@@ -338,15 +338,27 @@ export default function CapexDetailPage() {
     setCommentText("")
   }
 
-  const handleHeadApprove = () => { updateRequest(id, { status: "sourcing" }); toast.success("Request approved for sourcing") }
-  const handleHeadReject  = () => { updateRequest(id, { status: "rejected" }); toast.error("Request rejected") }
+  const handleHeadApprove = () => {
+    updateRequest(id, { status: "sourcing" }, ROLE_NAMES[currentRole] ?? currentRole);
+    toast.success("Request approved for sourcing")
+  }
+  const handleHeadReject = () => {
+    updateRequest(id, { status: "rejected" }, ROLE_NAMES[currentRole] ?? currentRole);
+    toast.error("Request rejected")
+  }
   const handleSourcingApprove = () => {
     if (bestEntry) approveInvite(bestEntry.inv.id)
-    updateRequest(id, { status: "sourcing_approved" })
+    updateRequest(id, { status: "sourcing_approved" }, ROLE_NAMES[currentRole] ?? currentRole);
     toast.success("Sent to buyer for approval")
   }
-  const handleBuyerApprove = () => { updateRequest(id, { status: "buyer_approved" }); toast.success("Request approved") }
-  const handleBuyerReject  = () => { updateRequest(id, { status: "rejected" }); toast.error("Request rejected") }
+  const handleBuyerApprove = () => {
+    updateRequest(id, { status: "buyer_approved" }, ROLE_NAMES[currentRole] ?? currentRole);
+    toast.success("Request approved")
+  }
+  const handleBuyerReject = () => {
+    updateRequest(id, { status: "rejected" }, ROLE_NAMES[currentRole] ?? currentRole);
+    toast.error("Request rejected")
+  }
 
   return (
     <div className="p-6 h-full flex flex-col space-y-6">

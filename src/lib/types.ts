@@ -50,6 +50,7 @@ export interface CapexRequest {
   createdBy: string;
   createdAt: string;
   comments?: RequestComment[];
+  statusHistory?: { status: CapexStatus; actor: string; at: string }[]
 }
 
 export interface Vendor {

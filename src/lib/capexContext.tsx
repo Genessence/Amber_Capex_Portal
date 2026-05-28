@@ -41,7 +41,7 @@ interface CapexContextValue {
   plants: string[];
   categories: string[];
   addRequest: (req: CapexRequest) => void;
-  updateRequest: (id: string, updates: Partial<CapexRequest>) => void;
+  updateRequest: (id: string, updates: Partial<CapexRequest>, actor?: string) => void;
   addVendor: (vendor: Vendor) => void;
   addInvite: (invite: VendorInvite) => void;
   inviteVendors: (requestId: string, vendorIds: string[]) => void;
@@ -133,23 +133,37 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   function addRequest(req: CapexRequest) {
-    setRequests((prev) => dedupeById([...prev, req]));
+    const withHistory: CapexRequest = req.statusHistory?.length
+      ? req
+      : {
+          ...req,
+          statusHistory: [{ status: req.status, actor: req.createdBy, at: req.createdAt }],
+        };
+    setRequests((prev) => dedupeById([...prev, withHistory]));
   }
 
-  function updateRequest(id: string, updates: Partial<CapexRequest>) {
+  function updateRequest(id: string, updates: Partial<CapexRequest>, actor?: string) {
     setRequests((prev) =>
       prev.map((req) => {
         if (req.id !== id) return req;
         if (updates.status && updates.status !== req.status) {
           const allowed = ALLOWED_TRANSITIONS[req.status] ?? [];
           if (!allowed.includes(updates.status)) {
-            console.error(
-              `[CapexContext] Invalid status transition: ${req.status} → ${updates.status}`
-            );
+            console.error(`[CapexContext] Invalid status transition: ${req.status} → ${updates.status}`);
             return req;
           }
         }
-        return { ...req, ...updates };
+        const historyEntry =
+          updates.status && updates.status !== req.status && actor
+            ? { status: updates.status, actor, at: new Date().toISOString() }
+            : null;
+        return {
+          ...req,
+          ...updates,
+          statusHistory: historyEntry
+            ? [...(req.statusHistory ?? []), historyEntry]
+            : req.statusHistory,
+        };
       })
     );
   }
