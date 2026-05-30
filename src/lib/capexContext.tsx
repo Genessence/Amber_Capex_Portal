@@ -1,18 +1,18 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useMemo } from 'react';
 import {
+  CapexMasterItem,
   CapexRequest,
   CapexStatus,
   ChatMessage,
-  HEAD_APPROVAL_THRESHOLD,
   NegotiationMessage,
   Quote,
   RequestComment,
   Vendor,
   VendorInvite,
 } from './types';
-import { mockInvites, mockRequests, mockVendors } from './mockData';
+import { mockCapexMaster, mockInvites, mockRequests, mockVendors } from './mockData';
 import { PLANTS } from './constants';
 
 const STORAGE_KEY = 'capex_data_v2';
@@ -40,6 +40,9 @@ interface CapexContextValue {
   sendChatMessage: (msg: ChatMessage) => void;
   plants: string[];
   categories: string[];
+  capexMaster: CapexMasterItem[];
+  usedCrMap: Record<string, number>;
+  getUsedCr: (plant: string) => number;
   addRequest: (req: CapexRequest) => void;
   updateRequest: (id: string, updates: Partial<CapexRequest>, actor?: string) => void;
   addVendor: (vendor: Vendor) => void;
@@ -54,6 +57,11 @@ interface CapexContextValue {
   removePlant: (value: string) => void;
   addCategory: (name: string) => void;
   removeCategory: (name: string) => void;
+  updateMasterItem: (id: string, updates: Partial<CapexMasterItem>) => void;
+  addMasterItem: (item: CapexMasterItem) => void;
+  cloneMasterForFY: (newFy: string) => void;
+  masterHeads: string[];
+  addMasterHead: (head: string) => void;
   resetData: () => void;
 }
 
@@ -68,9 +76,15 @@ function dedupeById<T extends { id: string }>(items: T[]): T[] {
   });
 }
 
-export function initialStatusForRequest(budget?: number): CapexStatus {
-  if (budget && budget > HEAD_APPROVAL_THRESHOLD) return 'pending_head_approval';
-  return 'sourcing';
+export function initialStatusForRequest(_budget?: number): CapexStatus {
+  return 'pending_head_approval';
+}
+
+function getCurrentFyCode(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const fyStart = now.getMonth() >= 3 ? year : year - 1; // April = month 3
+  return `${fyStart % 100}${(fyStart + 1) % 100}`;
 }
 
 export function CapexProvider({ children }: { children: React.ReactNode }) {
@@ -81,6 +95,8 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [plants, setPlants] = useState<string[]>(DEFAULT_PLANTS);
   const [categories, setCategories] = useState<string[]>(DEFAULT_CATEGORIES);
+  const [capexMaster, setCapexMaster] = useState<CapexMasterItem[]>([]);
+  const [masterHeads, setMasterHeads] = useState<string[]>([]);
 
   useEffect(() => {
     try {
@@ -96,15 +112,19 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
         if (parsed.chatMessages?.length) setChatMessages(parsed.chatMessages);
         if (parsed.plants?.length) setPlants(parsed.plants);
         if (parsed.categories?.length) setCategories(parsed.categories);
+        setCapexMaster(parsed.capexMaster?.length ? parsed.capexMaster : mockCapexMaster);
+        if (Array.isArray(parsed.masterHeads)) setMasterHeads(parsed.masterHeads);
       } else {
         setRequests(mockRequests);
         setVendors(mockVendors);
         setInvites(mockInvites);
+        setCapexMaster(mockCapexMaster);
       }
     } catch {
       setRequests(mockRequests);
       setVendors(mockVendors);
       setInvites(mockInvites);
+      setCapexMaster(mockCapexMaster);
     }
     setLoaded(true);
   }, []);
@@ -112,11 +132,14 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!requests.length && !vendors.length && !invites.length && !chatMessages.length) return;
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ requests, vendors, invites, chatMessages, plants, categories }));
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({ requests, vendors, invites, chatMessages, plants, categories, capexMaster, masterHeads })
+      );
     } catch {
       console.error('[CapexContext] Failed to persist to localStorage');
     }
-  }, [requests, vendors, invites, chatMessages, plants, categories]);
+  }, [requests, vendors, invites, chatMessages, plants, categories, capexMaster, masterHeads]);
 
   // Re-sync invites when the supplier portal tab submits a quote in another window
   useEffect(() => {
@@ -133,13 +156,18 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   function addRequest(req: CapexRequest) {
-    const withHistory: CapexRequest = req.statusHistory?.length
-      ? req
-      : {
-          ...req,
-          statusHistory: [{ status: req.status, actor: req.createdBy, at: req.createdAt }],
-        };
-    setRequests((prev) => dedupeById([...prev, withHistory]));
+    setRequests((prev) => {
+      const seq = String(prev.length + 1).padStart(4, '0');
+      const requestNo = req.requestNo ?? `CAP-${getCurrentFyCode()}-${seq}`;
+      const withHistory: CapexRequest = req.statusHistory?.length
+        ? { ...req, requestNo }
+        : {
+            ...req,
+            requestNo,
+            statusHistory: [{ status: req.status, actor: req.createdBy, at: req.createdAt }],
+          };
+      return dedupeById([...prev, withHistory]);
+    });
   }
 
   function updateRequest(id: string, updates: Partial<CapexRequest>, actor?: string) {
@@ -205,31 +233,54 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
   }
 
   function submitQuote(inviteId: string, quote: Quote) {
+    // [RELIABILITY] Append quote instead of replacing — preserves revision history.
+    // The UI already assumes quotes[] is a growing array (quoteIndex, "N revisions").
     setInvites((prev) =>
       prev.map((inv) =>
         inv.id === inviteId
-          ? { ...inv, quotes: [quote], status: 'quote_received' }
+          ? { ...inv, quotes: [...inv.quotes, quote], status: 'quote_received' }
           : inv
       )
     );
   }
 
   function addNegotiationMessage(inviteId: string, msg: NegotiationMessage) {
-    setInvites((prev) =>
-      prev.map((inv) =>
-        inv.id === inviteId
-          ? { ...inv, negotiationThread: [...inv.negotiationThread, msg], status: 'negotiating' }
-          : inv
-      )
-    );
+    // [RELIABILITY] Guard: do not silently succeed when the target invite is missing.
+    // [RELIABILITY] Guard: do not revert status to 'negotiating' if the invite is already 'approved'.
+    setInvites((prev) => {
+      const target = prev.find((inv) => inv.id === inviteId);
+      if (!target) {
+        console.error(`[CapexContext] addNegotiationMessage: invite "${inviteId}" not found — message dropped`);
+        return prev;
+      }
+      return prev.map((inv) => {
+        if (inv.id !== inviteId) return inv;
+        // Preserve status if already approved; otherwise advance to negotiating.
+        const nextStatus = inv.status === 'approved' ? 'approved' : 'negotiating';
+        return { ...inv, negotiationThread: [...inv.negotiationThread, msg], status: nextStatus };
+      });
+    });
   }
 
   function approveInvite(inviteId: string) {
-    setInvites((prev) =>
-      prev.map((inv) =>
+    // [DATA INTEGRITY] Guard: only one invite per request may be approved at a time.
+    setInvites((prev) => {
+      const target = prev.find((inv) => inv.id === inviteId);
+      if (!target) {
+        console.error(`[CapexContext] approveInvite: invite "${inviteId}" not found`);
+        return prev;
+      }
+      const alreadyApproved = prev.some(
+        (inv) => inv.requestId === target.requestId && inv.status === 'approved'
+      );
+      if (alreadyApproved) {
+        console.error(`[CapexContext] approveInvite: a vendor is already approved for request "${target.requestId}" — operation blocked`);
+        return prev;
+      }
+      return prev.map((inv) =>
         inv.id === inviteId ? { ...inv, status: 'approved' } : inv
-      )
-    );
+      );
+    });
   }
 
   function sendChatMessage(msg: ChatMessage) {
@@ -262,6 +313,47 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
     setCategories((prev) => prev.filter((c) => c !== name));
   }
 
+  // Derived: budget consumed per plant from non-rejected requests
+  const usedCrMap = useMemo(() => {
+    const map: Record<string, number> = {};
+    requests.forEach(req => {
+      if (!req.plant || req.status === 'rejected') return;
+      map[req.plant] = (map[req.plant] ?? 0) + (req.budget ?? 0);
+    });
+    return map;
+  }, [requests]);
+
+  function getUsedCr(plant: string): number {
+    return (usedCrMap[plant] ?? 0) / 1_00_00_000;
+  }
+
+  function updateMasterItem(id: string, updates: Partial<CapexMasterItem>) {
+    setCapexMaster(prev => prev.map(item => item.id === id ? { ...item, ...updates } : item));
+  }
+
+  function addMasterItem(item: CapexMasterItem) {
+    setCapexMaster(prev => [...prev, item]);
+  }
+
+  function addMasterHead(head: string) {
+    const trimmed = head.trim();
+    if (!trimmed) return;
+    setMasterHeads(prev => prev.includes(trimmed) ? prev : [...prev, trimmed]);
+  }
+
+  function cloneMasterForFY(newFy: string) {
+    const latestFy = capexMaster.length
+      ? capexMaster.slice().sort((a, b) => b.fy.localeCompare(a.fy))[0].fy
+      : null;
+    const sourceItems = latestFy ? capexMaster.filter(i => i.fy === latestFy) : capexMaster;
+    const cloned = sourceItems.map(item => ({
+      ...item,
+      id: `cm-${crypto.randomUUID()}`,
+      fy: newFy,
+    }));
+    setCapexMaster(prev => [...prev, ...cloned]);
+  }
+
   function resetData() {
     localStorage.removeItem(STORAGE_KEY);
     localStorage.removeItem('capex_role');
@@ -279,6 +371,9 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
         sendChatMessage,
         plants,
         categories,
+        capexMaster,
+        usedCrMap,
+        getUsedCr,
         addRequest,
         updateRequest,
         addVendor,
@@ -293,6 +388,11 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
         removePlant,
         addCategory,
         removeCategory,
+        updateMasterItem,
+        addMasterItem,
+        cloneMasterForFY,
+        masterHeads,
+        addMasterHead,
         resetData,
       }}
     >
