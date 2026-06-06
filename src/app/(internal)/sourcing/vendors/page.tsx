@@ -32,7 +32,7 @@ export default function VendorMasterPage() {
         </div>
         <Button
           onClick={() => setShowModal(true)}
-          className="bg-amber-400 hover:bg-amber-300 text-slate-900 font-semibold"
+          className="bg-[#0D9488] hover:bg-[#115E59] text-white font-semibold"
         >
           Onboard New Vendor
         </Button>
@@ -43,7 +43,7 @@ export default function VendorMasterPage() {
           value={search}
           onChange={e => setSearch(e.target.value)}
           placeholder="Search by name, code, or category…"
-          className="w-full max-w-sm rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400/50"
+          className="w-full max-w-sm rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0D9488]/50"
         />
       </div>
 
@@ -51,7 +51,7 @@ export default function VendorMasterPage() {
         {filtered.length === 0 ? (
           <div className="p-12 text-center">
             <p className="text-slate-400 text-sm">No vendors found.</p>
-            <Button onClick={() => setShowModal(true)} className="mt-4 bg-amber-400 hover:bg-amber-300 text-slate-900 font-semibold">
+            <Button onClick={() => setShowModal(true)} className="mt-4 bg-[#0D9488] hover:bg-[#115E59] text-white font-semibold">
               Onboard First Vendor
             </Button>
           </div>
@@ -69,11 +69,11 @@ export default function VendorMasterPage() {
             <tbody className="divide-y divide-slate-200">
               {filtered.map((v, idx) => (
                 <React.Fragment key={v.id}>
-                  <tr className={`transition-colors hover:bg-amber-50/60 ${idx % 2 === 0 ? "bg-white" : "bg-slate-50"}`}>
+                  <tr className={`transition-colors hover:bg-[#EBF0FB]/60 ${idx % 2 === 0 ? "bg-white" : "bg-slate-50"}`}>
                     <td className="px-4 py-3 font-mono text-xs text-slate-600">{v.vendorCode}</td>
                     <td className="px-4 py-3 font-semibold text-slate-800">{v.vendorName}</td>
                     <td className="px-4 py-3">
-                      <span className="text-xs font-semibold bg-slate-700 text-white px-2 py-0.5 rounded-full">{v.category}</span>
+                      <span className="text-xs font-semibold bg-[#EBF0FB] text-[#153f90] px-2 py-0.5 rounded-full">{v.category}</span>
                     </td>
                     <td className="px-4 py-3 text-slate-600 font-mono text-xs">{v.gstin || "—"}</td>
                     <td className="px-4 py-3 text-slate-700">{v.contactName || "—"}</td>

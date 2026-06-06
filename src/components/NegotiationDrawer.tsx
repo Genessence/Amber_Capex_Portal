@@ -135,9 +135,9 @@ export function NegotiationDrawer({ open, onClose, invite, vendor, currentRole, 
                 <p className="text-[10px] text-slate-400 px-1">
                   {isSourcing ? "Sourcing" : vendor.vendorName} · {formatTs(msg.at)}
                 </p>
-                <div className={`max-w-[320px] rounded-2xl px-4 py-2.5 text-sm ${isSourcing ? "bg-slate-100 text-slate-800" : "bg-amber-50 text-slate-800"}`}>
+                <div className={`max-w-[320px] rounded-2xl px-4 py-2.5 text-sm ${isSourcing ? "bg-slate-100 text-slate-800" : "bg-[#CCFBF1] text-slate-800"}`}>
                   {msg.counterPrice && (
-                    <span className="inline-flex items-center gap-1 mb-1.5 text-[11px] font-bold text-amber-700 bg-amber-100 rounded-full px-2 py-0.5">
+                    <span className="inline-flex items-center gap-1 mb-1.5 text-[11px] font-bold text-[#115E59] bg-[#CCFBF1] rounded-full px-2 py-0.5">
                       Counter: {formatPrice(msg.counterPrice)}
                     </span>
                   )}
@@ -156,7 +156,7 @@ export function NegotiationDrawer({ open, onClose, invite, vendor, currentRole, 
               onChange={e => setMessage(e.target.value)}
               placeholder="Type a message…"
               rows={3}
-              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-400/50 resize-none"
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0D9488]/50 resize-none"
             />
             <div className="flex items-center gap-2">
               <input
@@ -164,12 +164,12 @@ export function NegotiationDrawer({ open, onClose, invite, vendor, currentRole, 
                 value={counterPrice}
                 onChange={e => setCounterPrice(e.target.value)}
                 placeholder="Counter price (INR, optional)"
-                className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-400/50"
+                className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0D9488]/50"
               />
               <Button
                 onClick={handleSend}
                 disabled={!message.trim()}
-                className="bg-amber-400 hover:bg-amber-300 text-slate-900 font-semibold"
+                className="bg-[#0D9488] hover:bg-[#115E59] text-white font-semibold"
               >
                 Send
               </Button>

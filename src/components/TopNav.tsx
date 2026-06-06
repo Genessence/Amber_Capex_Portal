@@ -1,26 +1,30 @@
 "use client"
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Building2, ChevronDown, ChevronRight, MessageCircle, X, SendHorizonal } from 'lucide-react'
 import { usePathname, useRouter } from 'next/navigation'
 import { useCapex } from '@/lib/capexContext'
 
 const ROLE_GROUPS = [
   {
-    label: "Capital Expenditure",
-    roles: [{ value: "buyer", name: "Arjun Mehta", area: "CAPEX Requests" }],
-  },
-  {
-    label: "Sourcing Engineers",
+    label: "Buyers",
     roles: [
-      { value: "sourcing_member",   name: "Neha Kapoor",     area: "Machinery" },
-      { value: "sourcing_member_2", name: "Vikram Malhotra", area: "Infrastructure" },
-      { value: "sourcing_member_3", name: "Priya Nair",      area: "IT & Tooling" },
-      { value: "sourcing_member_4", name: "Ananya Reddy",    area: "Civil Works" },
+      { value: "buyer_jhajjar_p1", name: "Arjun Mehta", area: "Jhajjar Plant 1" },
+      { value: "buyer_jhajjar_p2", name: "Ravi Kumar",   area: "Jhajjar Plant 2" },
     ],
   },
   {
-    label: "Sourcing Leadership",
-    roles: [{ value: "sourcing_head", name: "Rajiv Sinha", area: "All Requests" }],
+    label: "Plant Management",
+    roles: [
+      { value: "plant_head_jhajjar_p1", name: "Karan Mehta", area: "Jhajjar Plant 1" },
+      { value: "plant_head_jhajjar_p2", name: "Ajay Gupta",  area: "Jhajjar Plant 2" },
+    ],
+  },
+  {
+    label: "Sourcing",
+    roles: [
+      { value: "sourcing_member", name: "Neha Kapoor",  area: "Machinery" },
+      { value: "sourcing_head",   name: "Rajiv Sinha",  area: "All Requests" },
+    ],
   },
   {
     label: "Administration",
@@ -28,16 +32,16 @@ const ROLE_GROUPS = [
   },
 ]
 
-const ALL_ROLES = ROLE_GROUPS.flatMap(g => g.roles)
 
 function getInitials(name: string) {
   return name.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2)
 }
 
 function getRoleBg(value: string): string {
-  if (value === "buyer")                   return "bg-blue-600"
-  if (value.startsWith("sourcing_member")) return "bg-violet-600"
-  if (value === "sourcing_head")           return "bg-violet-800"
+  if (value.startsWith("buyer"))        return "bg-blue-600"
+  if (value.startsWith("plant_head"))   return "bg-[#0D9488]"
+  if (value === "sourcing_member") return "bg-violet-600"
+  if (value === "sourcing_head")   return "bg-violet-800"
   return "bg-slate-700"
 }
 
@@ -46,15 +50,19 @@ const PAGE_LABELS: Record<string, { label: string; sub?: string }> = {
   "/capex/requests":   { label: "CAPEX Requests",   sub: "Vendor sourcing & negotiation" },
   "/capex/new":        { label: "New Request",       sub: "Submit a capital expenditure request" },
   "/sourcing/vendors": { label: "Vendor Directory",  sub: "Manage and onboard vendors" },
-  "/settings":         { label: "Settings",          sub: "Plants, categories & users" },
+  "/settings":         { label: "Configurations",     sub: "Plants, categories & users" },
 }
 
 const PLANT_LABELS: Record<string, string> = {
-  jhajjar:    "Jhajjar",
-  chennai:    "Chennai",
-  rajpura:    "Rajpura",
-  pune:       "Pune",
-  ahmedabad:  "Ahmedabad",
+  jhajjar_p1: "Jhajjar P1",
+  jhajjar_p2: "Jhajjar P2",
+  ddn_4:      "DDN-4",
+  ddn_5:      "DDN-5",
+  ddn_6:      "DDN-6",
+  supa:       "SUPA",
+  rudrapur:   "Rudrapur",
+  sircity_1:  "Sri City-1",
+  sircity_2:  "Sri City-2",
 }
 
 function formatChatTime(iso: string) {
@@ -69,11 +77,23 @@ function formatChatTime(iso: string) {
 export function TopNav() {
   const router   = useRouter()
   const pathname = usePathname()
-  const { chatMessages, sendChatMessage } = useCapex()
+  const { chatMessages, sendChatMessage, customPlants } = useCapex()
+
+  const allRoleGroups = useMemo(() => {
+    const dynamicBuyers     = customPlants.map(p => ({ value: `buyer_${p.value}`,      name: p.assignedUser ?? "Buyer",      area: p.label }))
+    const dynamicPlantHeads = customPlants.map(p => ({ value: `plant_head_${p.value}`, name: p.assignedUser ?? "Plant Head", area: p.label }))
+    return [
+      { label: "Buyers",            roles: [...ROLE_GROUPS[0].roles, ...dynamicBuyers] },
+      { label: "Plant Management",  roles: [...ROLE_GROUPS[1].roles, ...dynamicPlantHeads] },
+      ...ROLE_GROUPS.slice(2),
+    ]
+  }, [customPlants])
+
+  const ALL_ROLES = useMemo(() => allRoleGroups.flatMap(g => g.roles), [allRoleGroups])
 
   const [showRolePicker, setShowRolePicker] = useState(false)
   const [currentRole,    setCurrentRole]    = useState("buyer")
-  const [currentPlant,   setCurrentPlant]   = useState("jhajjar")
+  const [currentPlant,   setCurrentPlant]   = useState("jhajjar_p1")
   const [chatOpen,       setChatOpen]       = useState(false)
   const [selectedContact, setSelectedContact] = useState<string | null>(null)
   const [msgText,        setMsgText]        = useState("")
@@ -91,7 +111,7 @@ export function TopNav() {
   }, [])
 
   useEffect(() => {
-    setCurrentPlant(localStorage.getItem('capex_plant') ?? 'jhajjar')
+    setCurrentPlant(localStorage.getItem('capex_plant') ?? 'jhajjar_p1')
     const onPlantChange = (e: CustomEvent) => setCurrentPlant(e.detail)
     window.addEventListener('capex_plantchange', onPlantChange as EventListener)
     return () => window.removeEventListener('capex_plantchange', onPlantChange as EventListener)
@@ -182,15 +202,15 @@ export function TopNav() {
 
   return (
     <>
-      <header className="flex h-14 items-center justify-between border-b border-slate-200 bg-white px-5 relative z-50 shrink-0">
+      <header className="flex h-14 items-center justify-between border-b border-[#153f90]/20 bg-white px-5 relative z-50 shrink-0">
         {/* ── Page title ── */}
         <div className="flex items-center gap-2.5 min-w-0">
-          <span className="hidden sm:flex items-center gap-1 text-[11px] font-semibold text-slate-500 bg-slate-100 px-2 py-1 rounded-lg shrink-0">
+          <span className="hidden sm:flex items-center gap-1 text-[11px] font-semibold text-[#153f90] bg-[#e8eeff] px-2 py-1 rounded-lg shrink-0">
             <Building2 className="w-3 h-3" aria-hidden="true" />
             {PLANT_LABELS[currentPlant] ?? currentPlant}
           </span>
           <div className="hidden sm:block w-px h-4 bg-slate-200 shrink-0" />
-          <h1 className="text-[15px] font-semibold text-slate-900 tracking-tight truncate">{pageMeta.label}</h1>
+          <h1 className="text-[15px] font-bold text-[#153f90] tracking-tight truncate">{pageMeta.label}</h1>
           {pageMeta.sub && (
             <>
               <ChevronRight className="w-3.5 h-3.5 text-slate-300 shrink-0" />
@@ -204,8 +224,8 @@ export function TopNav() {
           <button
             onClick={() => setChatOpen(o => !o)}
             aria-label="Open chat"
-            className={`relative p-2 rounded-lg border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 ${
-              chatOpen ? "bg-amber-50 border-amber-200 text-amber-700" : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-700"
+            className={`relative p-2 rounded-lg border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D9488] ${
+              chatOpen ? "bg-[#CCFBF1] border-[#5EEAD4] text-[#0D9488]" : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-700"
             }`}
           >
             <MessageCircle className="w-4.5 h-4.5 w-[18px] h-[18px]" />
@@ -226,7 +246,7 @@ export function TopNav() {
               aria-label={`Switch user — currently ${active.name}`}
               className={[
                 "flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-all border",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-1",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D9488] focus-visible:ring-offset-1",
                 showRolePicker
                   ? "bg-slate-100 border-slate-200 shadow-inner"
                   : "bg-white border-slate-200 hover:bg-slate-50 hover:border-slate-300",
@@ -248,7 +268,7 @@ export function TopNav() {
                 <div className="px-3 py-2.5 border-b border-slate-100 bg-slate-50">
                   <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">Switch User</p>
                 </div>
-                {ROLE_GROUPS.map(group => (
+                {allRoleGroups.map(group => (
                   <div key={group.label}>
                     <div className="px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-[0.1em] bg-slate-50/60 border-b border-slate-100">
                       {group.label}
@@ -260,8 +280,8 @@ export function TopNav() {
                           aria-current={isSelected ? "true" : undefined}
                           className={[
                             "w-full flex items-center gap-2.5 px-3 py-2.5 text-left transition-colors",
-                            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-amber-500",
-                            isSelected ? "bg-slate-900" : "hover:bg-slate-50",
+                            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#0D9488]",
+                            isSelected ? "bg-[#153f90]" : "hover:bg-slate-50",
                           ].join(" ")}
                         >
                           <span aria-hidden="true" className={`flex items-center justify-center w-8 h-8 rounded-full text-white text-[11px] font-bold shrink-0 ${getRoleBg(role.value)}`}>
@@ -271,7 +291,7 @@ export function TopNav() {
                             <p className={`text-[13px] font-semibold leading-tight truncate ${isSelected ? "text-white" : "text-slate-800"}`}>{role.name}</p>
                             <p className="text-[11px] truncate mt-0.5 text-slate-400">{role.area}</p>
                           </div>
-                          {isSelected && <span aria-label="Currently active" className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />}
+                          {isSelected && <span aria-label="Currently active" className="w-2 h-2 rounded-full bg-[#0D9488] shrink-0" />}
                         </button>
                       )
                     })}
@@ -295,7 +315,7 @@ export function TopNav() {
             {/* Header */}
             <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-200 bg-white shrink-0">
               <div className="flex items-center gap-2">
-                <MessageCircle className="w-4 h-4 text-amber-500" />
+                <MessageCircle className="w-4 h-4 text-[#0D9488]" />
                 <p className="text-sm font-bold text-slate-900">Messages</p>
               </div>
               <button onClick={() => setChatOpen(false)} aria-label="Close chat"
@@ -315,7 +335,7 @@ export function TopNav() {
                   return (
                     <button key={contact.value} onClick={() => setSelectedContact(contact.value)}
                       className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-left transition-colors ${
-                        isActive ? "bg-amber-50 border-r-2 border-amber-500" : "hover:bg-white"
+                        isActive ? "bg-[#CCFBF1] border-r-2 border-[#0D9488]" : "hover:bg-white"
                       }`}>
                       <span className={`flex items-center justify-center w-8 h-8 rounded-full text-white text-[10px] font-bold shrink-0 ${getRoleBg(contact.value)}`}>
                         {getInitials(contact.name)}
@@ -365,7 +385,7 @@ export function TopNav() {
                           return (
                             <div key={msg.id} className={`flex flex-col gap-0.5 ${isMine ? "items-end" : "items-start"}`}>
                               <div className={`max-w-xs rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed ${
-                                isMine ? "bg-amber-500 text-white rounded-tr-sm" : "bg-slate-100 text-slate-800 rounded-tl-sm"
+                                isMine ? "bg-[#0D9488] text-white rounded-tr-sm" : "bg-slate-100 text-slate-800 rounded-tl-sm"
                               }`}>
                                 {msg.text}
                               </div>
@@ -379,9 +399,9 @@ export function TopNav() {
                       <form onSubmit={handleSend} className="px-4 py-3 border-t border-slate-100 flex gap-2 shrink-0 bg-white">
                         <input value={msgText} onChange={e => setMsgText(e.target.value)}
                           placeholder={`Message ${contact.name}…`}
-                          className="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400/50" />
+                          className="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0D9488]/50" />
                         <button type="submit" disabled={!msgText.trim()}
-                          className="p-2 rounded-xl bg-amber-500 hover:bg-amber-600 disabled:bg-slate-200 text-white transition-colors">
+                          className="p-2 rounded-xl bg-[#0D9488] hover:bg-[#115E59] disabled:bg-slate-200 text-white transition-colors">
                           <SendHorizonal className="w-4 h-4" />
                         </button>
                       </form>

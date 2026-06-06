@@ -141,7 +141,7 @@ export function VendorOnboardModal({ open, onClose, requestId, defaultTab = "exi
                       <p className="text-xs text-slate-400">{v.vendorCode} · {v.category}</p>
                     </div>
                     <Button size="sm" onClick={() => inviteVendor(v.id)}
-                      className="bg-amber-400 hover:bg-amber-300 text-slate-900 text-xs font-semibold">
+                      className="bg-[#0D9488] hover:bg-[#115E59] text-white text-xs font-semibold">
                       Invite
                     </Button>
                   </div>
@@ -203,7 +203,7 @@ export function VendorOnboardModal({ open, onClose, requestId, defaultTab = "exi
               <Button
                 onClick={handleOnboardSubmit}
                 disabled={!newVendorValid}
-                className="bg-amber-400 hover:bg-amber-300 text-slate-900 font-semibold"
+                className="bg-[#0D9488] hover:bg-[#115E59] text-white font-semibold"
               >
                 Onboard & Invite
               </Button>

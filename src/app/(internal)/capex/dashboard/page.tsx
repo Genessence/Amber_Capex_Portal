@@ -90,7 +90,7 @@ function HBarChart({ data, emptyText = 'No data.' }: { data: HBarItem[]; emptyTe
               </p>
             </div>
             <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
-              <div className="h-full bg-amber-500 rounded-full transition-[width] duration-300"
+              <div className="h-full bg-[#0D9488] rounded-full transition-[width] duration-300"
                 style={{ width: `${barPct}%` }} />
             </div>
           </div>
@@ -163,7 +163,7 @@ const ORDERED_STATUSES: CapexStatus[] = [
 
 /* ── Page ───────────────────────────────────────────────── */
 export default function DashboardPage() {
-  const { requests, invites } = useCapex();
+  const { requests, invites, capexMaster } = useCapex();
   const [plantFilter, setPlantFilter] = useState<string>('all');
 
   const filtered = useMemo(
@@ -225,8 +225,8 @@ export default function DashboardPage() {
               <button key={v} onClick={() => setPlantFilter(v)}
                 className={`px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors ${
                   active
-                    ? v === 'all' ? 'bg-slate-900 text-white border-slate-900' : 'bg-amber-500 text-white border-amber-500'
-                    : 'bg-white text-slate-600 border-slate-200 hover:border-amber-300 hover:text-amber-700'
+                    ? 'bg-[#153f90] text-white border-[#153f90]'
+                    : 'bg-white text-slate-600 border-slate-200 hover:border-[#5B82D4] hover:text-[#153f90]'
                 }`}
               >{label}</button>
             );
@@ -276,6 +276,51 @@ export default function DashboardPage() {
         ))}
       </div>
 
+      {/* CAPEX Master KPI strip */}
+      {(() => {
+        const currentFy = capexMaster.length
+          ? capexMaster.slice().sort((a, b) => b.fy.localeCompare(a.fy))[0].fy
+          : null
+        const fyItems = currentFy ? capexMaster.filter(i => i.fy === currentFy) : []
+        if (!fyItems.length) return null
+        const totalAllocatedCr = fyItems.reduce((s, i) => s + i.totalCost, 0)
+        // committed = budget of non-rejected requests in Cr (₹ / 1_00_00_000)
+        const committedCr = requests
+          .filter(r => r.status !== 'rejected' && r.budget)
+          .reduce((s, r) => s + (r.budget ?? 0) / 1_00_00_000, 0)
+        const remainingCr = totalAllocatedCr - committedCr
+        const utilisationPct = totalAllocatedCr > 0 ? Math.round((committedCr / totalAllocatedCr) * 100) : 0
+        return (
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">CAPEX Master — FY {currentFy}</p>
+              <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${utilisationPct > 90 ? "bg-red-50 text-red-700" : utilisationPct > 70 ? "bg-orange-50 text-orange-700" : "bg-emerald-50 text-emerald-700"}`}>
+                {utilisationPct}% utilised
+              </span>
+            </div>
+            <div className="grid grid-cols-3 gap-4">
+              {[
+                { label: "Allocated Budget", value: `${totalAllocatedCr.toFixed(2)} Cr`, color: "text-slate-800" },
+                { label: "Committed",        value: `${committedCr.toFixed(2)} Cr`,      color: "text-[#0D9488]" },
+                { label: "Remaining",        value: `${remainingCr.toFixed(2)} Cr`,      color: remainingCr >= 0 ? "text-emerald-700" : "text-red-700" },
+              ].map(({ label, value, color }) => (
+                <div key={label}>
+                  <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-0.5">{label}</p>
+                  <p className={`text-lg font-black tabular-nums ${color}`}>{value}</p>
+                </div>
+              ))}
+            </div>
+            {/* utilisation bar */}
+            <div className="mt-3 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-[width] duration-300 ${utilisationPct > 90 ? "bg-red-500" : utilisationPct > 70 ? "bg-[#0D9488]" : "bg-emerald-500"}`}
+                style={{ width: `${Math.min(utilisationPct, 100)}%` }}
+              />
+            </div>
+          </div>
+        )
+      })()}
+
       <div className="flex-1 min-h-0 overflow-y-auto space-y-6">
 
       {/* Row 2 — Status donut + Plant bars */}
@@ -319,7 +364,7 @@ export default function DashboardPage() {
             </thead>
             <tbody>
               {stats.recent.map((req, idx) => (
-                <tr key={req.id} className={`border-b border-slate-100 last:border-0 transition-colors hover:bg-amber-50/60 ${idx % 2 === 0 ? "bg-white" : "bg-slate-50"}`}>
+                <tr key={req.id} className={`border-b border-slate-100 last:border-0 transition-colors hover:bg-[#EBF0FB]/60 ${idx % 2 === 0 ? "bg-white" : "bg-slate-50"}`}>
                   <td className="py-3 pr-4 font-semibold text-slate-800 max-w-[180px] truncate">{req.subject}</td>
                   <td className="py-3 pr-4 text-slate-500">{req.plant ? (PLANTS.find(p => p.value === req.plant)?.label ?? req.plant) : '—'}</td>
                   <td className="py-3 pr-4 text-slate-500">{req.category}</td>

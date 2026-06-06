@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { X, Plus, ShieldCheck, RotateCcw } from 'lucide-react';
+import { X, Plus, ShieldCheck } from 'lucide-react';
 import { useCapex } from '@/lib/capexContext';
 import { PLANTS, ROLE_NAMES } from '@/lib/constants';
 
@@ -10,7 +10,7 @@ type Tab = 'plants' | 'categories' | 'users' | 'system';
 
 export default function SettingsPage() {
   const router = useRouter();
-  const { plants, categories, addPlant, removePlant, addCategory, removeCategory, resetData } = useCapex();
+  const { plants, categories, customPlants, addCustomPlant, removePlant, addCategory, removeCategory, resetData } = useCapex();
 
   const [activeTab, setActiveTab] = useState<Tab>('plants');
 
@@ -34,8 +34,7 @@ export default function SettingsPage() {
     const state = newPlantState.trim();
     if (!label) return;
     const value = label.toLowerCase().replace(/\s+/g, '_');
-    addPlant(value, label);
-    // If not already in PLANTS registry, we still store the value
+    addCustomPlant({ value, label, state });
     setNewPlantLabel('');
     setNewPlantState('');
   }
@@ -48,6 +47,8 @@ export default function SettingsPage() {
   }
 
   function plantLabel(value: string): string {
+    const custom = customPlants.find((p) => p.value === value);
+    if (custom) return `${custom.label}${custom.state ? ` (${custom.state})` : ''}`;
     const found = PLANTS.find((p) => p.value === value);
     return found ? `${found.label} (${found.state})` : value;
   }
@@ -58,10 +59,10 @@ export default function SettingsPage() {
   }
 
   const tabs: { key: Tab; label: string }[] = [
-    { key: 'plants', label: 'Plants' },
+    { key: 'plants',     label: 'Plants' },
     { key: 'categories', label: 'Categories' },
-    { key: 'users', label: 'Users' },
-    { key: 'system', label: 'System' },
+    { key: 'users',      label: 'Users' },
+    { key: 'system',     label: 'System' },
   ];
 
   return (
@@ -70,7 +71,7 @@ export default function SettingsPage() {
       <div className="flex items-center gap-3">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-semibold text-slate-900">Settings</h1>
+            <h1 className="text-2xl font-semibold text-slate-900">Configurations</h1>
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700">
               <ShieldCheck className="w-3 h-3" />
               Super Admin Only

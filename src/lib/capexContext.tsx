@@ -1,12 +1,13 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useState, useMemo } from 'react';
+import React, { createContext, useContext, useEffect, useState, useMemo, useRef } from 'react';
 import {
   CapexMasterItem,
   CapexRequest,
   CapexStatus,
   ChatMessage,
   NegotiationMessage,
+  PlantMeta,
   Quote,
   RequestComment,
   Vendor,
@@ -62,6 +63,10 @@ interface CapexContextValue {
   cloneMasterForFY: (newFy: string) => void;
   masterHeads: string[];
   addMasterHead: (head: string) => void;
+  renameMasterHead: (oldHead: string, newHead: string) => void;
+  removeMasterHead: (head: string) => void;
+  customPlants: PlantMeta[];
+  addCustomPlant: (meta: PlantMeta) => void;
   resetData: () => void;
 }
 
@@ -97,6 +102,11 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
   const [categories, setCategories] = useState<string[]>(DEFAULT_CATEGORIES);
   const [capexMaster, setCapexMaster] = useState<CapexMasterItem[]>([]);
   const [masterHeads, setMasterHeads] = useState<string[]>([]);
+  const [customPlants, setCustomPlants] = useState<PlantMeta[]>([]);
+  // Prevents the persist effect from writing back to localStorage when invites
+  // were just read FROM localStorage (storage event path). Writing back would
+  // trigger the other tab's storage listener, creating an infinite ping-pong.
+  const skipNextPersist = useRef(false);
 
   useEffect(() => {
     try {
@@ -114,6 +124,7 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
         if (parsed.categories?.length) setCategories(parsed.categories);
         setCapexMaster(parsed.capexMaster?.length ? parsed.capexMaster : mockCapexMaster);
         if (Array.isArray(parsed.masterHeads)) setMasterHeads(parsed.masterHeads);
+        if (Array.isArray(parsed.customPlants)) setCustomPlants(parsed.customPlants);
       } else {
         setRequests(mockRequests);
         setVendors(mockVendors);
@@ -130,16 +141,20 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (skipNextPersist.current) {
+      skipNextPersist.current = false;
+      return; // invites just came FROM localStorage — no need to write back
+    }
     if (!requests.length && !vendors.length && !invites.length && !chatMessages.length) return;
     try {
       localStorage.setItem(
         STORAGE_KEY,
-        JSON.stringify({ requests, vendors, invites, chatMessages, plants, categories, capexMaster, masterHeads })
+        JSON.stringify({ requests, vendors, invites, chatMessages, plants, categories, capexMaster, masterHeads, customPlants })
       );
     } catch {
       console.error('[CapexContext] Failed to persist to localStorage');
     }
-  }, [requests, vendors, invites, chatMessages, plants, categories, capexMaster, masterHeads]);
+  }, [requests, vendors, invites, chatMessages, plants, categories, capexMaster, masterHeads, customPlants]);
 
   // Re-sync invites when the supplier portal tab submits a quote in another window
   useEffect(() => {
@@ -148,7 +163,10 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
       try {
         const parsed = JSON.parse(e.newValue);
         const fresh = dedupeById<VendorInvite>(parsed.invites ?? []);
-        if (fresh.length) setInvites(fresh);
+        if (fresh.length) {
+          skipNextPersist.current = true; // data came FROM localStorage — don't write it back
+          setInvites(fresh);
+        }
       } catch {}
     }
     window.addEventListener('storage', onStorage);
@@ -303,6 +321,7 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
 
   function removePlant(value: string) {
     setPlants((prev) => prev.filter((p) => p !== value));
+    setCustomPlants((prev) => prev.filter((p) => p.value !== value));
   }
 
   function addCategory(name: string) {
@@ -341,6 +360,23 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
     setMasterHeads(prev => prev.includes(trimmed) ? prev : [...prev, trimmed]);
   }
 
+  function addCustomPlant(meta: PlantMeta) {
+    setCustomPlants(prev => prev.some(p => p.value === meta.value) ? prev : [...prev, meta]);
+    setPlants(prev => prev.includes(meta.value) ? prev : [...prev, meta.value]);
+  }
+
+  function renameMasterHead(oldHead: string, newHead: string) {
+    const trimmed = newHead.trim();
+    if (!trimmed || trimmed === oldHead) return;
+    setMasterHeads(prev => prev.map(h => h === oldHead ? trimmed : h));
+    setCapexMaster(prev => prev.map(item => item.head === oldHead ? { ...item, head: trimmed } : item));
+  }
+
+  function removeMasterHead(head: string) {
+    setMasterHeads(prev => prev.filter(h => h !== head));
+    setCapexMaster(prev => prev.map(item => item.head === head ? { ...item, head: 'Misc.' } : item));
+  }
+
   function cloneMasterForFY(newFy: string) {
     const latestFy = capexMaster.length
       ? capexMaster.slice().sort((a, b) => b.fy.localeCompare(a.fy))[0].fy
@@ -355,8 +391,7 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
   }
 
   function resetData() {
-    localStorage.removeItem(STORAGE_KEY);
-    localStorage.removeItem('capex_role');
+    localStorage.clear();
     window.location.replace('/login');
   }
 
@@ -393,6 +428,10 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
         cloneMasterForFY,
         masterHeads,
         addMasterHead,
+        renameMasterHead,
+        removeMasterHead,
+        customPlants,
+        addCustomPlant,
         resetData,
       }}
     >

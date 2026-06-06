@@ -1,9 +1,20 @@
 export const ROLE_NAMES: Record<string, string> = {
-  buyer:          "Arjun Mehta",
-  sourcing_member: "Neha Kapoor",
-  plant_head:     "Karan Mehta",
-  sourcing_head:  "Rajiv Sinha",
-  super_admin:    "Super Admin",
+  buyer:                  "Arjun Mehta",
+  buyer_jhajjar_p1:       "Arjun Mehta",
+  buyer_jhajjar_p2:       "Ravi Kumar",
+  sourcing_member:        "Neha Kapoor",
+  plant_head:             "Karan Mehta",
+  plant_head_jhajjar_p1:  "Karan Mehta",
+  plant_head_jhajjar_p2:  "Ajay Gupta",
+  sourcing_head:          "Rajiv Sinha",
+  super_admin:            "Super Admin",
+}
+
+export const ROLE_PLANT: Record<string, string> = {
+  buyer_jhajjar_p1:      "jhajjar_p1",
+  buyer_jhajjar_p2:      "jhajjar_p2",
+  plant_head_jhajjar_p1: "jhajjar_p1",
+  plant_head_jhajjar_p2: "jhajjar_p2",
 }
 
 export const SOURCING_ENGINEERS = [
@@ -11,20 +22,20 @@ export const SOURCING_ENGINEERS = [
 ]
 
 export const STATUS_COLORS: Record<string, string> = {
-  draft:                 "bg-slate-400 text-white",
-  submitted:             "bg-blue-600 text-white",
-  pending_head_approval: "bg-orange-500 text-white",
-  sourcing:              "bg-violet-600 text-white",
-  negotiation:           "bg-amber-500 text-slate-900",
-  sourcing_approved:     "bg-teal-600 text-white",
-  buyer_approved:        "bg-green-600 text-white",
-  rejected:              "bg-red-600 text-white",
+  draft:                 "bg-slate-100 text-slate-600",
+  submitted:             "bg-blue-100 text-blue-800",
+  pending_head_approval: "bg-[#EDE9FE] text-[#5B21B6]",
+  sourcing:              "bg-[#DBEAFE] text-[#1E40AF]",
+  negotiation:           "bg-[#FEF9C3] text-[#854D0E]",
+  sourcing_approved:     "bg-emerald-100 text-emerald-800",
+  buyer_approved:        "bg-[#DCFCE7] text-[#166534]",
+  rejected:              "bg-red-100 text-red-700",
 }
 
 export const STATUS_LABELS: Record<string, string> = {
   draft:                 "Draft",
   submitted:             "Submitted",
-  pending_head_approval: "Pending Approval",
+  pending_head_approval: "With Plant Head",
   sourcing:              "In Sourcing",
   negotiation:           "Negotiation",
   sourcing_approved:     "Sourcing Approved",
@@ -40,18 +51,28 @@ export const PRIORITY_COLORS: Record<string, string> = {
 }
 
 export const INVITE_STATUS_COLORS: Record<string, string> = {
-  invited:        "bg-slate-400 text-white",
-  quote_received: "bg-blue-600 text-white",
-  negotiating:    "bg-amber-500 text-slate-900",
-  approved:       "bg-green-600 text-white",
-  rejected:       "bg-red-600 text-white",
+  invited:        "bg-slate-100 text-slate-600",
+  quote_received: "bg-[#DBEAFE] text-[#1E40AF]",
+  negotiating:    "bg-[#FEF9C3] text-[#854D0E]",
+  approved:       "bg-[#DCFCE7] text-[#166534]",
+  rejected:       "bg-red-100 text-red-700",
+}
+
+export function getPlantForRole(role: string): string | null {
+  if (role in ROLE_PLANT) return ROLE_PLANT[role]
+  if (role.startsWith('buyer_')) return role.slice(6)
+  if (role.startsWith('plant_head_')) return role.slice(11)
+  return null
 }
 
 export const PLANTS = [
   { value: "jhajjar_p1", label: "Jhajjar Plant 1", state: "Haryana" },
   { value: "jhajjar_p2", label: "Jhajjar Plant 2", state: "Haryana" },
-  { value: "chennai",    label: "Chennai",          state: "Tamil Nadu" },
-  { value: "rajpura",    label: "Rajpura",          state: "Punjab" },
-  { value: "pune",       label: "Pune",             state: "Maharashtra" },
-  { value: "ahmedabad",  label: "Ahmedabad",        state: "Gujarat" },
+  { value: "ddn_4",      label: "DDN-4",             state: "Uttarakhand" },
+  { value: "ddn_5",      label: "DDN-5",             state: "Uttarakhand" },
+  { value: "ddn_6",      label: "DDN-6",             state: "Uttarakhand" },
+  { value: "supa",      label: "SUPA",              state: "Maharashtra" },
+  { value: "rudrapur",  label: "Rudrapur",          state: "Uttarakhand" },
+  { value: "sircity_1", label: "Sri City-1",        state: "Andhra Pradesh" },
+  { value: "sircity_2", label: "Sri City-2",        state: "Andhra Pradesh" },
 ]

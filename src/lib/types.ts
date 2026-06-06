@@ -34,8 +34,47 @@ export interface RequestComment {
   at: string;
 }
 
+export interface VendorRecommendation {
+  vendorName: string;
+  reason: string;
+}
+
+export interface CapexLineItem {
+  id: string;
+  masterItemId?: string;
+  masterHead?: string;
+  description: string;
+  category: string;
+  quantity: string;
+  uom?: string;
+  specs?: string;
+  lastPrice?: number;
+  lastVendor?: string;
+  budget?: number;
+  remarks?: string;
+  vendorRecommendation?: VendorRecommendation;
+  attachmentName?: string;
+  attachmentBase64?: string;
+}
+
+export interface SourcingDecision {
+  selectedVendorId?: string;
+  finalPrices?: Record<string, string>;
+  freight?: string;
+  packing?: string;
+  service?: string;
+  delivery?: string;
+  warranty?: string;
+  currency?: string;
+  offerCols?: Array<{ vendorId: string; prices: Record<string, string>; attrs: Record<string, string> }>;
+  finalVendorPerItem?: Record<string, string>;
+  savedAt?: string;
+}
+
 export interface CapexRequest {
   id: string;
+  requestNo?: string;
+  masterItemId?: string;
   subject: string;
   category: string;
   quantity: string;
@@ -47,10 +86,18 @@ export interface CapexRequest {
   assignedTo: string;
   status: CapexStatus;
   rejectionReason?: string;
+  sourcingDecision?: SourcingDecision;
   createdBy: string;
   createdAt: string;
   comments?: RequestComment[];
-  statusHistory?: { status: CapexStatus; actor: string; at: string }[]
+  statusHistory?: { status: CapexStatus; actor: string; at: string }[];
+  remarks?: string;
+  vendorRecommendation?: VendorRecommendation;
+  reasonForRequirement?: string;
+  benefitsRoi?: string;
+  attachmentName?: string;
+  attachmentBase64?: string;
+  lineItems?: CapexLineItem[];
 }
 
 export interface Vendor {
@@ -72,6 +119,7 @@ export interface Vendor {
 export interface Quote {
   id: string;
   price: number;
+  itemPrices?: Record<string, number>;
   deliveryDays: number;
   validUntil: string;
   attachmentName?: string;
@@ -106,6 +154,24 @@ export interface ChatMessage {
   toName: string;
   text: string;
   at: string;
+}
+
+export interface CapexMasterItem {
+  id: string;
+  plant: string;
+  head: string;
+  department: string;
+  subParticulars: string;
+  rate: number;
+  totalCost: number;
+  fy: string;
+}
+
+export interface PlantMeta {
+  value: string;
+  label: string;
+  state: string;
+  assignedUser?: string;
 }
 
 export interface VendorInvite {

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { Eye, EyeOff, ArrowRight } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -13,20 +13,39 @@ import {
 } from "@/components/ui/select"
 
 const ROLES = [
-  { value: "buyer",          label: "Buyer" },
-  { value: "sourcing_member",label: "Sourcing Member" },
-  { value: "sourcing_head",  label: "Sourcing Head" },
-  { value: "super_admin",    label: "Super Admin" },
+  { value: "buyer_jhajjar_p1",      label: "Buyer · Jhajjar Plant 1" },
+  { value: "buyer_jhajjar_p2",      label: "Buyer · Jhajjar Plant 2" },
+  { value: "plant_head_jhajjar_p1", label: "Plant Head · Jhajjar P1" },
+  { value: "plant_head_jhajjar_p2", label: "Plant Head · Jhajjar P2" },
+  { value: "sourcing_member",       label: "Sourcing Member" },
+  { value: "sourcing_head",         label: "Sourcing Head" },
+  { value: "super_admin",           label: "Super Admin" },
 ]
 
 
 export default function LoginPage() {
   const router = useRouter()
-  const [email,    setEmail]    = useState("")
-  const [password, setPassword] = useState("")
-  const [role,     setRole]     = useState("buyer")
-  const [showPass, setShowPass] = useState(false)
-  const [loading,  setLoading]  = useState(false)
+  const [email,         setEmail]         = useState("")
+  const [password,      setPassword]      = useState("")
+  const [role,          setRole]          = useState("buyer_jhajjar_p1")
+  const [showPass,      setShowPass]      = useState(false)
+  const [loading,       setLoading]       = useState(false)
+  const [dynamicRoles,  setDynamicRoles]  = useState<{ value: string; label: string }[]>([])
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('capex_data_v2')
+      if (raw) {
+        const { customPlants = [] } = JSON.parse(raw) as { customPlants?: { value: string; label: string }[] }
+        setDynamicRoles(
+          customPlants.flatMap(p => [
+            { value: `buyer_${p.value}`,      label: `Buyer · ${p.label}` },
+            { value: `plant_head_${p.value}`, label: `Plant Head · ${p.label}` },
+          ])
+        )
+      }
+    } catch {}
+  }, [])
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault()
@@ -46,7 +65,7 @@ export default function LoginPage() {
         className="absolute inset-0 bg-cover bg-center"
         style={{ backgroundImage: `url("https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&w=1920&q=80")` }}
       />
-      <div className="absolute inset-0 bg-gradient-to-r from-slate-950/90 via-slate-950/70 to-slate-950/50" />
+      <div className="absolute inset-0 bg-gradient-to-r from-[#0a1f4e]/95 via-[#153f90]/60 to-slate-950/40" />
       <div className="absolute inset-0 bg-gradient-to-t from-slate-950/50 via-transparent to-transparent" />
 
       {/* Left — hero branding */}
@@ -59,7 +78,7 @@ export default function LoginPage() {
         </div>
 
         <div className="space-y-6 max-w-lg">
-          <p className="text-[11px] font-bold tracking-[0.2em] text-amber-400 uppercase">
+          <p className="text-[11px] font-bold tracking-[0.2em] text-[#5EEAD4] uppercase">
             Capital Expenditure Management
           </p>
           <h1 className="text-[52px] leading-[1.05] font-black text-white tracking-tight">
@@ -103,7 +122,7 @@ export default function LoginPage() {
                 value={email}
                 onChange={e => setEmail(e.target.value)}
                 placeholder="yourname@amberenterprises.in"
-                className="w-full rounded-xl bg-white/10 border border-white/15 px-4 py-3 text-sm text-white placeholder:text-white/25 focus:outline-none focus:ring-2 focus:ring-amber-400/60 focus:border-amber-400/40 transition-all"
+                className="w-full rounded-xl bg-white/10 border border-white/15 px-4 py-3 text-sm text-white placeholder:text-white/25 focus:outline-none focus:ring-2 focus:ring-[#0D9488]/60 focus:border-[#0D9488]/40 transition-all"
               />
             </div>
 
@@ -119,7 +138,7 @@ export default function LoginPage() {
                   value={password}
                   onChange={e => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="w-full rounded-xl bg-white/10 border border-white/15 px-4 py-3 pr-11 text-sm text-white placeholder:text-white/25 focus:outline-none focus:ring-2 focus:ring-amber-400/60 focus:border-amber-400/40 transition-all"
+                  className="w-full rounded-xl bg-white/10 border border-white/15 px-4 py-3 pr-11 text-sm text-white placeholder:text-white/25 focus:outline-none focus:ring-2 focus:ring-[#0D9488]/60 focus:border-[#0D9488]/40 transition-all"
                 />
                 <button
                   type="button"
@@ -138,11 +157,11 @@ export default function LoginPage() {
                 Sign in as
               </label>
               <Select value={role} onValueChange={v => { if (v) setRole(v) }}>
-                <SelectTrigger className="w-full bg-white/10 border-white/15 text-white data-placeholder:text-white/25 focus:ring-amber-400/60 h-11 rounded-xl">
+                <SelectTrigger className="w-full bg-white/10 border-white/15 text-white data-placeholder:text-white/25 focus:ring-[#0D9488]/60 h-11 rounded-xl">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {ROLES.map(r => (
+                  {[...ROLES, ...dynamicRoles].map(r => (
                     <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>
                   ))}
                 </SelectContent>
@@ -157,7 +176,7 @@ export default function LoginPage() {
                   "w-full flex items-center justify-center gap-2 py-3 rounded-xl font-semibold text-[14px] transition-all duration-200",
                   loading
                     ? "bg-white/10 text-white/30 cursor-not-allowed"
-                    : "bg-amber-400 hover:bg-amber-300 text-slate-900 shadow-lg shadow-amber-400/20 active:scale-[0.99]"
+                    : "bg-[#0D9488] hover:bg-[#115E59] text-white shadow-lg shadow-[#0D9488]/30 active:scale-[0.99]"
                 )}
               >
                 {loading ? (
