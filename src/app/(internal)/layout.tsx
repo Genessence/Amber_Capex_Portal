@@ -7,7 +7,7 @@ export default function InternalLayout({ children }: { children: React.ReactNode
   return (
     <CapexProvider>
       <LoginGate>
-        <div className="flex h-screen overflow-hidden max-w-full" style={{ background: "#F3F6FC" }}>
+        <div className="flex h-screen overflow-hidden max-w-full bg-background">
           <Sidebar />
           <div className="flex flex-1 flex-col overflow-hidden">
             <TopNav />

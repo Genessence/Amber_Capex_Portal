@@ -1,0 +1,44 @@
+---
+description: Keep CLAUDE.md and USER_STORY.md in sync with code and user requirements
+alwaysApply: true
+---
+
+# Project documentation maintenance
+
+This repo uses two living documents. Update them as part of every meaningful change — including in new chat sessions.
+
+## CLAUDE.md (architecture & conventions)
+
+**Read first** when starting work in this repo. It is the source of truth for structure, patterns, and file roles.
+
+**Update CLAUDE.md** whenever you change anything that affects:
+- Commands, scripts, or build tooling
+- Route groups, auth model, roles, or status flow
+- `CapexProvider` state shape, mutations, or persistence
+- Shared constants, key files, UI stack, or layout conventions
+- Feature-specific behaviour (new request grid, CAPEX master, supplier portal, etc.)
+- How to add new roles, statuses, plants, or budget heads
+
+Keep edits minimal and factual — match the existing section structure; do not bloat with implementation detail that belongs in code comments.
+
+## docs/USER_STORY.md (requirements)
+
+**Read** when the user mentions a user story, feature request, acceptance criteria, or product requirement.
+
+**Update docs/USER_STORY.md** whenever the user:
+- Describes a new user story or refines an existing one
+- Changes acceptance criteria, scope, or priority
+- Marks work as started, blocked, or done
+
+Use the document's ID format (`US-###`). Append new stories; edit existing entries in place rather than duplicating. Set **Last updated** at the top to today's date.
+
+## Workflow on every task
+
+1. Read `CLAUDE.md` and `docs/USER_STORY.md` if the task touches architecture or requirements.
+2. Implement the change.
+3. Before finishing, update both docs if anything changed. If the user only gave a user story with no code change, still update `USER_STORY.md`.
+
+## Do not
+
+- Skip doc updates because it is a "new chat" — these files persist across sessions.
+- Create separate spec files for user stories unless the user explicitly asks; use `docs/USER_STORY.md` as the single backlog.

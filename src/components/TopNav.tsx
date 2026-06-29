@@ -27,6 +27,14 @@ const ROLE_GROUPS = [
     ],
   },
   {
+    label: "Maintenance & Accounts",
+    roles: [
+      { value: "maintenance",    name: "Sunil Verma", area: "CAPEX Master / Budget" },
+      { value: "plant_accounts", name: "Meera Iyer",  area: "FA Codes" },
+      { value: "accounts",       name: "Priya Nair",  area: "PO & Payments" },
+    ],
+  },
+  {
     label: "Administration",
     roles: [{ value: "super_admin", name: "Super Admin", area: "Full Access" }],
   },
@@ -42,6 +50,8 @@ function getRoleBg(value: string): string {
   if (value.startsWith("plant_head"))   return "bg-[#0D9488]"
   if (value === "sourcing_member") return "bg-violet-600"
   if (value === "sourcing_head")   return "bg-violet-800"
+  if (value === "maintenance")     return "bg-amber-600"
+  if (value === "accounts")        return "bg-teal-700"
   return "bg-slate-700"
 }
 
@@ -50,6 +60,11 @@ const PAGE_LABELS: Record<string, { label: string; sub?: string }> = {
   "/capex/requests":   { label: "CAPEX Requests",   sub: "Vendor sourcing & negotiation" },
   "/capex/new":        { label: "New Request",       sub: "Submit a capital expenditure request" },
   "/sourcing/vendors": { label: "Vendor Directory",  sub: "Manage and onboard vendors" },
+  "/capex/master":     { label: "CAPEX Master",       sub: "Per-plant budget planning" },
+  "/capex/budget-proposals": { label: "Budget Planning", sub: "Author next-FY budget proposals" },
+  "/capex/adhoc-budget": { label: "Adhoc Budget",     sub: "Reallocate budget between heads" },
+  "/capex/budget-approvals": { label: "Budget Approvals", sub: "Next-FY proposals & adhoc transfers" },
+  "/accounts/queue":   { label: "Accounts Queue",     sub: "FA codes, PO & payments" },
   "/settings":         { label: "Configurations",     sub: "Plants, categories & users" },
 }
 
@@ -202,15 +217,15 @@ export function TopNav() {
 
   return (
     <>
-      <header className="flex h-14 items-center justify-between border-b border-[#153f90]/20 bg-white px-5 relative z-50 shrink-0">
+      <header className="flex h-14 items-center justify-between border-b border-border bg-card px-5 relative z-50 shrink-0 shadow-xs">
         {/* ── Page title ── */}
         <div className="flex items-center gap-2.5 min-w-0">
-          <span className="hidden sm:flex items-center gap-1 text-[11px] font-semibold text-[#153f90] bg-[#e8eeff] px-2 py-1 rounded-lg shrink-0">
+          <span className="hidden sm:flex items-center gap-1 text-[11px] font-semibold text-primary bg-accent px-2.5 py-1 rounded-lg shrink-0 border border-primary/10">
             <Building2 className="w-3 h-3" aria-hidden="true" />
             {PLANT_LABELS[currentPlant] ?? currentPlant}
           </span>
-          <div className="hidden sm:block w-px h-4 bg-slate-200 shrink-0" />
-          <h1 className="text-[15px] font-bold text-[#153f90] tracking-tight truncate">{pageMeta.label}</h1>
+          <div className="hidden sm:block w-px h-4 bg-border shrink-0" />
+          <h1 className="text-[15px] font-bold text-foreground tracking-tight truncate">{pageMeta.label}</h1>
           {pageMeta.sub && (
             <>
               <ChevronRight className="w-3.5 h-3.5 text-slate-300 shrink-0" />
@@ -224,11 +239,11 @@ export function TopNav() {
           <button
             onClick={() => setChatOpen(o => !o)}
             aria-label="Open chat"
-            className={`relative p-2 rounded-lg border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D9488] ${
-              chatOpen ? "bg-[#CCFBF1] border-[#5EEAD4] text-[#0D9488]" : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-700"
+            className={`relative p-2 rounded-lg border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+              chatOpen ? "bg-accent border-primary/20 text-primary" : "bg-card border-border text-muted-foreground hover:bg-muted hover:text-foreground"
             }`}
           >
-            <MessageCircle className="w-4.5 h-4.5 w-[18px] h-[18px]" />
+            <MessageCircle className="w-[18px] h-[18px]" />
             {unread > 0 && (
               <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center">
                 {unread > 9 ? "9+" : unread}
@@ -246,10 +261,10 @@ export function TopNav() {
               aria-label={`Switch user — currently ${active.name}`}
               className={[
                 "flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-all border",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D9488] focus-visible:ring-offset-1",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
                 showRolePicker
-                  ? "bg-slate-100 border-slate-200 shadow-inner"
-                  : "bg-white border-slate-200 hover:bg-slate-50 hover:border-slate-300",
+                  ? "bg-muted border-border shadow-inner"
+                  : "bg-card border-border hover:bg-muted hover:border-border",
               ].join(" ")}
             >
               <span aria-hidden="true" className={`flex items-center justify-center w-7 h-7 rounded-full text-white text-[10px] font-bold shrink-0 ${getRoleBg(currentRole)}`}>
@@ -264,10 +279,11 @@ export function TopNav() {
 
             {showRolePicker && (
               <div role="menu" aria-label="Switch user"
-                className="absolute right-0 mt-2 w-64 rounded-xl bg-white shadow-xl shadow-slate-200/80 ring-1 ring-slate-200 overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-150">
-                <div className="px-3 py-2.5 border-b border-slate-100 bg-slate-50">
+                className="absolute right-0 mt-2 w-64 rounded-xl bg-white shadow-xl shadow-slate-200/80 ring-1 ring-slate-200 overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-150 flex flex-col max-h-[70vh]">
+                <div className="px-3 py-2.5 border-b border-slate-100 bg-slate-50 shrink-0">
                   <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">Switch User</p>
                 </div>
+                <div className="overflow-y-auto">
                 {allRoleGroups.map(group => (
                   <div key={group.label}>
                     <div className="px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-[0.1em] bg-slate-50/60 border-b border-slate-100">
@@ -280,8 +296,8 @@ export function TopNav() {
                           aria-current={isSelected ? "true" : undefined}
                           className={[
                             "w-full flex items-center gap-2.5 px-3 py-2.5 text-left transition-colors",
-                            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#0D9488]",
-                            isSelected ? "bg-[#153f90]" : "hover:bg-slate-50",
+                            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                            isSelected ? "bg-foreground" : "hover:bg-muted",
                           ].join(" ")}
                         >
                           <span aria-hidden="true" className={`flex items-center justify-center w-8 h-8 rounded-full text-white text-[11px] font-bold shrink-0 ${getRoleBg(role.value)}`}>
@@ -291,12 +307,13 @@ export function TopNav() {
                             <p className={`text-[13px] font-semibold leading-tight truncate ${isSelected ? "text-white" : "text-slate-800"}`}>{role.name}</p>
                             <p className="text-[11px] truncate mt-0.5 text-slate-400">{role.area}</p>
                           </div>
-                          {isSelected && <span aria-label="Currently active" className="w-2 h-2 rounded-full bg-[#0D9488] shrink-0" />}
+                          {isSelected && <span aria-label="Currently active" className="w-2 h-2 rounded-full bg-primary shrink-0" />}
                         </button>
                       )
                     })}
                   </div>
                 ))}
+                </div>
               </div>
             )}
           </div>
@@ -315,7 +332,7 @@ export function TopNav() {
             {/* Header */}
             <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-200 bg-white shrink-0">
               <div className="flex items-center gap-2">
-                <MessageCircle className="w-4 h-4 text-[#0D9488]" />
+                <MessageCircle className="w-4 h-4 text-primary" />
                 <p className="text-sm font-bold text-slate-900">Messages</p>
               </div>
               <button onClick={() => setChatOpen(false)} aria-label="Close chat"
@@ -335,7 +352,7 @@ export function TopNav() {
                   return (
                     <button key={contact.value} onClick={() => setSelectedContact(contact.value)}
                       className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-left transition-colors ${
-                        isActive ? "bg-[#CCFBF1] border-r-2 border-[#0D9488]" : "hover:bg-white"
+                        isActive ? "bg-accent border-r-2 border-primary" : "hover:bg-card"
                       }`}>
                       <span className={`flex items-center justify-center w-8 h-8 rounded-full text-white text-[10px] font-bold shrink-0 ${getRoleBg(contact.value)}`}>
                         {getInitials(contact.name)}
@@ -377,7 +394,7 @@ export function TopNav() {
                       </div>
 
                       {/* Messages */}
-                      <div ref={threadRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+                      <div ref={threadRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
                         {thread.length === 0 ? (
                           <p className="text-xs text-slate-400 text-center py-8">No messages yet. Say hi!</p>
                         ) : thread.map(msg => {
@@ -385,7 +402,7 @@ export function TopNav() {
                           return (
                             <div key={msg.id} className={`flex flex-col gap-0.5 ${isMine ? "items-end" : "items-start"}`}>
                               <div className={`max-w-xs rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed ${
-                                isMine ? "bg-[#0D9488] text-white rounded-tr-sm" : "bg-slate-100 text-slate-800 rounded-tl-sm"
+                                isMine ? "bg-primary text-primary-foreground rounded-tr-sm" : "bg-muted text-foreground rounded-tl-sm"
                               }`}>
                                 {msg.text}
                               </div>
@@ -399,9 +416,9 @@ export function TopNav() {
                       <form onSubmit={handleSend} className="px-4 py-3 border-t border-slate-100 flex gap-2 shrink-0 bg-white">
                         <input value={msgText} onChange={e => setMsgText(e.target.value)}
                           placeholder={`Message ${contact.name}…`}
-                          className="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0D9488]/50" />
+                          className="flex-1 rounded-xl border border-border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring/50" />
                         <button type="submit" disabled={!msgText.trim()}
-                          className="p-2 rounded-xl bg-[#0D9488] hover:bg-[#115E59] disabled:bg-slate-200 text-white transition-colors">
+                          className="p-2 rounded-xl bg-primary hover:bg-primary/90 disabled:bg-muted text-primary-foreground transition-colors">
                           <SendHorizonal className="w-4 h-4" />
                         </button>
                       </form>

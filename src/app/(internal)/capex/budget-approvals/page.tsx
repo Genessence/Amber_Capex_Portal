@@ -1,0 +1,224 @@
+'use client'
+
+import { useEffect, useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { toast } from 'sonner'
+import { ClipboardCheck, Check, X, ChevronDown, ChevronRight } from 'lucide-react'
+import { useCapex } from '@/lib/capexContext'
+import { PLANTS, ROLE_NAMES } from '@/lib/constants'
+import type { BudgetProposal } from '@/lib/types'
+import { PROJECT_TYPE_LABELS } from '@/lib/greenFieldConstants'
+import {
+  BUDGET_PROPOSAL_STATUS_COLORS,
+  BUDGET_PROPOSAL_STATUS_LABELS,
+  diffProposalAgainstLive,
+  proposalTotalCr,
+} from '@/lib/budgetProposalUtils'
+import { ADHOC_STATUS_COLORS, ADHOC_STATUS_LABELS, effectiveHeadAllocationCr, headUsedCr } from '@/lib/adhocBudgetUtils'
+
+function fmtCr(n: number) {
+  return `₹${n.toFixed(2)} Cr`
+}
+function plantLabel(v: string, custom: { value: string; label: string }[]) {
+  return PLANTS.find(p => p.value === v)?.label ?? custom.find(p => p.value === v)?.label ?? v
+}
+
+export default function BudgetApprovalsPage() {
+  const router = useRouter()
+  const {
+    capexMaster, customPlants, budgetProposals, decideBudgetProposal,
+    adhocBudgetRequests, brownFieldHeadAllocations, usedAmountByMasterItemId, decideAdhocBudgetRequest,
+  } = useCapex()
+  const [role, setRole] = useState('')
+  const [expanded, setExpanded] = useState<string | null>(null)
+
+  useEffect(() => {
+    const r = localStorage.getItem('capex_role') ?? ''
+    if (r !== 'super_admin') { router.replace('/capex/requests'); return }
+    setRole(r)
+    const handler = (e: Event) => {
+      const next = (e as CustomEvent).detail as string
+      setRole(next)
+      if (next !== 'super_admin') router.replace('/capex/requests')
+    }
+    window.addEventListener('capex_rolechange', handler as EventListener)
+    return () => window.removeEventListener('capex_rolechange', handler as EventListener)
+  }, [router])
+
+  const pending = useMemo(
+    () => budgetProposals.filter(p => p.status === 'pending_admin'),
+    [budgetProposals],
+  )
+  const pendingAdhoc = useMemo(
+    () => adhocBudgetRequests.filter(r => r.status === 'pending_admin'),
+    [adhocBudgetRequests],
+  )
+  const decided = useMemo(
+    () => budgetProposals
+      .filter(p => p.status === 'approved' || p.status === 'rejected')
+      .sort((a, b) => (b.decidedAt ?? '').localeCompare(a.decidedAt ?? ''))
+      .slice(0, 10),
+    [budgetProposals],
+  )
+
+  if (role !== 'super_admin') return null
+
+  function approve(p: BudgetProposal) {
+    decideBudgetProposal(p.id, 'approved', role)
+    toast.success(`Approved — ${plantLabel(p.plant, customPlants)} FY ${p.targetFy} published as the new live budget`)
+  }
+  function reject(p: BudgetProposal) {
+    const note = window.prompt('Reason for rejection (optional):') ?? undefined
+    decideBudgetProposal(p.id, 'rejected', role, note)
+    toast.success('Proposal rejected')
+  }
+  const fmtCr = (n: number) => `₹${n.toFixed(2)} Cr`
+
+  return (
+    <div className="p-5 h-full flex flex-col gap-4">
+      <div className="shrink-0">
+        <h1 className="text-lg font-bold text-foreground flex items-center gap-2">
+          <ClipboardCheck className="w-5 h-5 text-primary" /> Budget Approvals
+        </h1>
+        <p className="text-sm text-muted-foreground mt-0.5">
+          Review next-FY Brown Field budget proposals. Approving publishes the proposal as a new live FY that buyers will use.
+        </p>
+      </div>
+
+      <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
+        {/* Pending */}
+        <section className="space-y-2">
+          <h2 className="text-[12px] font-bold text-muted-foreground uppercase tracking-wide">
+            Pending ({pending.length})
+          </h2>
+          {pending.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-4 text-center border border-dashed border-border rounded-xl">
+              No proposals awaiting approval.
+            </p>
+          ) : pending.map(p => {
+            const diff = diffProposalAgainstLive(p, capexMaster)
+            const isOpen = expanded === p.id
+            return (
+              <div key={p.id} className="rounded-xl border border-border bg-card overflow-hidden">
+                <div className="flex items-center gap-3 px-4 py-3">
+                  <button onClick={() => setExpanded(isOpen ? null : p.id)} className="p-1 text-muted-foreground">
+                    {isOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                  </button>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-foreground">
+                      {plantLabel(p.plant, customPlants)} · {PROJECT_TYPE_LABELS[p.projectType]} · FY {p.targetFy}
+                    </p>
+                    <p className="text-[12px] text-muted-foreground">
+                      {p.items.length} lines · {fmtCr(proposalTotalCr(p))} · from FY {p.sourceFy ?? '—'} · by {ROLE_NAMES[p.createdBy] ?? p.createdBy}
+                    </p>
+                  </div>
+                  <button onClick={() => reject(p)}
+                    className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-white hover:bg-red-50 text-red-600 border border-red-200 rounded-lg">
+                    <X className="w-3.5 h-3.5" /> Reject
+                  </button>
+                  <button onClick={() => approve(p)}
+                    className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg">
+                    <Check className="w-3.5 h-3.5" /> Approve & Publish
+                  </button>
+                </div>
+                {isOpen && (
+                  <div className="border-t border-border px-4 py-3 bg-muted/30">
+                    <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wide mb-2">Per-head change vs live FY {p.sourceFy ?? '—'}</p>
+                    <table className="w-full text-sm">
+                      <thead className="text-[11px] uppercase text-muted-foreground">
+                        <tr>
+                          <th className="text-left py-1 font-semibold">Head</th>
+                          <th className="text-right py-1 font-semibold">Live</th>
+                          <th className="text-right py-1 font-semibold">Proposed</th>
+                          <th className="text-right py-1 font-semibold">Δ</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {diff.map(d => (
+                          <tr key={d.head} className="border-t border-border/60">
+                            <td className="py-1.5 text-foreground">{d.head}</td>
+                            <td className="py-1.5 text-right font-mono text-muted-foreground">{fmtCr(d.liveCr)}</td>
+                            <td className="py-1.5 text-right font-mono">{fmtCr(d.proposedCr)}</td>
+                            <td className={`py-1.5 text-right font-mono font-semibold ${
+                              d.deltaCr > 0 ? 'text-emerald-700' : d.deltaCr < 0 ? 'text-red-600' : 'text-muted-foreground'
+                            }`}>
+                              {d.deltaCr > 0 ? '+' : ''}{fmtCr(d.deltaCr)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </section>
+
+        {/* Pending adhoc reallocations */}
+        <section className="space-y-2">
+          <h2 className="text-[12px] font-bold text-muted-foreground uppercase tracking-wide">
+            Adhoc Reallocations ({pendingAdhoc.length})
+          </h2>
+          {pendingAdhoc.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-4 text-center border border-dashed border-border rounded-xl">
+              No adhoc budget transfers awaiting approval.
+            </p>
+          ) : pendingAdhoc.map(r => {
+            const fromAlloc = effectiveHeadAllocationCr(capexMaster, brownFieldHeadAllocations, r.plant, r.fy, r.projectType, r.fromHead)
+            const fromUsed = headUsedCr(capexMaster, usedAmountByMasterItemId, r.plant, r.fy, r.projectType, r.fromHead)
+            const toAlloc = effectiveHeadAllocationCr(capexMaster, brownFieldHeadAllocations, r.plant, r.fy, r.projectType, r.toHead)
+            const toUsed = headUsedCr(capexMaster, usedAmountByMasterItemId, r.plant, r.fy, r.projectType, r.toHead)
+            return (
+              <div key={r.id} className="rounded-xl border border-border bg-card px-4 py-3">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-foreground">
+                      {plantLabel(r.plant, customPlants)} · {PROJECT_TYPE_LABELS[r.projectType]} · FY {r.fy}
+                    </p>
+                    <p className="text-[12px] text-muted-foreground">
+                      Move <span className="font-semibold">{fmtCr(r.amountCr)}</span> from <span className="font-semibold">{r.fromHead}</span> → <span className="font-semibold">{r.toHead}</span> · by {r.createdBy}
+                      {r.reason ? ` · ${r.reason}` : ''}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      {r.fromHead}: {fmtCr(fromUsed)} used / {fmtCr(fromAlloc)} → {fmtCr(fromAlloc - r.amountCr)} &nbsp;·&nbsp;
+                      {r.toHead}: {fmtCr(toUsed)} used / {fmtCr(toAlloc)} → {fmtCr(toAlloc + r.amountCr)}
+                    </p>
+                  </div>
+                  <button onClick={() => { decideAdhocBudgetRequest(r.id, 'rejected', role, window.prompt('Reason (optional):') ?? undefined); toast.success('Reallocation rejected') }}
+                    className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-white hover:bg-red-50 text-red-600 border border-red-200 rounded-lg">
+                    <X className="w-3.5 h-3.5" /> Reject
+                  </button>
+                  <button onClick={() => { decideAdhocBudgetRequest(r.id, 'approved', role); toast.success('Reallocation approved') }}
+                    className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg">
+                    <Check className="w-3.5 h-3.5" /> Approve
+                  </button>
+                </div>
+              </div>
+            )
+          })}
+        </section>
+
+        {/* Recently decided */}
+        {decided.length > 0 && (
+          <section className="space-y-2">
+            <h2 className="text-[12px] font-bold text-muted-foreground uppercase tracking-wide">Recently Decided</h2>
+            <div className="rounded-xl border border-border bg-card divide-y divide-border">
+              {decided.map(p => (
+                <div key={p.id} className="flex items-center gap-3 px-4 py-2.5">
+                  <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${BUDGET_PROPOSAL_STATUS_COLORS[p.status]}`}>
+                    {BUDGET_PROPOSAL_STATUS_LABELS[p.status]}
+                  </span>
+                  <span className="text-sm text-foreground flex-1">
+                    {plantLabel(p.plant, customPlants)} · {PROJECT_TYPE_LABELS[p.projectType]} · FY {p.targetFy}
+                  </span>
+                  <span className="text-[12px] text-muted-foreground">{fmtCr(proposalTotalCr(p))}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+      </div>
+    </div>
+  )
+}

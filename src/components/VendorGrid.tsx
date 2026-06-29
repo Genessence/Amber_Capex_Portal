@@ -1,11 +1,12 @@
 "use client"
 
-import React, { useState, useMemo, useCallback, useRef } from "react"
+import React, { useState, useMemo, useCallback, useRef, useEffect } from "react"
 import { toast } from "sonner"
 import { Copy, FileSpreadsheet, Paperclip, Mail, X, Users } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useCapex } from "@/lib/capexContext"
 import { buildSupplierLink } from "@/lib/tokenUtils"
+import { isAuctionExpired } from "@/lib/auctionUtils"
 import { INVITE_STATUS_COLORS, SOURCING_ENGINEERS, ROLE_NAMES } from "@/lib/constants"
 import type { CapexRequest, CapexLineItem, VendorInvite, Vendor, Quote, SourcingDecision } from "@/lib/types"
 
@@ -23,6 +24,8 @@ interface Props {
   vendors: Vendor[]
   currentRole: string
   onSelectFinal?: (inviteId: string) => void
+  auctionSelectedVendorIds?: string[]
+  onAuctionSelectionChange?: (vendorIds: string[]) => void
 }
 
 const isSourcingRole = (role: string) =>
@@ -296,11 +299,10 @@ const ItemBodyRow = React.memo(function ItemBodyRow({
   )
 })
 
-function ItemRowGrid({ request, invites, vendors, currentRole, onSelectFinal }: Props) {
-  const { approveInvite, updateRequest, inviteVendors } = useCapex()
+function ItemRowGrid({ request, invites, vendors, currentRole, onSelectFinal, auctionSelectedVendorIds = [], onAuctionSelectionChange }: Props) {
+  const { approveInvite, updateRequest, inviteVendors, finalizeSplitAward } = useCapex()
   const items = request.lineItems!
   const isSourcing = isSourcingRole(currentRole)
-  const isLocked   = request.status === "sourcing_approved" || request.status === "buyer_approved"
 
   // Cache each VendorCol by invite id so stable references survive re-renders
   // where that invite's data didn't change — lets React.memo bail out per-row.
@@ -334,6 +336,22 @@ function ItemRowGrid({ request, invites, vendors, currentRole, onSelectFinal }: 
     [invites]
   )
 
+  // While a timed reverse auction is still running, vendors can keep revising bids — the winner
+  // can only be finalized once the auction has ended (countdown expired or closed by sourcing).
+  // No timed auction configured (e.g. seeded-quote comparison) ⇒ finalize stays available.
+  const auctionLive = !!request.auctionConfig?.endsAt && !isAuctionExpired(request.auctionConfig)
+  // A timed reverse auction ran on this request (vs a seeded-quote comparison). The auction path
+  // finalizes via the split-award "Approve Final Decision & Award" footer (per-line vendor + price),
+  // not the legacy single "✓ OK" / "✓ Approve → buyer" controls.
+  const ranAuction = !!request.auctionConfig?.endsAt
+  const auctionEnded = ranAuction && isAuctionExpired(request.auctionConfig)
+  const canFinalize = currentRole === "sourcing_head" || currentRole === "super_admin"
+
+  // Lock the editable offer / final-decision cells once a final vendor is chosen. The auction
+  // path now stays in `sourcing` after finalize (mirrors RFQ), so key off the approved invite
+  // rather than the old sourcing_approved/buyer_approved statuses (kept for legacy safety).
+  const isLocked = !!approvedInviteId || request.status === "sourcing_approved" || request.status === "buyer_approved"
+
   const saved = request.sourcingDecision
 
   const [offerCols, setOfferCols] = useState<OfferCol[]>(() => {
@@ -347,6 +365,11 @@ function ItemRowGrid({ request, invites, vendors, currentRole, onSelectFinal }: 
   })
   const [finalPrices, setFinalPrices] = useState<Record<string, string>>(saved?.finalPrices ?? {})
   const [finalVendorPerItem, setFinalVendorPerItem] = useState<Record<string, string>>(saved?.finalVendorPerItem ?? {})
+
+  // Split award is ready once EVERY line has a chosen vendor and a positive final price.
+  const allLinesAwarded = items.every(
+    (it) => !!finalVendorPerItem[it.id] && Number(finalPrices[`${it.id}-price`] ?? 0) > 0,
+  )
 
   const [fdAttr, setFdAttr] = useState({
     freight:  saved?.freight  ?? "",
@@ -437,7 +460,27 @@ function ItemRowGrid({ request, invites, vendors, currentRole, onSelectFinal }: 
   }
   function setOfferVendor(id: string, vendorId: string) {
     setOfferCols(prev => prev.map(o => o.id === id ? { ...o, vendorId } : o))
+    // Notify auction panel when a vendor is selected in the table
+    if (vendorId && onAuctionSelectionChange) {
+      const newSelection = [...new Set([...auctionSelectedVendorIds, vendorId])]
+      if (newSelection.length !== auctionSelectedVendorIds.length) {
+        onAuctionSelectionChange(newSelection)
+      }
+    }
   }
+
+  // Add offer columns for vendors selected in auction panel but not in table
+  useEffect(() => {
+    if (!auctionSelectedVendorIds.length) return
+    const selectedInTable = new Set(offerCols.map(c => c.vendorId).filter(Boolean))
+    const missingVendors = auctionSelectedVendorIds.filter(id => !selectedInTable.has(id))
+    if (missingVendors.length) {
+      setOfferCols(prev => [
+        ...prev,
+        ...missingVendors.map(vendorId => ({ id: crypto.randomUUID(), vendorId, prices: {} }))
+      ])
+    }
+  }, [auctionSelectedVendorIds])
 
   const copyLink = (inv: VendorInvite) => {
     navigator.clipboard.writeText(buildSupplierLink(inv.token))
@@ -512,10 +555,13 @@ function ItemRowGrid({ request, invites, vendors, currentRole, onSelectFinal }: 
                       <button onClick={() => copyLink(inv)} className="p-0.5 rounded text-white/50 hover:text-white transition-colors" title="Copy supplier link">
                         <Copy className="w-3 h-3" />
                       </button>
-                      {currentRole === "sourcing_head" && !isApproved && latestQuote && (
+                      {/* Auction finalizes via the split-award footer (per-line vendor + price), so
+                          the legacy single "✓ OK" header finalize is hidden when an auction ran. */}
+                      {!ranAuction && currentRole === "sourcing_head" && !isApproved && latestQuote && (
                         <button onClick={() => { approveInvite(inv.id); onSelectFinal?.(inv.id) }}
-                          className="px-1.5 py-0.5 rounded bg-emerald-400 hover:bg-emerald-300 text-white text-[10px] font-bold"
-                          disabled={!!approvedInviteId}>✓ OK</button>
+                          className="px-1.5 py-0.5 rounded bg-emerald-400 hover:bg-emerald-300 text-white text-[10px] font-bold disabled:opacity-40 disabled:cursor-not-allowed"
+                          title={auctionLive ? "Auction in progress — finalize the winner after it ends" : "Select as final vendor"}
+                          disabled={!!approvedInviteId || auctionLive}>✓ OK</button>
                       )}
                     </div>
                   </th>
@@ -811,8 +857,49 @@ function ItemRowGrid({ request, invites, vendors, currentRole, onSelectFinal }: 
         </table>
       </div>
 
-      {/* ── Review Request footer — hidden when decision is locked ── */}
-      {isSourcing && !isLocked && (
+      {/* ── Auction: split-award finalize footer — pick a vendor + final price per line, then award ── */}
+      {isSourcing && !isLocked && ranAuction && (
+        <div className="border-t border-slate-200 px-5 py-4 flex items-center justify-between gap-4 bg-white">
+          <div>
+            <p className="text-sm font-bold text-slate-800">Award &amp; Finalize</p>
+            <p className="text-xs text-slate-500 mt-0.5">
+              {auctionEnded
+                ? "Pick a winning vendor and final price for every line, then award. Each awarded vendor runs its own PI → terms → PO → payments track."
+                : "Close the auction first — vendors can still revise their bids."}
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={handleSave}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold border border-slate-200 transition-colors"
+            >
+              Save
+            </button>
+            {canFinalize ? (
+              <button
+                onClick={() => {
+                  if (!auctionEnded) { toast.error("Close the auction before awarding"); return }
+                  if (!allLinesAwarded) { toast.error("Select a vendor and final price for every line item"); return }
+                  const decision = buildDecision()
+                  updateRequest(request.id, { sourcingDecision: decision })
+                  finalizeSplitAward(request.id, decision)
+                  toast.success("Awards finalized — contract terms sent to each winning vendor")
+                }}
+                disabled={!auctionEnded || !allLinesAwarded}
+                title={!auctionEnded ? "Close the auction first" : !allLinesAwarded ? "Every line needs a vendor + final price" : "Award and send contract terms"}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#0D9488] hover:bg-[#115E59] text-white text-xs font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                ✓ Approve Final Decision &amp; Award
+              </button>
+            ) : (
+              <p className="text-xs text-slate-500">Awaiting sourcing head to award.</p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Legacy non-auction (seeded comparison) footer — Reject / Save / Approve → buyer ── */}
+      {isSourcing && !isLocked && !ranAuction && (
         <div className="border-t border-slate-200 px-5 py-4 flex items-center justify-between gap-4 bg-white">
           <div>
             <p className="text-sm font-bold text-slate-800">Review Request</p>
@@ -924,6 +1011,9 @@ function AttributeRowGrid({ request, invites, vendors, currentRole, onSelectFina
     [invites]
   )
 
+  // Finalize the winner only after a running auction has ended (see ItemRowGrid for rationale).
+  const auctionLive = !!request.auctionConfig?.endsAt && !isAuctionExpired(request.auctionConfig)
+
   const isSourcing = isSourcingRole(currentRole)
   const totalColCount = 1 + allQuotes.length + pendingInvites.length + (isSourcing ? 1 : 0)
 
@@ -1003,7 +1093,7 @@ function AttributeRowGrid({ request, invites, vendors, currentRole, onSelectFina
                         <button onClick={() => copyLink(invite)} className="p-1.5 rounded-md text-slate-400 hover:text-[#0D9488] hover:bg-[#CCFBF1] transition-colors"><Copy className="w-3.5 h-3.5" /></button>
                         {isLatest && <button onClick={() => setEmailOpenId(id => id === invite.id ? null : invite.id)} className={["p-1.5 rounded-md transition-colors", emailOpenId === invite.id ? "bg-[#CCFBF1] text-[#0D9488]" : "text-slate-400 hover:text-[#0D9488] hover:bg-[#CCFBF1]"].join(" ")}><Mail className="w-3.5 h-3.5" /></button>}
                         {currentRole === "sourcing_head" && isLatest && !isApproved && invite.quotes.length > 0 && (
-                          <Button size="sm" onClick={() => approveInvite(invite.id)} className="h-6 px-2.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white ml-0.5">Approve</Button>
+                          <Button size="sm" disabled={auctionLive} title={auctionLive ? "Auction in progress — finalize the winner after it ends" : "Approve this vendor"} onClick={() => approveInvite(invite.id)} className="h-6 px-2.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white ml-0.5 disabled:opacity-40 disabled:cursor-not-allowed">Approve</Button>
                         )}
                       </div>
                     </th>
@@ -1168,7 +1258,18 @@ function AttributeRowGrid({ request, invites, vendors, currentRole, onSelectFina
                 </div>
                 <div className={["bg-white rounded-xl border overflow-hidden", latestQ ? "border-green-200" : "border-slate-200 opacity-60"].join(" ")}>
                   <div className={["border-b px-4 py-3", latestQ ? "bg-green-50 border-green-200" : "bg-slate-50 border-slate-200"].join(" ")}>
-                    <div className="flex items-center gap-1.5 mb-1">{latestQ ? <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-green-100 text-green-700 uppercase">Received · Q{inv.quotes.length}</span> : <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 uppercase">Awaiting Reply</span>}</div>
+                    <div className="flex items-center gap-1.5 mb-1 flex-wrap">
+                      {latestQ ? (
+                        <>
+                          <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-green-100 text-green-700 uppercase">Received · Q{inv.quotes.length}</span>
+                          {latestQ.seededByBuyer && (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-teal-50 text-teal-800 border border-teal-200">Added at request</span>
+                          )}
+                        </>
+                      ) : (
+                        <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 uppercase">Awaiting Reply</span>
+                      )}
+                    </div>
                   </div>
                   <div className="px-4 py-3 text-xs text-slate-600 space-y-3">
                     {latestQ ? (
@@ -1205,7 +1306,14 @@ function AttributeRowGrid({ request, invites, vendors, currentRole, onSelectFina
                   const isApproved = inv.id === approvedInviteId
                   return (
                     <tr key={inv.id} className={["border-b border-slate-100 last:border-b-0", isApproved ? "border-l-4 border-l-emerald-600 bg-emerald-50/30" : isLowest ? "border-l-4 border-l-green-500 bg-green-50/40" : "border-l-4 border-l-transparent"].join(" ")}>
-                      <td className="px-4 py-3"><p className="font-semibold text-slate-800">{vendor?.vendorName ?? "—"}</p><p className="text-xs text-slate-400">{vendor?.vendorCode ?? ""}</p>{isLowest && !isApproved && <span className="text-xs font-semibold text-green-600">↓ Cheapest</span>}</td>
+                      <td className="px-4 py-3">
+                        <p className="font-semibold text-slate-800">{vendor?.vendorName ?? "—"}</p>
+                        <p className="text-xs text-slate-400">{vendor?.vendorCode ?? ""}</p>
+                        {quote.seededByBuyer && (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-teal-50 text-teal-800 border border-teal-200 mt-0.5 inline-block">Added at request</span>
+                        )}
+                        {isLowest && !isApproved && <span className="text-xs font-semibold text-green-600 block">↓ Cheapest</span>}
+                      </td>
                       <td className="px-4 py-3 text-right font-medium text-slate-700">₹{quote.price.toLocaleString("en-IN")}</td>
                       <td className="px-4 py-3 text-right text-slate-600">{quote.freight != null ? `₹${quote.freight.toLocaleString("en-IN")}` : "—"}</td>
                       <td className="px-4 py-3 text-right text-slate-600">{quote.packing != null ? `₹${quote.packing.toLocaleString("en-IN")}` : "—"}</td>
@@ -1214,7 +1322,7 @@ function AttributeRowGrid({ request, invites, vendors, currentRole, onSelectFina
                       <td className="px-4 py-3 text-center text-slate-600">{Math.round(quote.deliveryDays / 7)} wks</td>
                       <td className="px-4 py-3 text-center text-slate-600">{quote.warranty != null ? `${quote.warranty} yr${quote.warranty !== 1 ? "s" : ""}` : "—"}</td>
                       <td className="px-4 py-3 text-center"><span className={["text-xs font-semibold px-2 py-0.5 rounded-full", INVITE_STATUS_COLORS[inv.status] ?? "bg-slate-200 text-slate-600"].join(" ")}>{INVITE_STATUS_LABELS[inv.status] ?? inv.status}</span></td>
-                      {currentRole === "sourcing_head" && <td className="px-4 py-3 text-center">{isApproved ? <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-green-100 text-green-700">✓ Selected</span> : <button disabled={!!approvedInviteId} onClick={() => { approveInvite(inv.id); onSelectFinal?.(inv.id) }} className="px-3 py-1.5 rounded-lg bg-[#0D9488] hover:bg-[#115E59] text-white text-xs font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed">Select as Final</button>}</td>}
+                      {currentRole === "sourcing_head" && <td className="px-4 py-3 text-center">{isApproved ? <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-green-100 text-green-700">✓ Selected</span> : <button disabled={!!approvedInviteId || auctionLive} title={auctionLive ? "Auction in progress — finalize the winner after it ends" : "Select as final vendor"} onClick={() => { approveInvite(inv.id); onSelectFinal?.(inv.id) }} className="px-3 py-1.5 rounded-lg bg-[#0D9488] hover:bg-[#115E59] text-white text-xs font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed">Select as Final</button>}</td>}
                     </tr>
                   )
                 })}

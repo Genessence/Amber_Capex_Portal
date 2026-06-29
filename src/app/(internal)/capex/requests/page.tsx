@@ -103,12 +103,12 @@ function RequestsTable() {
     "All requests"
 
   return (
-    <div className="p-6 h-full flex flex-col">
+    <div className="p-5 h-full flex flex-col">
       {/* Header */}
       <div className="mb-4 flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900">CAPEX Requests</h1>
-          <p className="text-sm text-slate-500 mt-1">
+          <h1 className="text-xl font-bold tracking-tight text-slate-900">CAPEX Requests</h1>
+          <p className="text-xs text-slate-500 mt-0.5">
             {summaryLabel} — {displayRequests.length} request{displayRequests.length !== 1 ? "s" : ""}
           </p>
         </div>
@@ -122,7 +122,7 @@ function RequestsTable() {
             id="status-filter"
             value={statusFilter}
             onChange={e => setStatusFilter(e.target.value)}
-            className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[13px] text-slate-700 font-medium focus:outline-none focus:ring-2 focus:ring-[#0D9488]"
+            className="rounded-lg border border-slate-200 bg-white px-3 py-2 min-h-[36px] text-[13px] text-slate-700 font-medium focus:outline-none focus:ring-2 focus:ring-[#0D9488]"
           >
             {STATUS_FILTER_OPTIONS.map(opt => (
               <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -132,35 +132,34 @@ function RequestsTable() {
       </div>
 
       {displayRequests.length === 0 ? (
-        <div className="bg-white rounded-2xl border border-slate-200 p-16 text-center">
+        <div className="bg-card rounded-xl border border-border p-12 text-center">
           <p className="text-slate-400 font-medium">No requests found.</p>
           <p className="text-slate-300 text-sm mt-1">
             {currentRole === "buyer" ? "Submit a new request to get started." : "No requests match the current filter."}
           </p>
         </div>
       ) : (
-        <div className="flex-1 min-h-0 overflow-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex-1 min-h-0 overflow-auto rounded-xl border border-border bg-card shadow-sm">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-[#F0F4FB] text-[#1E293B]">
-                <th className="px-5 py-3.5 text-left text-[11px] font-bold uppercase tracking-wider">Req. No.</th>
-                <th className="px-4 py-3.5 text-left text-[11px] font-bold uppercase tracking-wider">Subject</th>
-                <th className="px-4 py-3.5 text-left text-[11px] font-bold uppercase tracking-wider">Status</th>
-                <th className="px-4 py-3.5 text-left text-[11px] font-bold uppercase tracking-wider hidden sm:table-cell">Plant</th>
-                <th className="px-4 py-3.5 text-left text-[11px] font-bold uppercase tracking-wider hidden md:table-cell">Budget</th>
-                <th className="px-4 py-3.5 text-left text-[11px] font-bold uppercase tracking-wider hidden md:table-cell">Finalized</th>
+                <th className="px-5 py-2 text-left text-[11px] font-bold uppercase tracking-wider">Req. No.</th>
+                <th className="px-4 py-2 text-left text-[11px] font-bold uppercase tracking-wider">Subject</th>
+                <th className="px-4 py-2 text-left text-[11px] font-bold uppercase tracking-wider">Status</th>
+                <th className="px-4 py-2 text-left text-[11px] font-bold uppercase tracking-wider hidden sm:table-cell">Plant</th>
+                <th className="px-4 py-2 text-left text-[11px] font-bold uppercase tracking-wider hidden md:table-cell">Finalized</th>
                 {showAssignedTo && (
-                  <th className="px-4 py-3.5 text-left text-[11px] font-bold uppercase tracking-wider hidden lg:table-cell">Assigned To</th>
+                  <th className="px-4 py-2 text-left text-[11px] font-bold uppercase tracking-wider hidden lg:table-cell">Assigned To</th>
                 )}
-                <th className="px-4 py-3.5 text-left text-[11px] font-bold uppercase tracking-wider hidden lg:table-cell">Date</th>
-                <th className="px-4 py-3.5 text-right text-[11px] font-bold uppercase tracking-wider">Action</th>
+                <th className="px-4 py-2 text-left text-[11px] font-bold uppercase tracking-wider hidden lg:table-cell">Date</th>
+                <th className="px-4 py-2 text-right text-[11px] font-bold uppercase tracking-wider">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200">
               {displayRequests.map((req, idx) => (
                 <tr key={req.id} className={`transition-colors group hover:bg-[#EBF0FB]/60 ${idx % 2 === 0 ? "bg-white" : "bg-slate-50"}`}>
                   {/* Request No. */}
-                  <td className="px-5 py-4 whitespace-nowrap">
+                  <td className="px-5 py-2 whitespace-nowrap">
                     {req.requestNo
                       ? <span className="text-sm font-bold text-[#153f90]">{req.requestNo}</span>
                       : <span className="text-sm font-mono text-slate-400">{req.id.slice(0, 8)}…</span>
@@ -168,7 +167,7 @@ function RequestsTable() {
                   </td>
 
                   {/* Subject */}
-                  <td className="px-4 py-4 max-w-[220px]">
+                  <td className="px-4 py-2 max-w-[220px]">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium text-slate-800 truncate">{req.subject}</span>
                       {req.lineItems && req.lineItems.length > 1 && (
@@ -180,24 +179,21 @@ function RequestsTable() {
                   </td>
 
                   {/* Status */}
-                  <td className="px-4 py-4 whitespace-nowrap">
+                  <td className="px-4 py-2 whitespace-nowrap">
                     <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full ${STATUS_COLORS[req.status] ?? "bg-slate-100 text-slate-600"}`}>
                       {STATUS_LABELS[req.status] ?? req.status.replace(/_/g, " ")}
                     </span>
                   </td>
 
                   {/* Plant */}
-                  <td className="px-4 py-4 hidden sm:table-cell">
+                  <td className="px-4 py-2 hidden sm:table-cell">
                     {plantLabel(req.plant)
                       ? <span className="text-[12px] bg-[#EBF0FB] text-[#153f90] px-2 py-0.5 rounded-full font-medium">{plantLabel(req.plant)}</span>
                       : <span className="text-slate-300">—</span>}
                   </td>
 
-                  {/* Budget */}
-                  <td className="px-4 py-4 font-medium text-slate-700 hidden md:table-cell">{formatBudget(req.budget)}</td>
-
                   {/* Finalized price + savings */}
-                  <td className="px-4 py-4 hidden md:table-cell">
+                  <td className="px-4 py-2 hidden md:table-cell">
                     {(() => {
                       const isApproved = req.status === "sourcing_approved" || req.status === "buyer_approved"
                       if (!isApproved) return <span className="text-slate-300">—</span>
@@ -224,19 +220,19 @@ function RequestsTable() {
 
                   {/* Assigned To */}
                   {showAssignedTo && (
-                    <td className="px-4 py-4 text-slate-600 text-[12px] hidden lg:table-cell">
+                    <td className="px-4 py-2 text-slate-600 text-[12px] hidden lg:table-cell">
                       {req.assignedTo ? (ROLE_NAMES[req.assignedTo] ?? req.assignedTo) : <span className="text-slate-300">—</span>}
                     </td>
                   )}
 
                   {/* Date */}
-                  <td className="px-4 py-4 text-slate-400 text-[12px] hidden lg:table-cell">{formatDate(req.createdAt)}</td>
+                  <td className="px-4 py-2 text-slate-400 text-[12px] hidden lg:table-cell">{formatDate(req.createdAt)}</td>
 
                   {/* View button */}
-                  <td className="px-4 py-4 text-right">
+                  <td className="px-4 py-2 text-right">
                     <Link
                       href={`/capex/${req.id}`}
-                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[#153f90] hover:bg-[#1a4da8] text-white text-[12px] font-semibold transition-colors"
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 min-h-[36px] rounded-lg bg-[#153f90] hover:bg-[#1a4da8] text-white text-[12px] font-semibold transition-colors"
                     >
                       View
                     </Link>

@@ -19,6 +19,9 @@ const ROLES = [
   { value: "plant_head_jhajjar_p2", label: "Plant Head · Jhajjar P2" },
   { value: "sourcing_member",       label: "Sourcing Member" },
   { value: "sourcing_head",         label: "Sourcing Head" },
+  { value: "maintenance",           label: "Maintenance" },
+  { value: "plant_accounts",        label: "Plant Accounts (FA codes)" },
+  { value: "accounts",              label: "Global Accounts (PO & payments)" },
   { value: "super_admin",           label: "Super Admin" },
 ]
 
@@ -68,8 +71,8 @@ export default function LoginPage() {
       <div className="absolute inset-0 bg-gradient-to-r from-[#0a1f4e]/95 via-[#153f90]/60 to-slate-950/40" />
       <div className="absolute inset-0 bg-gradient-to-t from-slate-950/50 via-transparent to-transparent" />
 
-      {/* Left — hero branding */}
-      <div className="relative z-10 flex flex-col justify-between flex-1 px-16 py-14 select-none">
+      {/* Left — hero branding (hidden below lg) */}
+      <div className="relative z-10 hidden lg:flex flex-col justify-between flex-1 px-8 lg:px-16 py-10 lg:py-14 select-none">
 
         <div className="flex items-center gap-2.5">
           <img src="/amber-logo.png" alt="Amber" className="h-6 w-auto object-contain brightness-0 invert opacity-80" />
@@ -102,8 +105,8 @@ export default function LoginPage() {
       </div>
 
       {/* Right — glass login card */}
-      <div className="relative z-10 flex items-center justify-center w-[440px] shrink-0 px-10 py-14">
-        <div className="w-full bg-white/10 backdrop-blur-2xl border border-white/15 rounded-3xl p-8 shadow-2xl">
+      <div className="relative z-10 flex flex-1 lg:flex-initial items-center justify-center w-full lg:w-[440px] lg:shrink-0 px-6 sm:px-10 py-10 sm:py-14">
+        <div className="w-full max-w-md bg-white/10 backdrop-blur-2xl border border-white/15 rounded-3xl p-6 sm:p-8 shadow-2xl">
 
           <div className="mb-8">
             <h2 className="text-[22px] font-bold text-white leading-tight">Sign in</h2>

@@ -11,9 +11,10 @@ import { Label } from "@/components/ui/label"
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
+import { Checkbox } from "@/components/ui/checkbox"
 import { useCapex } from "@/lib/capexContext"
 import { generateToken } from "@/lib/tokenUtils"
-import type { Vendor, VendorInvite } from "@/lib/types"
+import type { PaymentSplit, Vendor, VendorInvite } from "@/lib/types"
 
 const CATEGORIES = ["Machinery", "Infrastructure", "IT", "Tooling"]
 const PAYMENT_TERMS = ["Net-30", "Net-60", "Advance"] as const
@@ -46,6 +47,11 @@ export function VendorOnboardModal({ open, onClose, requestId, defaultTab = "exi
   const [bankName,     setBankName]     = useState("")
   const [accountNumber,setAccountNumber]= useState("")
   const [ifsc,         setIfsc]         = useState("")
+  const [oneTime,      setOneTime]      = useState(false)
+  const [paymentTermsText, setPaymentTermsText] = useState("")
+  const [advancePct,   setAdvancePct]   = useState("30")
+  const [dispatchPct,  setDispatchPct]  = useState("60")
+  const [installPct,   setInstallPct]   = useState("10")
 
   const alreadyInvitedIds = new Set(
     invites.filter(i => i.requestId === requestId).map(i => i.vendorId)
@@ -64,6 +70,7 @@ export function VendorOnboardModal({ open, onClose, requestId, defaultTab = "exi
       vendorId,
       token: generateToken(vendorId, requestId),
       status: "invited",
+      auctionApprovalStatus: "not_sent",
       quotes: [],
       negotiationThread: [],
       invitedAt: new Date().toISOString(),
@@ -90,6 +97,13 @@ export function VendorOnboardModal({ open, onClose, requestId, defaultTab = "exi
       accountNumber,
       ifsc,
       onboardedAt: new Date().toISOString(),
+      oneTime,
+      paymentTermsText: paymentTermsText.trim() || undefined,
+      paymentSplits: ([
+        { id: "adv", label: "Advance", percent: Number(advancePct) || 0, trigger: "On PO" },
+        { id: "dispatch", label: "On Dispatch", percent: Number(dispatchPct) || 0, trigger: "On dispatch" },
+        { id: "install", label: "On Installation", percent: Number(installPct) || 0, trigger: "On installation" },
+      ] as PaymentSplit[]).filter(s => s.percent > 0),
     }
     addVendor(vendor)
     if (requestId) {
@@ -99,6 +113,7 @@ export function VendorOnboardModal({ open, onClose, requestId, defaultTab = "exi
         vendorId: vendor.id,
         token: generateToken(vendor.id, requestId),
         status: "invited",
+        auctionApprovalStatus: "not_sent",
         quotes: [],
         negotiationThread: [],
         invitedAt: new Date().toISOString(),
@@ -196,6 +211,41 @@ export function VendorOnboardModal({ open, onClose, requestId, defaultTab = "exi
               <Field label="IFSC">
                 <Input value={ifsc} onChange={e => setIfsc(e.target.value)} placeholder="HDFC0001234" />
               </Field>
+
+              <div className="col-span-2 flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5">
+                <Checkbox id="oneTime" checked={oneTime} onCheckedChange={v => setOneTime(!!v)} className="mt-0.5" />
+                <label htmlFor="oneTime" className="text-xs text-amber-900 leading-snug cursor-pointer">
+                  <span className="font-semibold">One-time / not-yet-onboarded vendor</span> — payment terms are not fetched
+                  from the onboarding portal, so they will be sent with the approval documents for the vendor to accept.
+                </label>
+              </div>
+
+              {oneTime && (
+                <Field label="Payment Terms Note (sent to vendor)">
+                  <Input value={paymentTermsText} onChange={e => setPaymentTermsText(e.target.value)} placeholder="e.g. 30% advance, 60% on dispatch, 10% on installation" />
+                </Field>
+              )}
+
+              <div className="col-span-2">
+                <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Payment Terms Split (%)</Label>
+                <div className="grid grid-cols-3 gap-3 mt-1.5">
+                  <div>
+                    <p className="text-[11px] text-slate-400 mb-1">Advance</p>
+                    <Input type="number" value={advancePct} onChange={e => setAdvancePct(e.target.value)} />
+                  </div>
+                  <div>
+                    <p className="text-[11px] text-slate-400 mb-1">On Dispatch</p>
+                    <Input type="number" value={dispatchPct} onChange={e => setDispatchPct(e.target.value)} />
+                  </div>
+                  <div>
+                    <p className="text-[11px] text-slate-400 mb-1">On Installation</p>
+                    <Input type="number" value={installPct} onChange={e => setInstallPct(e.target.value)} />
+                  </div>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  Used to build payment milestones when this vendor is finalized. Total: {(Number(advancePct) || 0) + (Number(dispatchPct) || 0) + (Number(installPct) || 0)}%
+                </p>
+              </div>
             </div>
 
             <DialogFooter className="mt-6">

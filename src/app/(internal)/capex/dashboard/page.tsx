@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { FileText, IndianRupee, Activity, TrendingDown } from 'lucide-react';
 import { useCapex } from '@/lib/capexContext';
 import { STATUS_COLORS, STATUS_LABELS, PLANTS } from '@/lib/constants';
+import { CARD, CARD_TIGHT } from '@/lib/uiTokens';
 import type { CapexStatus } from '@/lib/types';
 
 /* ── Formatters ─────────────────────────────────────────── */
@@ -31,7 +32,7 @@ function DonutChart({ data }: { data: DonutItem[] }) {
   });
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-4">
       {/* Donut */}
       <div className="flex justify-center">
         <svg viewBox="0 0 200 200" className="w-44 h-44" aria-label="requests by status">
@@ -52,7 +53,7 @@ function DonutChart({ data }: { data: DonutItem[] }) {
       {/* Legend — 2-col grid with % */}
       <div className="grid grid-cols-2 gap-1.5">
         {segs.map(s => (
-          <div key={s.label} className="flex items-center gap-2 rounded-lg bg-slate-50 px-2.5 py-2">
+          <div key={s.label} className="flex items-center gap-1.5 rounded-lg bg-slate-50 px-2 py-1.5">
             <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ background: s.color }} />
             <span className="text-xs text-slate-600 truncate flex-1 min-w-0">{s.label}</span>
             <span className="text-xs font-bold text-slate-800 shrink-0">{s.value}</span>
@@ -105,7 +106,7 @@ interface SavingsEntry { id: string; subject: string; budget: number; finalCost:
 function SavingsBreakdown({ entries }: { entries: SavingsEntry[] }) {
   const maxBudget = Math.max(...entries.map(e => e.budget), 1);
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       {entries.sort((a, b) => b.saving - a.saving).map(e => {
         const costW    = Math.round((e.finalCost / e.budget) * 100);
         const savePct  = Math.round((e.saving / e.budget) * 100);
@@ -209,7 +210,7 @@ export default function DashboardPage() {
   }, [filtered, invites]);
 
   return (
-    <div className="p-6 h-full flex flex-col space-y-6">
+    <div className="p-5 h-full flex flex-col space-y-4">
 
       {/* Header + plant filter */}
       <div className="flex flex-col sm:flex-row sm:items-end gap-4">
@@ -217,13 +218,13 @@ export default function DashboardPage() {
           <h1 className="text-2xl font-bold tracking-tight text-slate-900">Dashboard</h1>
           <p className="text-sm text-slate-500 mt-0.5">Capital expenditure overview</p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2.5">
           {(['all', ...PLANTS.map(p => p.value)] as string[]).map(v => {
             const label  = v === 'all' ? 'All Plants' : PLANTS.find(p => p.value === v)?.label ?? v;
             const active = plantFilter === v;
             return (
               <button key={v} onClick={() => setPlantFilter(v)}
-                className={`px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors ${
+                className={`px-3 py-2 rounded-lg border text-xs font-semibold transition-colors ${
                   active
                     ? 'bg-[#153f90] text-white border-[#153f90]'
                     : 'bg-white text-slate-600 border-slate-200 hover:border-[#5B82D4] hover:text-[#153f90]'
@@ -259,18 +260,18 @@ export default function DashboardPage() {
           },
         ].map(({ label, value, sub, accent, icon: Icon }) => (
           <div key={label}
-            className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 flex flex-col gap-3 relative overflow-hidden">
+            className={`${CARD_TIGHT} flex flex-col gap-1.5 relative overflow-hidden`}>
             {/* left accent bar */}
-            <div className="absolute left-0 top-0 bottom-0 w-1 rounded-l-2xl" style={{ background: accent }} />
+            <div className="absolute left-0 top-0 bottom-0 w-1 rounded-l-xl" style={{ background: accent }} />
             <div className="flex items-center justify-between">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">{label}</p>
+              <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{label}</p>
               <div className="rounded-lg p-1.5" style={{ background: accent + '18' }}>
                 <Icon className="w-4 h-4" style={{ color: accent }} />
               </div>
             </div>
             <div>
-              <p className="text-3xl font-black tracking-tight text-slate-900 leading-none">{value}</p>
-              <p className="text-xs text-slate-400 mt-1.5">{sub}</p>
+              <p className="text-2xl font-black tracking-tight text-slate-900 leading-none">{value}</p>
+              <p className="text-xs text-slate-400 mt-1">{sub}</p>
             </div>
           </div>
         ))}
@@ -291,22 +292,22 @@ export default function DashboardPage() {
         const remainingCr = totalAllocatedCr - committedCr
         const utilisationPct = totalAllocatedCr > 0 ? Math.round((committedCr / totalAllocatedCr) * 100) : 0
         return (
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
+          <div className={CARD}>
             <div className="flex items-center justify-between mb-3">
               <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">CAPEX Master — FY {currentFy}</p>
               <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${utilisationPct > 90 ? "bg-red-50 text-red-700" : utilisationPct > 70 ? "bg-orange-50 text-orange-700" : "bg-emerald-50 text-emerald-700"}`}>
                 {utilisationPct}% utilised
               </span>
             </div>
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-3 gap-3">
               {[
                 { label: "Allocated Budget", value: `${totalAllocatedCr.toFixed(2)} Cr`, color: "text-slate-800" },
                 { label: "Committed",        value: `${committedCr.toFixed(2)} Cr`,      color: "text-[#0D9488]" },
                 { label: "Remaining",        value: `${remainingCr.toFixed(2)} Cr`,      color: remainingCr >= 0 ? "text-emerald-700" : "text-red-700" },
               ].map(({ label, value, color }) => (
-                <div key={label}>
-                  <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-0.5">{label}</p>
-                  <p className={`text-lg font-black tabular-nums ${color}`}>{value}</p>
+                <div key={label} className="flex items-baseline gap-1.5 min-w-0">
+                  <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider shrink-0">{label}:</p>
+                  <p className={`text-lg font-black tabular-nums truncate ${color}`}>{value}</p>
                 </div>
               ))}
             </div>
@@ -321,25 +322,25 @@ export default function DashboardPage() {
         )
       })()}
 
-      <div className="flex-1 min-h-0 overflow-y-auto space-y-6">
+      <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
 
       {/* Row 2 — Status donut + Plant bars */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-          <p className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-5">Requests by Status</p>
+        <div className={CARD}>
+          <p className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-4">Requests by Status</p>
           <DonutChart data={stats.donutData} />
         </div>
 
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-          <p className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-5">Requests by Plant</p>
+        <div className={CARD}>
+          <p className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-4">Requests by Plant</p>
           <HBarChart data={stats.byPlant} emptyText="No plant data yet." />
         </div>
       </div>
 
       {/* Row 3 — Money saved */}
       {stats.savingsEntries.length > 0 && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-          <div className="flex items-center justify-between mb-5">
+        <div className={CARD}>
+          <div className="flex items-center justify-between mb-4">
             <p className="text-xs font-bold uppercase tracking-widest text-slate-400">Money Saved</p>
             <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-50 border border-emerald-200 text-xs font-bold text-emerald-700">
               <TrendingDown className="w-3.5 h-3.5" />
@@ -351,13 +352,13 @@ export default function DashboardPage() {
       )}
 
       {/* Row 4 — Recent requests */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+      <div className={CARD}>
         <p className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-4">Recent Requests</p>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-100">
-                {['Subject','Plant','Category','Budget','Status'].map(h => (
+                {['Subject','Plant','Category','Status'].map(h => (
                   <th key={h} className="text-left text-xs font-semibold text-slate-400 pb-2.5 pr-4 last:pr-0">{h}</th>
                 ))}
               </tr>
@@ -365,12 +366,11 @@ export default function DashboardPage() {
             <tbody>
               {stats.recent.map((req, idx) => (
                 <tr key={req.id} className={`border-b border-slate-100 last:border-0 transition-colors hover:bg-[#EBF0FB]/60 ${idx % 2 === 0 ? "bg-white" : "bg-slate-50"}`}>
-                  <td className="py-3 pr-4 font-semibold text-slate-800 max-w-[180px] truncate">{req.subject}</td>
-                  <td className="py-3 pr-4 text-slate-500">{req.plant ? (PLANTS.find(p => p.value === req.plant)?.label ?? req.plant) : '—'}</td>
-                  <td className="py-3 pr-4 text-slate-500">{req.category}</td>
-                  <td className="py-3 pr-4 font-semibold text-slate-700 tabular-nums">{req.budget != null ? fmt(req.budget) : '—'}</td>
-                  <td className="py-3">
-                    <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${STATUS_COLORS[req.status] ?? 'bg-slate-100 text-slate-600'}`}>
+                  <td className="py-2 pr-4 font-semibold text-slate-800 max-w-[180px] truncate">{req.subject}</td>
+                  <td className="py-2 pr-4 text-slate-500">{req.plant ? (PLANTS.find(p => p.value === req.plant)?.label ?? req.plant) : '—'}</td>
+                  <td className="py-2 pr-4 text-slate-500">{req.category}</td>
+                  <td className="py-2">
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${STATUS_COLORS[req.status] ?? 'bg-slate-100 text-slate-600'}`}>
                       {STATUS_LABELS[req.status as CapexStatus] ?? req.status}
                     </span>
                   </td>

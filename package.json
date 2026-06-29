@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "generate:brownfield-seed": "python3 scripts/generate_brownfield_seed.py"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",

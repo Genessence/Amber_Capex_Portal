@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { X, Plus, ShieldCheck } from 'lucide-react';
 import { useCapex } from '@/lib/capexContext';
 import { PLANTS, ROLE_NAMES } from '@/lib/constants';
+import { CARD } from '@/lib/uiTokens';
 
 type Tab = 'plants' | 'categories' | 'users' | 'system';
 
@@ -66,18 +67,18 @@ export default function SettingsPage() {
   ];
 
   return (
-    <div className="p-6 max-w-3xl mx-auto space-y-6">
+    <div className="p-5 max-w-3xl mx-auto space-y-3">
       {/* Header */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-semibold text-slate-900">Configurations</h1>
+            <h1 className="text-xl font-semibold text-slate-900">Configurations</h1>
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700">
               <ShieldCheck className="w-3 h-3" />
               Super Admin Only
             </span>
           </div>
-          <p className="text-sm text-slate-500 mt-1">Manage plants, categories, and system users</p>
+          <p className="text-xs text-slate-500 mt-0.5">Manage plants, categories, and system users</p>
         </div>
       </div>
 
@@ -100,7 +101,7 @@ export default function SettingsPage() {
 
       {/* Plants Tab */}
       {activeTab === 'plants' && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-4">
+        <div className={`${CARD} space-y-3`}>
           <h2 className="text-sm font-semibold text-slate-700">Configured Plants</h2>
 
           {plants.length === 0 && (
@@ -109,7 +110,7 @@ export default function SettingsPage() {
 
           <ul className="divide-y divide-slate-100">
             {plants.map((value) => (
-              <li key={value} className="flex items-center justify-between py-2.5">
+              <li key={value} className="flex items-center justify-between py-2">
                 <span className="text-sm text-slate-800">{plantLabel(value)}</span>
                 <button
                   onClick={() => removePlant(value)}
@@ -122,7 +123,7 @@ export default function SettingsPage() {
             ))}
           </ul>
 
-          <div className="border-t border-slate-100 pt-4">
+          <div className="border-t border-slate-100 pt-3">
             <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">
               Add Plant
             </p>
@@ -158,7 +159,7 @@ export default function SettingsPage() {
 
       {/* Categories Tab */}
       {activeTab === 'categories' && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-4">
+        <div className={`${CARD} space-y-3`}>
           <h2 className="text-sm font-semibold text-slate-700">Configured Categories</h2>
 
           {categories.length === 0 && (
@@ -167,7 +168,7 @@ export default function SettingsPage() {
 
           <ul className="divide-y divide-slate-100">
             {categories.map((name) => (
-              <li key={name} className="flex items-center justify-between py-2.5">
+              <li key={name} className="flex items-center justify-between py-2">
                 <span className="text-sm text-slate-800">{name}</span>
                 <button
                   onClick={() => removeCategory(name)}
@@ -180,7 +181,7 @@ export default function SettingsPage() {
             ))}
           </ul>
 
-          <div className="border-t border-slate-100 pt-4">
+          <div className="border-t border-slate-100 pt-3">
             <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">
               Add Category
             </p>
@@ -208,8 +209,8 @@ export default function SettingsPage() {
 
       {/* System Tab */}
       {activeTab === 'system' && (
-        <div className="space-y-4">
-          <div className="bg-red-50 border border-red-200 rounded-2xl p-5 space-y-3">
+        <div className="space-y-3">
+          <div className="bg-red-50 border border-red-200 rounded-xl p-4 space-y-3">
             <div>
               <h2 className="text-sm font-semibold text-red-800">Danger Zone</h2>
               <p className="text-sm text-red-700 mt-1">
@@ -217,20 +218,22 @@ export default function SettingsPage() {
               </p>
             </div>
             {resetConfirm ? (
-              <div className="flex items-center gap-3 pt-1">
-                <span className="text-sm font-medium text-red-800">Are you sure? All data will be lost.</span>
-                <button
-                  onClick={handleReset}
-                  className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg transition-colors"
-                >
-                  Yes, Reset Everything
-                </button>
-                <button
-                  onClick={() => setResetConfirm(false)}
-                  className="px-4 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-sm font-semibold rounded-lg transition-colors"
-                >
-                  Cancel
-                </button>
+              <div className="pt-1 space-y-3">
+                <p className="text-sm font-medium text-red-800">Are you sure? All data will be lost.</p>
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    onClick={handleReset}
+                    className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg transition-colors"
+                  >
+                    Yes, Reset Everything
+                  </button>
+                  <button
+                    onClick={() => setResetConfirm(false)}
+                    className="px-4 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-sm font-semibold rounded-lg transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
               </div>
             ) : (
               <button
@@ -246,7 +249,7 @@ export default function SettingsPage() {
 
       {/* Users Tab */}
       {activeTab === 'users' && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-4">
+        <div className={`${CARD} space-y-3`}>
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-slate-700">System Users</h2>
             <span className="text-xs text-slate-400">Display only — managed via backend</span>

@@ -1,16 +1,87 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { useParams } from "next/navigation"
 import { toast } from "sonner"
-import { CheckIcon, ClockIcon, SearchIcon, BellIcon, CheckCircleIcon, XCircleIcon } from "lucide-react"
+import { CheckIcon, ClockIcon, SearchIcon, BellIcon, CheckCircleIcon, XCircleIcon, Gavel, Timer, Copy, Users, Plus, X, FileText, Printer, Bell, UserX, AlertCircle, ArrowLeftRight } from "lucide-react"
 import { VendorGrid } from "@/components/VendorGrid"
+import { RfqPanel } from "@/components/RfqPanel"
+import { AccountsPanel } from "@/components/AccountsPanel"
+import { TatBanner } from "@/components/TatBanner"
+import { ClampText } from "@/components/ClampText"
+import { isFulfillmentStatus, resolveFinalVendor, isAwardBased, awardedInvites, awardSummary } from "@/lib/paymentUtils"
+import { lowestRfqTotal } from "@/lib/rfqUtils"
+import { effectiveDocApprovalStatus } from "@/lib/docPackageUtils"
 import { useCapex } from "@/lib/capexContext"
-import type { CapexRequest, CapexStatus, Vendor, Quote, VendorInvite } from "@/lib/types"
-import { ROLE_NAMES, STATUS_COLORS, STATUS_LABELS, PRIORITY_COLORS, SOURCING_ENGINEERS, PLANTS } from "@/lib/constants"
+import type { AuctionConfig, CapexMasterItem, CapexRequest, CapexStatus, Vendor, Quote, VendorInvite } from "@/lib/types"
+import { ROLE_NAMES, STATUS_COLORS, STATUS_LABELS, SOURCING_ENGINEERS, PLANTS } from "@/lib/constants"
+import { CARD } from "@/lib/uiTokens"
+
+const FIELD_TYPE_LABELS: Record<string, string> = {
+  green_field: "Green Field",
+  brown_field: "Brown Field",
+  digitisation: "Digitisation",
+  information_technology: "Information Technology",
+}
+import {
+  buildAuctionEndsAt,
+  computeVendorRankings,
+  extendAuctionEndsAt,
+  formatAuctionCountdown,
+  getL1Price,
+  isAuctionActive,
+  isAuctionExpired,
+  rankLabel,
+} from "@/lib/auctionUtils"
+import {
+  AUCTION_APPROVAL_STATUS_COLORS,
+  AUCTION_APPROVAL_STATUS_LABELS,
+  buildAuctionDocumentPlaceholders,
+  canStartAuction,
+  createAuctionApprovalDocument,
+  DEFAULT_AUCTION_RULES,
+  formatDateDDMMYYYY,
+  getEffectiveAuctionApprovalStatus,
+  isVendorEligibleForAuction,
+} from "@/lib/auctionDocumentUtils"
+import { buildSupplierLink } from "@/lib/tokenUtils"
 
 function formatPrice(n: number) {
   return "₹" + n.toLocaleString("en-IN")
+}
+
+const CR_TO_INR = 10_000_000
+
+function getAllocatedINR(masterItemId: string | undefined, capexMaster: CapexMasterItem[]): number | null {
+  if (!masterItemId) return null
+  const item = capexMaster.find(m => m.id === masterItemId)
+  return item ? item.totalCost * CR_TO_INR : null
+}
+
+function BudgetStatusChip({ budget, allocatedINR }: { budget?: number; allocatedINR: number | null }) {
+  if (allocatedINR === null || budget === undefined) {
+    return <span className="text-slate-300">—</span>
+  }
+  const diff = budget - allocatedINR
+  if (diff > 0) {
+    return (
+      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold text-red-700 bg-red-100 border border-red-200 whitespace-nowrap">
+        {formatPrice(diff)} over
+      </span>
+    )
+  }
+  if (diff < 0) {
+    return (
+      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold text-emerald-700 bg-emerald-100 border border-emerald-200 whitespace-nowrap">
+        {formatPrice(Math.abs(diff))} under
+      </span>
+    )
+  }
+  return (
+    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold text-slate-600 bg-slate-100 border border-slate-200 whitespace-nowrap">
+      On budget
+    </span>
+  )
 }
 
 function formatDate(iso: string) {
@@ -20,6 +91,7 @@ function formatDate(iso: string) {
 /* ── Request info card (shown to every role) ─────────────────── */
 
 function RequestInfoCard({ request }: { request: CapexRequest }) {
+  const { capexMaster } = useCapex()
   const plant = PLANTS.find(p => p.value === request.plant)
 
   const hasText = !!(
@@ -28,38 +100,51 @@ function RequestInfoCard({ request }: { request: CapexRequest }) {
     request.reasonForRequirement ||
     request.benefitsRoi
   )
-  const hasTechSpecs = !!(
-    request.techSpecs?.specifications ||
-    request.techSpecs?.complianceStandards
-  )
   const hasVendorRec = !!request.vendorRecommendation
 
   const hasLineItems = request.lineItems && request.lineItems.length > 0
 
-  return (
-    <div className="bg-white border border-slate-200 rounded-xl p-5">
-      <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-4">Request Details</h2>
+  const legacyAllocatedINR = getAllocatedINR(request.masterItemId, capexMaster)
+  const legacyOverAllocated =
+    request.budget !== undefined &&
+    legacyAllocatedINR !== null &&
+    request.budget > legacyAllocatedINR
 
-      {/* Top meta — plant, priority, date */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-x-8 gap-y-4 mb-4">
+  const lineBudgetSummary = useMemo(() => {
+    if (!hasLineItems) return null
+    const items = request.lineItems!
+    const totalBudget = items.reduce((sum, item) => sum + (item.budget ?? 0), 0)
+    const totalAllocated = items.reduce((sum, item) => {
+      const allocated = getAllocatedINR(item.masterItemId, capexMaster)
+      return sum + (allocated ?? 0)
+    }, 0)
+    const hasAnyAllocation = items.some(item => getAllocatedINR(item.masterItemId, capexMaster) !== null)
+    return {
+      totalBudget: totalBudget || undefined,
+      totalAllocated: hasAnyAllocation ? totalAllocated : null,
+    }
+  }, [hasLineItems, request.lineItems, capexMaster])
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-4">
+      <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Request Details</h2>
+
+      {/* Top meta — dense inline label: value strip (no stacked cells, no orphaned fields) */}
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs mb-3">
         {[
+          { label: "Field Type", value: FIELD_TYPE_LABELS[request.fieldType ?? "brown_field"] ?? "—" },
           { label: "Plant",     value: plant ? `${plant.label}, ${plant.state}` : (request.plant ?? "—") },
-          { label: "Priority",  value: request.priority
-              ? request.priority.charAt(0).toUpperCase() + request.priority.slice(1)
-              : "—" },
           { label: "Submitted", value: formatDate(request.createdAt) },
           ...(!hasLineItems ? [
             { label: "Category", value: request.category },
             { label: "Quantity", value: request.quantity },
-            { label: "Budget",   value: request.budget ? formatPrice(request.budget) : "—" },
           ] : [
-            { label: "Total Budget", value: request.budget ? formatPrice(request.budget) : "—" },
             { label: "Items",        value: String(request.lineItems!.length) },
           ]),
         ].map(({ label, value }) => (
-          <div key={label}>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">{label}</p>
-            <p className="text-sm font-semibold text-slate-800">{value}</p>
+          <div key={label} className="flex items-center gap-1.5">
+            <span className="font-bold text-slate-400 uppercase tracking-wider">{label}</span>
+            <span className="text-[13px] font-semibold text-slate-800">{value}</span>
           </div>
         ))}
       </div>
@@ -74,94 +159,93 @@ function RequestInfoCard({ request }: { request: CapexRequest }) {
                 <th className="px-3 py-2 text-left font-bold uppercase tracking-wider">Description</th>
                 <th className="px-3 py-2 text-left font-bold uppercase tracking-wider hidden sm:table-cell">Category</th>
                 <th className="px-3 py-2 text-left font-bold uppercase tracking-wider hidden sm:table-cell">Qty</th>
-                <th className="px-3 py-2 text-right font-bold uppercase tracking-wider">Budget</th>
-                <th className="px-3 py-2 text-left font-bold uppercase tracking-wider hidden md:table-cell">Vendor</th>
-                <th className="px-3 py-2 text-left font-bold uppercase tracking-wider hidden md:table-cell">Doc</th>
+                <th className="px-3 py-2 text-right font-bold uppercase tracking-wider hidden md:table-cell">Allocated</th>
+                <th className="px-3 py-2 text-left font-bold uppercase tracking-wider hidden md:table-cell">Status</th>
+                <th className="px-3 py-2 text-left font-bold uppercase tracking-wider hidden lg:table-cell">Vendor</th>
+                <th className="px-3 py-2 text-left font-bold uppercase tracking-wider hidden lg:table-cell">Doc</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {request.lineItems!.map((item, idx) => (
-                <tr key={item.id} className={idx % 2 === 0 ? "bg-white" : "bg-slate-50"}>
-                  <td className="px-3 py-2.5 text-slate-400 font-bold">{idx + 1}</td>
-                  <td className="px-3 py-2.5">
-                    <span className="font-semibold text-slate-800">{item.description}</span>
-                    {item.masterHead && <span className="ml-1.5 text-slate-400">· {item.masterHead}</span>}
-                    {item.remarks && <p className="text-slate-500 mt-0.5 leading-snug">{item.remarks}</p>}
-                  </td>
-                  <td className="px-3 py-2.5 text-slate-600 hidden sm:table-cell">{item.category}</td>
-                  <td className="px-3 py-2.5 text-slate-600 hidden sm:table-cell">{item.quantity}</td>
-                  <td className="px-3 py-2.5 text-right font-medium text-slate-700">
-                    {item.budget ? formatPrice(item.budget) : <span className="text-slate-300">—</span>}
-                  </td>
-                  <td className="px-3 py-2.5 text-slate-600 hidden md:table-cell">
-                    {item.vendorRecommendation?.vendorName ?? <span className="text-slate-300">—</span>}
-                  </td>
-                  <td className="px-3 py-2.5 hidden md:table-cell">
-                    {item.attachmentName
-                      ? <span className="text-teal-700 font-medium truncate max-w-[100px] block" title={item.attachmentName}>{item.attachmentName}</span>
-                      : <span className="text-slate-300">—</span>}
-                  </td>
-                </tr>
-              ))}
+              {request.lineItems!.map((item, idx) => {
+                const allocatedINR = getAllocatedINR(item.masterItemId, capexMaster)
+                const overAllocated =
+                  item.budget !== undefined &&
+                  allocatedINR !== null &&
+                  item.budget > allocatedINR
+                return (
+                  <tr
+                    key={item.id}
+                    className={[
+                      idx % 2 === 0 ? "bg-white" : "bg-slate-50",
+                      overAllocated ? "border-l-4 border-l-red-500" : "",
+                    ].join(" ")}
+                  >
+                    <td className="px-3 py-2 text-slate-400 font-bold">{idx + 1}</td>
+                    <td className="px-3 py-2">
+                      <span className="font-semibold text-slate-800">{item.description}</span>
+                      {item.division && <span className="ml-1.5 text-emerald-600 text-xs font-semibold">{item.division}</span>}
+                      {item.masterHead && <span className="ml-1.5 text-slate-400">· {item.masterHead}</span>}
+                      {item.machineCapacity && (
+                        <span className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-sky-100 text-sky-800 border border-sky-200">
+                          Capacity: {item.machineCapacity}
+                        </span>
+                      )}
+                      {item.remarks && <p className="text-slate-500 mt-0.5 leading-snug">{item.remarks}</p>}
+                    </td>
+                    <td className="px-3 py-2 text-slate-600 hidden sm:table-cell">{item.category}</td>
+                    <td className="px-3 py-2 text-slate-600 hidden sm:table-cell">{item.quantity}</td>
+                    <td className="px-3 py-2 text-right font-medium text-slate-600 hidden md:table-cell">
+                      {allocatedINR !== null ? formatPrice(allocatedINR) : <span className="text-slate-300">—</span>}
+                    </td>
+                    <td className="px-3 py-2 hidden md:table-cell">
+                      <BudgetStatusChip budget={item.budget} allocatedINR={allocatedINR} />
+                    </td>
+                    <td className="px-3 py-2 text-slate-600 hidden lg:table-cell">
+                      {item.vendorRecommendation?.vendorName ?? <span className="text-slate-300">—</span>}
+                    </td>
+                    <td className="px-3 py-2 hidden lg:table-cell">
+                      {item.attachmentName
+                        ? <span className="text-teal-700 font-medium truncate max-w-[100px] block" title={item.attachmentName}>{item.attachmentName}</span>
+                        : <span className="text-slate-300">—</span>}
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
+          {lineBudgetSummary && lineBudgetSummary.totalAllocated !== null && (
+            <div className="border-t border-slate-200 bg-slate-50 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Budget Summary</p>
+              <div className="flex flex-wrap items-center gap-4 text-sm">
+                <span className="text-slate-600">
+                  Allocated:{" "}
+                  <span className="font-semibold text-slate-800">
+                    {formatPrice(lineBudgetSummary.totalAllocated)}
+                  </span>
+                </span>
+                <BudgetStatusChip
+                  budget={lineBudgetSummary.totalBudget}
+                  allocatedINR={lineBudgetSummary.totalAllocated}
+                />
+              </div>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Justification / remarks / reason / ROI */}
+      {/* Justification / remarks / reason / ROI — clamped-but-visible, 2-up */}
       {hasText && (
-        <div className="border-t border-slate-100 mt-4 pt-4 space-y-3">
-          {request.justification && (
-            <div>
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Justification</p>
-              <p className="text-sm text-slate-600 leading-relaxed">{request.justification}</p>
-            </div>
-          )}
-          {request.remarks && (
-            <div>
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Complete Description</p>
-              <p className="text-sm text-slate-600 leading-relaxed">{request.remarks}</p>
-            </div>
-          )}
-          {request.reasonForRequirement && (
-            <div>
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Reason for Requirement</p>
-              <p className="text-sm text-slate-600 leading-relaxed">{request.reasonForRequirement}</p>
-            </div>
-          )}
-          {request.benefitsRoi && (
-            <div>
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Benefits / ROI</p>
-              <p className="text-sm text-slate-600 leading-relaxed">{request.benefitsRoi}</p>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Tech specs */}
-      {hasTechSpecs && (
-        <div className="border-t border-slate-100 mt-4 pt-4">
-          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-3">Technical Specifications</p>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {request.techSpecs.specifications && (
-              <div className="md:col-span-2">
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Specifications & Requirements</p>
-                <p className="text-sm text-slate-700">{request.techSpecs.specifications}</p>
-              </div>
-            )}
-            {request.techSpecs.complianceStandards && (
-              <div>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Compliance</p>
-                <p className="text-sm text-slate-700">{request.techSpecs.complianceStandards}</p>
-              </div>
-            )}
-          </div>
+        <div className="border-t border-slate-100 mt-3 pt-3 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2">
+          {request.justification && <ClampText label="Justification" text={request.justification} />}
+          {request.remarks && <ClampText label="Complete Description" text={request.remarks} />}
+          {request.reasonForRequirement && <ClampText label="Reason for Requirement" text={request.reasonForRequirement} />}
+          {request.benefitsRoi && <ClampText label="Benefits / ROI" text={request.benefitsRoi} />}
         </div>
       )}
 
       {/* Preferred vendor */}
       {hasVendorRec && (
-        <div className="border-t border-slate-100 mt-4 pt-4">
+        <div className="border-t border-slate-100 mt-3 pt-3">
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Preferred Vendor</p>
           <p className="text-sm font-semibold text-slate-800">{request.vendorRecommendation!.vendorName}</p>
           {request.vendorRecommendation!.reason && (
@@ -172,7 +256,7 @@ function RequestInfoCard({ request }: { request: CapexRequest }) {
 
       {/* Attachment */}
       {request.attachmentName && (
-        <div className="border-t border-slate-100 mt-4 pt-4">
+        <div className="border-t border-slate-100 mt-3 pt-3">
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Attached Document</p>
           <div className="inline-flex items-center gap-2.5 px-3 py-2 rounded-lg border border-slate-200 bg-slate-50">
             <svg aria-hidden="true" className="w-4 h-4 text-slate-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -231,6 +315,16 @@ const BUYER_STEPS = [
   { key: "buyer_approved",        label: "Complete" },
 ]
 
+// Per-award (split reverse auction) fulfillment-status labels for the internal award tracker.
+const AWARD_STATUS_LABEL: Record<string, string> = {
+  awarded:              "Awarded — terms pending",
+  pi_requested:         "PI requested",
+  pi_submitted:         "PI submitted",
+  accounts_processing:  "With Accounts (FA codes)",
+  payment_in_progress:  "PO issued — payments",
+  completed:            "Completed",
+}
+
 const STATUS_TO_STEP: Record<CapexStatus, number> = {
   draft:                  0,
   submitted:              0,
@@ -239,6 +333,12 @@ const STATUS_TO_STEP: Record<CapexStatus, number> = {
   negotiation:            2,
   sourcing_approved:      3,
   buyer_approved:         4,
+  // Brown Field fulfillment chain (step tracker refined in later phases)
+  pi_requested:           4,
+  pi_submitted:           4,
+  accounts_processing:    4,
+  payment_in_progress:    4,
+  completed:              4,
   rejected:               -1,
 }
 
@@ -300,27 +400,27 @@ function BuyerView({ request, approvedVendor, approvedQuote, approvedInvite, onA
   const msg = STATUS_MESSAGES[request.status]
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       {/* Status stepper */}
       {request.status !== "rejected" && (
-        <div className="bg-white border border-slate-200 rounded-xl p-5">
+        <div className="bg-white border border-slate-200 rounded-xl px-4 py-2.5">
           <div className="relative flex items-start justify-between">
             {/* Connector line */}
-            <div className="absolute top-4 left-[calc(10%)] right-[calc(10%)] h-px bg-slate-200" />
+            <div className="absolute top-3 left-[calc(10%)] right-[calc(10%)] h-px bg-slate-200" />
             {BUYER_STEPS.map((step, idx) => {
               const done   = idx < activeStep
               const active = idx === activeStep
               const future = idx > activeStep
               return (
-                <div key={step.key} className="relative flex flex-col items-center gap-2 flex-1">
+                <div key={step.key} className="relative flex flex-col items-center gap-1 flex-1">
                   <div className={[
-                    "w-8 h-8 rounded-full flex items-center justify-center z-10 transition-all text-xs font-bold",
+                    "w-6 h-6 rounded-full flex items-center justify-center z-10 transition-all text-[11px] font-bold",
                     done   ? "bg-[#0D9488] text-white shadow-sm" : "",
                     active ? "bg-white border-2 border-[#0D9488] text-[#0D9488] shadow-sm" : "",
                     future ? "bg-white border-2 border-slate-200 text-slate-300" : "",
                   ].join(" ")}>
                     {done
-                      ? <CheckIcon className="w-4 h-4" />
+                      ? <CheckIcon className="w-3.5 h-3.5" />
                       : idx + 1
                     }
                   </div>
@@ -341,7 +441,7 @@ function BuyerView({ request, approvedVendor, approvedQuote, approvedInvite, onA
 
       {/* Status messaging */}
       {msg && (
-        <div className={`rounded-xl border-l-4 px-5 py-4 flex items-start gap-3 ${msg.color}`}>
+        <div className={`rounded-xl border-l-4 px-4 py-3 flex items-start gap-3 ${msg.color}`}>
           <msg.icon className={`w-5 h-5 mt-0.5 shrink-0 ${msg.textColor} opacity-70`} />
           <div>
             <p className={`text-sm font-semibold ${msg.textColor}`}>{msg.title}</p>
@@ -355,7 +455,7 @@ function BuyerView({ request, approvedVendor, approvedQuote, approvedInvite, onA
 
       {/* Buyer approval card */}
       {request.status === "sourcing_approved" && (
-        <div className="bg-white border border-[#5EEAD4] rounded-xl p-5 shadow-sm space-y-5">
+        <div className="bg-white border border-[#5EEAD4] rounded-xl p-4 shadow-sm space-y-4">
           <div className="flex items-center gap-2">
             <div className="w-2 h-2 rounded-full bg-[#0D9488] animate-pulse" />
             <h2 className="text-sm font-bold text-slate-900">Sourcing Recommendation — Action Required</h2>
@@ -363,7 +463,7 @@ function BuyerView({ request, approvedVendor, approvedQuote, approvedInvite, onA
           {approvedInvite && approvedVendor && approvedQuote ? (
             <>
               {/* Vendor identity */}
-              <div className="rounded-lg bg-[#CCFBF1] border border-[#5EEAD4] px-4 py-3 flex flex-wrap gap-x-8 gap-y-2">
+              <div className="rounded-lg bg-[#CCFBF1] border border-[#5EEAD4] px-4 py-3 flex flex-wrap gap-x-6 gap-y-2">
                 <div>
                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Vendor</p>
                   <p className="text-sm font-bold text-slate-800">{approvedVendor.vendorName}</p>
@@ -393,13 +493,13 @@ function BuyerView({ request, approvedVendor, approvedQuote, approvedInvite, onA
                         { label: "Service / Install", value: approvedQuote.service },
                       ].map(({ label, value }) => value !== undefined ? (
                         <tr key={label} className="border-b border-slate-100 last:border-0">
-                          <td className="px-4 py-2.5 text-slate-500">{label}</td>
-                          <td className="px-4 py-2.5 text-right font-medium text-slate-800">{formatPrice(value)}</td>
+                          <td className="px-4 py-2 text-slate-500">{label}</td>
+                          <td className="px-4 py-2 text-right font-medium text-slate-800">{formatPrice(value)}</td>
                         </tr>
                       ) : null)}
                       <tr className="bg-[#CCFBF1]">
-                        <td className="px-4 py-2.5 font-bold text-slate-700">Total</td>
-                        <td className="px-4 py-2.5 text-right font-bold text-[#0D9488]">
+                        <td className="px-4 py-2 font-bold text-slate-700">Total</td>
+                        <td className="px-4 py-2 text-right font-bold text-[#0D9488]">
                           {formatPrice(approvedQuote.price + (approvedQuote.freight ?? 0) + (approvedQuote.packing ?? 0) + (approvedQuote.service ?? 0))}
                         </td>
                       </tr>
@@ -462,7 +562,7 @@ function BuyerView({ request, approvedVendor, approvedQuote, approvedInvite, onA
 function StatusTimeline({ history }: { history: CapexRequest["statusHistory"] }) {
   if (!history || history.length === 0) return null
   return (
-    <div className="bg-white rounded-xl border border-slate-200 p-5">
+    <div className={CARD}>
       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-4">Status History</p>
       <ol className="relative space-y-4 pl-5 before:absolute before:left-1.5 before:top-1 before:bottom-1 before:w-px before:bg-slate-200">
         {[...history].reverse().map((entry, idx) => (
@@ -513,7 +613,7 @@ function SourcingDecisionBanner({ request, vendors }: { request: CapexRequest; v
 
   return (
     <div className="rounded-xl border border-green-300 overflow-hidden shadow-sm">
-      <div className="flex items-center justify-between px-5 py-3 bg-[#166534]">
+      <div className="flex items-center justify-between px-4 py-3 bg-[#166534]">
         <div className="flex items-center gap-2">
           <CheckCircleIcon className="w-4 h-4 text-green-300" />
           <p className="text-sm font-bold text-white">Sourcing Decision Locked</p>
@@ -524,7 +624,7 @@ function SourcingDecisionBanner({ request, vendors }: { request: CapexRequest; v
           </p>
         )}
       </div>
-      <div className="bg-green-50 px-5 py-4 grid grid-cols-2 sm:grid-cols-4 gap-5">
+      <div className="bg-green-50 px-4 py-4 grid grid-cols-2 sm:grid-cols-4 gap-4">
         {finalTotal > 0 && (
           <div>
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Final Amount</p>
@@ -577,11 +677,1066 @@ function SourcingDecisionBanner({ request, vendors }: { request: CapexRequest; v
   )
 }
 
+/* ── Reverse auction panel ───────────────────────────────────── */
+
+const SOURCING_ROLES = ["sourcing_member", "sourcing_member_2", "sourcing_member_3", "sourcing_member_4", "sourcing_head", "super_admin"]
+
+// Delivery location form component
+function DeliveryLocationRow({
+  location,
+  onChange,
+  onRemove,
+  showRemove
+}: {
+  location: { name: string; state: string; subLocationCount?: number }
+  onChange: (updates: Partial<{ name: string; state: string; subLocationCount: number }>) => void
+  onRemove: () => void
+  showRemove: boolean
+}) {
+  return (
+    <div className="flex items-start gap-2 bg-slate-50 p-3 rounded-lg">
+      <div className="flex-1 grid grid-cols-3 gap-2">
+        <input
+          type="text"
+          value={location.name}
+          onChange={e => onChange({ name: e.target.value })}
+          placeholder="Location name (e.g., Jhajjar)"
+          className="text-sm border border-slate-200 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-400"
+        />
+        <input
+          type="text"
+          value={location.state}
+          onChange={e => onChange({ state: e.target.value })}
+          placeholder="State (e.g., Haryana)"
+          className="text-sm border border-slate-200 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-400"
+        />
+        <input
+          type="number"
+          value={location.subLocationCount || ''}
+          onChange={e => onChange({ subLocationCount: e.target.value ? parseInt(e.target.value) : undefined })}
+          placeholder="Sub-locations (optional)"
+          className="text-sm border border-slate-200 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-400"
+        />
+      </div>
+      {showRemove && (
+        <button
+          type="button"
+          onClick={onRemove}
+          className="p-2 text-red-500 hover:bg-red-50 rounded-md"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      )}
+    </div>
+  )
+}
+
+// Auction Document Print View
+function AuctionDocumentPrintView({
+  request,
+  document,
+  vendors,
+  reqInvites
+}: {
+  request: CapexRequest
+  document: import("@/lib/types").AuctionApprovalDocument
+  vendors: Vendor[]
+  reqInvites: VendorInvite[]
+}) {
+  const placeholders = buildAuctionDocumentPlaceholders(request, document)
+  const vendorList = reqInvites
+    .filter(inv => inv.auctionApprovalStatus !== 'not_sent')
+    .map(inv => vendors.find(v => v.id === inv.vendorId))
+    .filter(Boolean)
+
+  return (
+    <div className="bg-white p-8 max-w-4xl mx-auto print:p-0 print:m-0">
+      <div className="text-center mb-6">
+        <h1 className="text-xl font-bold uppercase tracking-wide">Business Rules for Reverse Auction</h1>
+        <p className="text-sm text-slate-500">(Annexure – I)</p>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4 mb-6 text-sm">
+        <div>
+          <p className="text-slate-500">Auction No:</p>
+          <p className="font-semibold">{placeholders.auctionNumber}</p>
+        </div>
+        <div className="text-right">
+          <p className="text-slate-500">Closing Date/Time:</p>
+          <p className="font-semibold">{placeholders.auctionDate} {placeholders.closingTime}</p>
+        </div>
+      </div>
+
+      <div className="border-t border-slate-200 pt-4 mb-6 text-sm">
+        <p className="mb-4">
+          Amber Enterprises India Limited ('Amber') will be finalizing the rates for the procurement of{' '}
+          <strong>{placeholders.itemName}</strong> through Reverse Auction mode.
+        </p>
+
+        <p className="font-semibold mb-2">Name of Work: {placeholders.itemName}</p>
+        <p className="mb-4">
+          Bidders are requested to go through the guidelines given herein below and submit their acceptance
+          before the <strong>{placeholders.vendorRevertExpectedByDate} {placeholders.vendorRevertExpectedByTime}</strong>.
+        </p>
+      </div>
+
+      <div className="space-y-4 text-sm">
+        <h3 className="font-bold">1. Procedure of Reverse Auctioning:</h3>
+        <div className="pl-4 space-y-2">
+          <p>i. Eligibility for Bidding: Price bids shall be opened for all techno-commercially qualified bidders.</p>
+          <p>ii. Bid decrement: The bid decrement will be determined by Amber.</p>
+          <p>iii. Ranking order for Bids: Lowest to Highest.</p>
+          <p>iv. Max decrements at one go: {placeholders.maxDecrements}</p>
+        </div>
+
+        <h3 className="font-bold">2. Schedule for reverse auction:</h3>
+        <div className="pl-4 space-y-1">
+          <p>Date: {placeholders.auctionDate}</p>
+          <p>Opening Time: {placeholders.openingTime}</p>
+          <p>Closing Time: {placeholders.closingTime}</p>
+        </div>
+
+        <h3 className="font-bold">3. Auction extension:</h3>
+        <div className="pl-4">
+          <p>During the Reverse Auction if a bidder is not able to bid and requests for extension of time,
+          time extension of additional {placeholders.extensionDurationMins} minutes will be provided. Only {placeholders.maxExtensionsPerBidder} such requests per bidder can be entertained.</p>
+        </div>
+
+        <h3 className="font-bold">4. Bid validity:</h3>
+        <div className="pl-4">
+          <p>The Bid shall be valid for <strong>{placeholders.bidValidityDays} Days</strong> from the date of reverse auction.</p>
+        </div>
+
+        <h3 className="font-bold">5. Bidding currency:</h3>
+        <div className="pl-4">
+          <p>Bidding will be conducted in <strong>{placeholders.currency}</strong>.</p>
+        </div>
+
+        <h3 className="font-bold">6. Delivery Locations:</h3>
+        <div className="pl-4">
+          <pre className="whitespace-pre-wrap font-sans">{placeholders.deliveryLocations}</pre>
+        </div>
+
+        {document.performanceBankGuaranteeText && (
+          <>
+            <h3 className="font-bold">7. Performance Bank Guarantee:</h3>
+            <div className="pl-4"><p>{document.performanceBankGuaranteeText}</p></div>
+          </>
+        )}
+        {document.delayLiabilityClauseText && (
+          <>
+            <h3 className="font-bold">8. Delay Liability Clause:</h3>
+            <div className="pl-4"><p>{document.delayLiabilityClauseText}</p></div>
+          </>
+        )}
+      </div>
+
+      <div className="mt-8 pt-6 border-t border-slate-200">
+        <div className="grid grid-cols-2 gap-8">
+          <div>
+            <p className="text-sm font-semibold mb-2">For Amber Enterprises India Limited</p>
+            <p className="text-sm">{placeholders.buyerName}</p>
+            <p className="text-sm">{placeholders.buyerDesignation}</p>
+            <p className="text-sm">Email: {placeholders.buyerEmail}</p>
+            <p className="text-sm">Mob: {placeholders.buyerMobile}</p>
+          </div>
+          <div className="text-right">
+            <p className="text-sm font-semibold mb-2">Authorized Signatory</p>
+            <p className="text-sm">{placeholders.signatoryName}</p>
+            <p className="text-sm">{placeholders.signatoryDesignation}</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-8 pt-4 border-t border-slate-200">
+        <p className="text-xs text-slate-400 text-center">
+          Amber Enterprises India Limited | www.ambergroupindia.com
+        </p>
+      </div>
+    </div>
+  )
+}
+
+function ReverseAuctionPanel({
+  request,
+  reqInvites,
+  vendors,
+  currentRole,
+  selectedVendorIds,
+  onSelectionChange,
+}: {
+  request: CapexRequest
+  reqInvites: VendorInvite[]
+  vendors: Vendor[]
+  currentRole: string
+  selectedVendorIds: string[]
+  onSelectionChange: (ids: string[]) => void
+}) {
+  const {
+    setAuctionConfig,
+    inviteVendors,
+    saveAuctionApprovalDocument,
+    sendAuctionApprovalToVendors,
+    sendAuctionApprovalReminder,
+    excludeVendorFromAuction,
+  } = useCapex()
+
+  // Auction config state — threshold pre-fills from the lowest RFQ quote collected (if any),
+  // so an auction escalated from RFQ starts at the best price already on the table.
+  const rfqFloor = lowestRfqTotal(reqInvites, request.lineItems)
+  const [durationDays, setDurationDays] = useState(request.auctionConfig?.durationDays ?? 7)
+  const [threshold, setThreshold] = useState(
+    String(request.auctionConfig?.threshold ?? rfqFloor ?? request.budget ?? "")
+  )
+
+  // Document setup state
+  const [showDocumentForm, setShowDocumentForm] = useState(false)
+  const [showDocumentPreview, setShowDocumentPreview] = useState(false)
+  const [showVendorSelect, setShowVendorSelect] = useState(false)
+  const [newVendorId, setNewVendorId] = useState("")
+  const [tick, setTick] = useState(0)
+
+  // Form state for document generation
+  const [auctionDate, setAuctionDate] = useState(() => {
+    const d = new Date()
+    d.setDate(d.getDate() + 3)
+    return d.toISOString().split('T')[0]
+  })
+  const [auctionOpeningTime, setAuctionOpeningTime] = useState('11:00')
+  const [auctionClosingTime, setAuctionClosingTime] = useState('12:00')
+  const [bidderAcceptanceDeadlineDate, setBidderAcceptanceDeadlineDate] = useState(() => {
+    const d = new Date()
+    d.setDate(d.getDate() + 2)
+    return d.toISOString().split('T')[0]
+  })
+  const [bidderAcceptanceDeadlineTime, setBidderAcceptanceDeadlineTime] = useState('17:00')
+  const [vendorRevertDeadlineAt, setVendorRevertDeadlineAt] = useState(() => {
+    const d = new Date()
+    d.setDate(d.getDate() + 2)
+    return d.toISOString().slice(0, 16)
+  })
+
+  // Green field delivery locations
+  const [deliveryLocations, setDeliveryLocations] = useState<{ name: string; state: string; subLocationCount?: number }[]>([
+    { name: '', state: '', subLocationCount: undefined }
+  ])
+
+  // Auction rules with defaults
+  const [bidValidityDays, setBidValidityDays] = useState(DEFAULT_AUCTION_RULES.bidValidityDays)
+  const [maxDecrements, setMaxDecrements] = useState(DEFAULT_AUCTION_RULES.maxDecrements)
+  const [extensionDurationMins, setExtensionDurationMins] = useState(DEFAULT_AUCTION_RULES.extensionDurationMinutes)
+  const [maxExtensionsPerBidder, setMaxExtensionsPerBidder] = useState(DEFAULT_AUCTION_RULES.maxExtensionsPerBidder)
+  const [currency, setCurrency] = useState(DEFAULT_AUCTION_RULES.currency)
+
+  const canManage = SOURCING_ROLES.includes(currentRole)
+  const showPanel = ["sourcing", "negotiation"].includes(request.status)
+
+  const document = request.auctionApprovalDocument
+  const hasDocument = !!document
+
+  useEffect(() => {
+    if (!request.auctionConfig?.endsAt) return
+    const id = window.setInterval(() => setTick(t => t + 1), 60_000)
+    return () => window.clearInterval(id)
+  }, [request.auctionConfig?.endsAt])
+
+  const rankings = useMemo(() => computeVendorRankings(reqInvites), [reqInvites, tick])
+  const l1Price = getL1Price(rankings)
+  const config = request.auctionConfig
+  const active = isAuctionActive(config)
+  const expired = isAuctionExpired(config)
+
+  const invitedVendorIds = useMemo(() => new Set(reqInvites.map(inv => inv.vendorId)), [reqInvites])
+  const uninvitedVendors = useMemo(
+    () => vendors.filter(v => !invitedVendorIds.has(v.id)),
+    [vendors, invitedVendorIds]
+  )
+
+  // Auction approval status check
+  const approvalStatus = useMemo(() => canStartAuction(reqInvites, document?.vendorRevertDeadlineAt), [reqInvites, document?.vendorRevertDeadlineAt])
+
+  if (!showPanel || !canManage) return null
+
+  function toggleVendor(vendorId: string) {
+    const isSelected = selectedVendorIds.includes(vendorId)
+    if (isSelected) {
+      if (invitedVendorIds.has(vendorId)) return
+      onSelectionChange(selectedVendorIds.filter(id => id !== vendorId))
+    } else {
+      onSelectionChange([...selectedVendorIds, vendorId])
+    }
+  }
+
+  function generateAndSendDocument() {
+    const currentUser = {
+      name: ROLE_NAMES[currentRole] || currentRole,
+      designation: SOURCING_ROLES.find(r => r === currentRole)?.replace(/_/g, ' ') || 'Sourcing Member',
+      email: 'sourcing@ambergroupindia.com',
+      mobile: '+91 99999 99999',
+    }
+
+    const doc = createAuctionApprovalDocument(request, currentUser, {
+      auctionDate,
+      auctionOpeningTime: `${auctionOpeningTime} Hrs`,
+      auctionClosingTime: `${auctionClosingTime} Hrs`,
+      bidderAcceptanceDeadlineDate,
+      bidderAcceptanceDeadlineTime: `${bidderAcceptanceDeadlineTime} Hrs`,
+      vendorRevertDeadlineAt,
+      deliveryLocations: request.fieldType === 'green_field' ? deliveryLocations.filter(l => l.name && l.state) : undefined,
+      rules: {
+        bidValidityDays,
+        maxDecrements,
+        extensionDurationMinutes: extensionDurationMins,
+        maxExtensionsPerBidder,
+        currency,
+      },
+      supplyFrame: 'As per Amber Terms and Conditions',
+      paymentTerms: '60 Days from the date of Invoice (Open Account)',
+    })
+
+    saveAuctionApprovalDocument(request.id, doc)
+    sendAuctionApprovalToVendors(request.id, selectedVendorIds)
+
+    toast.success(`Business Rules document generated and sent to ${selectedVendorIds.length} vendor${selectedVendorIds.length !== 1 ? 's' : ''}`)
+    setShowDocumentForm(false)
+  }
+
+  function startAuction() {
+    // Only include approved vendors
+    const approvedVendors = reqInvites.filter(inv =>
+      isVendorEligibleForAuction(inv, document?.vendorRevertDeadlineAt)
+    )
+    const approvedVendorIds = approvedVendors.map(inv => inv.vendorId)
+
+    const newVendorIds = approvedVendorIds.filter(id => !invitedVendorIds.has(id))
+    if (newVendorIds.length > 0) {
+      inviteVendors(request.id, newVendorIds)
+    }
+
+    const startedAt = new Date().toISOString()
+    const next: AuctionConfig = {
+      startedAt,
+      durationDays,
+      endsAt: buildAuctionEndsAt(startedAt, durationDays),
+      threshold: threshold ? Number(threshold) : request.budget,
+    }
+    setAuctionConfig(request.id, next)
+    toast.success(`Reverse auction started · ${approvedVendors.length} approved vendor${approvedVendors.length !== 1 ? "s" : ""} invited`)
+  }
+
+  function extendAuction(days: number) {
+    if (!config) return
+    const next: AuctionConfig = {
+      ...config,
+      endsAt: extendAuctionEndsAt(config.endsAt, days),
+      durationDays: config.durationDays + days,
+    }
+    setAuctionConfig(request.id, next)
+    toast.success(`Auction extended by ${days} day${days > 1 ? "s" : ""}`)
+  }
+
+  // End the auction early (in addition to the natural countdown expiry) so sourcing can
+  // finalize the winner without waiting for `endsAt`. Sets `endsAt` to now → isAuctionExpired
+  // becomes true → the "Select as Final" action in the vendor grid unlocks.
+  function closeAuction() {
+    if (!config) return
+    if (!window.confirm("Close the auction now? Vendors will no longer be able to revise their bids.")) return
+    setAuctionConfig(request.id, { ...config, endsAt: new Date().toISOString() })
+    toast.success("Auction closed — select the winning vendor")
+  }
+
+  function addVendorToAuction() {
+    if (!newVendorId) return
+    inviteVendors(request.id, [newVendorId])
+    if (!selectedVendorIds.includes(newVendorId)) {
+      onSelectionChange([...selectedVendorIds, newVendorId])
+    }
+    setNewVendorId("")
+    toast.success("Vendor added to auction")
+  }
+
+  function copyLink(inv: VendorInvite) {
+    navigator.clipboard.writeText(buildSupplierLink(inv.token))
+      .then(() => toast.success("Supplier link copied"))
+      .catch(() => toast.error("Could not copy to clipboard"))
+  }
+
+  function handleSendReminder(inviteId: string, vendorName: string) {
+    sendAuctionApprovalReminder(inviteId)
+    toast.success(`Reminder sent to ${vendorName}`)
+  }
+
+  function handleExcludeVendor(inviteId: string, vendorName: string) {
+    if (confirm(`Exclude ${vendorName} from auction?`)) {
+      excludeVendorFromAuction(inviteId, 'Manually excluded by sourcing team')
+      toast.success(`${vendorName} excluded from auction`)
+    }
+  }
+
+  function addDeliveryLocation() {
+    setDeliveryLocations(prev => [...prev, { name: '', state: '', subLocationCount: undefined }])
+  }
+
+  function updateDeliveryLocation(index: number, updates: Partial<{ name: string; state: string; subLocationCount: number }>) {
+    setDeliveryLocations(prev => prev.map((loc, i) => i === index ? { ...loc, ...updates } : loc))
+  }
+
+  function removeDeliveryLocation(index: number) {
+    setDeliveryLocations(prev => prev.filter((_, i) => i !== index))
+  }
+
+  // Document preview section
+  if (showDocumentPreview && document) {
+    return (
+      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+        <div className="flex items-center justify-between px-4 py-3.5 bg-violet-50 border-b border-violet-100">
+          <div className="flex items-center gap-2">
+            <FileText className="w-4 h-4 text-violet-600" />
+            <h2 className="text-sm font-bold text-slate-900">Business Rules for Reverse Auction - Preview</h2>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => window.print()}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-white border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50"
+            >
+              <Printer className="w-3.5 h-3.5" />
+              Print
+            </button>
+            <button
+              onClick={() => setShowDocumentPreview(false)}
+              className="p-1.5 text-slate-400 hover:text-slate-600"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+        <div className="p-4 max-h-[600px] overflow-y-auto">
+          <AuctionDocumentPrintView request={request} document={document} vendors={vendors} reqInvites={reqInvites} />
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Auction Document Setup Form */}
+      {!hasDocument && !config && (
+        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+          <div className="flex items-center justify-between px-4 py-3.5 bg-violet-50 border-b border-violet-100">
+            <div className="flex items-center gap-2">
+              <Gavel className="w-4 h-4 text-violet-600" />
+              <h2 className="text-sm font-bold text-slate-900">Reverse Auction Setup</h2>
+            </div>
+          </div>
+
+          <div className="p-4 space-y-4">
+            {/* Step 1: Vendor Selection */}
+            <div>
+              <button
+                type="button"
+                onClick={() => setShowVendorSelect(v => !v)}
+                className="flex items-center gap-2 text-sm font-semibold text-violet-700 hover:text-violet-800"
+              >
+                <Users className="w-4 h-4" />
+                {showVendorSelect ? "Hide" : "Select"} Vendors ({selectedVendorIds.length} selected)
+              </button>
+              {showVendorSelect && (
+                <div className="mt-3 border border-slate-200 rounded-lg overflow-hidden">
+                  <div className="bg-slate-50 px-4 py-2 border-b border-slate-100">
+                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Choose vendors to invite</p>
+                  </div>
+                  <div className="max-h-60 overflow-y-auto p-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {vendors.map(vendor => {
+                        const isInvited = invitedVendorIds.has(vendor.id)
+                        const isSelected = selectedVendorIds.includes(vendor.id)
+                        return (
+                          <label
+                            key={vendor.id}
+                            className={[
+                              "flex items-center gap-3 px-3 py-2 rounded-lg border cursor-pointer transition-colors",
+                              isSelected
+                                ? "bg-violet-50 border-violet-200"
+                                : "bg-white border-slate-200 hover:border-violet-200",
+                              isInvited && "opacity-75",
+                            ].join(" ")}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              disabled={isInvited}
+                              onChange={() => toggleVendor(vendor.id)}
+                              className="w-4 h-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
+                            />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-semibold text-slate-800 truncate">{vendor.vendorName}</p>
+                              <p className="text-xs text-slate-500">{vendor.vendorCode}</p>
+                            </div>
+                            {isInvited && (
+                              <span className="text-[10px] font-medium text-violet-600 bg-violet-100 px-2 py-0.5 rounded-full">Already invited</span>
+                            )}
+                          </label>
+                        )
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Step 2: Document Configuration */}
+            {!showDocumentForm ? (
+              <button
+                onClick={() => setShowDocumentForm(true)}
+                disabled={selectedVendorIds.length === 0}
+                className="w-full px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-sm font-semibold transition-colors"
+              >
+                Configure Auction Document
+              </button>
+            ) : (
+              <div className="space-y-4 border-t border-slate-100 pt-4">
+                <h3 className="text-sm font-semibold text-slate-800">Auction Dates & Times</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Auction Date</label>
+                    <input
+                      type="date"
+                      value={auctionDate}
+                      onChange={e => setAuctionDate(e.target.value)}
+                      className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-400"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Open Time</label>
+                      <input
+                        type="time"
+                        value={auctionOpeningTime}
+                        onChange={e => setAuctionOpeningTime(e.target.value)}
+                        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Close Time</label>
+                      <input
+                        type="time"
+                        value={auctionClosingTime}
+                        onChange={e => setAuctionClosingTime(e.target.value)}
+                        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-400"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Bidder Acceptance Deadline Date</label>
+                    <input
+                      type="date"
+                      value={bidderAcceptanceDeadlineDate}
+                      onChange={e => setBidderAcceptanceDeadlineDate(e.target.value)}
+                      className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-400"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Bidder Acceptance Deadline Time</label>
+                    <input
+                      type="time"
+                      value={bidderAcceptanceDeadlineTime}
+                      onChange={e => setBidderAcceptanceDeadlineTime(e.target.value)}
+                      className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-400"
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Vendor Revert Expected By</label>
+                    <input
+                      type="datetime-local"
+                      value={vendorRevertDeadlineAt}
+                      onChange={e => setVendorRevertDeadlineAt(e.target.value)}
+                      className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-400"
+                    />
+                  </div>
+                </div>
+
+                {/* Green Field Delivery Locations */}
+                {request.fieldType === 'green_field' && (
+                  <div className="border-t border-slate-100 pt-4">
+                    <h3 className="text-sm font-semibold text-slate-800 mb-3">Delivery Locations</h3>
+                    <div className="space-y-2">
+                      {deliveryLocations.map((loc, idx) => (
+                        <DeliveryLocationRow
+                          key={idx}
+                          location={loc}
+                          onChange={updates => updateDeliveryLocation(idx, updates)}
+                          onRemove={() => removeDeliveryLocation(idx)}
+                          showRemove={deliveryLocations.length > 1}
+                        />
+                      ))}
+                    </div>
+                    <button
+                      onClick={addDeliveryLocation}
+                      className="mt-2 flex items-center gap-1.5 text-sm font-semibold text-violet-700 hover:text-violet-800"
+                    >
+                      <Plus className="w-4 h-4" />
+                      Add Location
+                    </button>
+                  </div>
+                )}
+
+                {/* Auction Rules */}
+                <div className="border-t border-slate-100 pt-4">
+                  <h3 className="text-sm font-semibold text-slate-800 mb-3">Auction Rules (Optional)</h3>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Bid Validity (days)</label>
+                      <input
+                        type="number"
+                        value={bidValidityDays}
+                        onChange={e => setBidValidityDays(Number(e.target.value))}
+                        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Max Decrements</label>
+                      <input
+                        type="number"
+                        value={maxDecrements}
+                        onChange={e => setMaxDecrements(Number(e.target.value))}
+                        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Extension (mins)</label>
+                      <input
+                        type="number"
+                        value={extensionDurationMins}
+                        onChange={e => setExtensionDurationMins(Number(e.target.value))}
+                        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Max Extensions</label>
+                      <input
+                        type="number"
+                        value={maxExtensionsPerBidder}
+                        onChange={e => setMaxExtensionsPerBidder(Number(e.target.value))}
+                        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Currency</label>
+                      <input
+                        type="text"
+                        value={currency}
+                        onChange={e => setCurrency(e.target.value)}
+                        placeholder="INR"
+                        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-400"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Threshold and Duration */}
+                <div className="border-t border-slate-100 pt-4">
+                  <h3 className="text-sm font-semibold text-slate-800 mb-3">Auction Configuration</h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Duration (days)</label>
+                      <select
+                        value={durationDays}
+                        onChange={e => setDurationDays(Number(e.target.value))}
+                        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-400"
+                      >
+                        {Array.from({ length: 30 }, (_, i) => i + 1).map(d => (
+                          <option key={d} value={d}>{d} day{d > 1 ? "s" : ""}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Threshold price (₹)</label>
+                      <input
+                        type="number"
+                        value={threshold}
+                        onChange={e => setThreshold(e.target.value)}
+                        placeholder="Buyer estimate"
+                        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-400"
+                      />
+                      {rfqFloor != null && (
+                        <p className="text-[10px] text-slate-400 mt-1">Pre-filled from lowest RFQ quote ({formatPrice(rfqFloor)}) — editable.</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex gap-3 pt-4 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={generateAndSendDocument}
+                    disabled={selectedVendorIds.length === 0 || !auctionDate || !auctionOpeningTime || !auctionClosingTime}
+                    className="flex-1 px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-sm font-semibold transition-colors"
+                  >
+                    Generate & Send to Vendors
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowDocumentForm(false)}
+                    className="px-4 py-2 rounded-lg border border-slate-200 text-slate-700 text-sm font-semibold hover:bg-slate-50"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Document Generated - Show Status & Approval Tracker */}
+      {hasDocument && !config && (
+        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+          <div className="flex items-center justify-between px-4 py-3.5 bg-violet-50 border-b border-violet-100">
+            <div className="flex items-center gap-2">
+              <FileText className="w-4 h-4 text-violet-600" />
+              <h2 className="text-sm font-bold text-slate-900">Auction Document & Vendor Approvals</h2>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowDocumentPreview(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-white border border-violet-200 text-violet-700 rounded-lg hover:bg-violet-50"
+              >
+                <FileText className="w-3.5 h-3.5" />
+                View Document
+              </button>
+            </div>
+          </div>
+
+          <div className="p-4 space-y-4">
+            {/* Approval Status Summary */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-center">
+                <p className="text-2xl font-bold text-green-700">{approvalStatus.approvedCount}</p>
+                <p className="text-xs font-semibold text-green-600 uppercase">Approved</p>
+              </div>
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-center">
+                <p className="text-2xl font-bold text-amber-700">{approvalStatus.pendingCount}</p>
+                <p className="text-xs font-semibold text-amber-600 uppercase">Pending</p>
+              </div>
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-center">
+                <p className="text-2xl font-bold text-red-700">{approvalStatus.rejectedCount}</p>
+                <p className="text-xs font-semibold text-red-600 uppercase">Rejected/Excluded</p>
+              </div>
+              <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 text-center">
+                <p className="text-2xl font-bold text-orange-700">{approvalStatus.overdueCount}</p>
+                <p className="text-xs font-semibold text-orange-600 uppercase">Overdue</p>
+              </div>
+            </div>
+
+            {/* Vendor Approval Tracker */}
+            <div className="border border-slate-200 rounded-lg overflow-hidden">
+              <div className="bg-slate-50 px-4 py-2 border-b border-slate-100 flex items-center justify-between">
+                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Vendor Approval Tracker</p>
+                <span className="text-xs text-slate-500">
+                  Deadline: {document.vendorRevertDeadlineAt ? new Date(document.vendorRevertDeadlineAt).toLocaleString('en-IN') : 'Not set'}
+                </span>
+              </div>
+              <div className="divide-y divide-slate-100">
+                {reqInvites.filter(inv => inv.auctionApprovalStatus !== 'not_sent').length === 0 ? (
+                  <p className="text-sm text-slate-400 text-center py-8">No vendors have been sent the approval document yet.</p>
+                ) : (
+                  reqInvites
+                    .filter(inv => inv.auctionApprovalStatus !== 'not_sent')
+                    .map(inv => {
+                      const vendor = vendors.find(v => v.id === inv.vendorId)
+                      const status = getEffectiveAuctionApprovalStatus(inv, document?.vendorRevertDeadlineAt)
+                      return (
+                        <div key={inv.id} className="flex items-center justify-between px-4 py-3 hover:bg-slate-50">
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-full bg-violet-100 flex items-center justify-center text-violet-700 font-bold text-xs">
+                              {vendor?.vendorName?.charAt(0) ?? "V"}
+                            </div>
+                            <div>
+                              <p className="text-sm font-semibold text-slate-800">{vendor?.vendorName ?? inv.vendorId}</p>
+                              <p className="text-xs text-slate-500">{vendor?.vendorCode ?? ""}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <div className="text-right">
+                              <span className={[
+                                "text-[10px] font-semibold px-2 py-0.5 rounded-full",
+                                AUCTION_APPROVAL_STATUS_COLORS[status],
+                              ].join(" ")}>
+                                {AUCTION_APPROVAL_STATUS_LABELS[status]}
+                              </span>
+                              {inv.approvalRespondedAt && (
+                                <p className="text-[10px] text-slate-400 mt-0.5">
+                                  Responded: {new Date(inv.approvalRespondedAt).toLocaleDateString('en-IN')}
+                                </p>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-1">
+                              {status === 'pending' && (
+                                <>
+                                  <button
+                                    onClick={() => handleSendReminder(inv.id, vendor?.vendorName || 'Vendor')}
+                                    className="p-1.5 text-amber-600 hover:bg-amber-50 rounded-md"
+                                    title="Send reminder"
+                                  >
+                                    <Bell className="w-4 h-4" />
+                                  </button>
+                                  <button
+                                    onClick={() => handleExcludeVendor(inv.id, vendor?.vendorName || 'Vendor')}
+                                    className="p-1.5 text-red-600 hover:bg-red-50 rounded-md"
+                                    title="Exclude from auction"
+                                  >
+                                    <UserX className="w-4 h-4" />
+                                  </button>
+                                </>
+                              )}
+                              <button
+                                onClick={() => copyLink(inv)}
+                                className="p-1.5 text-slate-500 hover:bg-slate-100 rounded-md"
+                                title="Copy supplier link"
+                              >
+                                <Copy className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })
+                )}
+              </div>
+            </div>
+
+            {/* Auction Launch Gate */}
+            <div className="border-t border-slate-100 pt-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-end">
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Duration (days)</label>
+                  <select
+                    value={durationDays}
+                    onChange={e => setDurationDays(Number(e.target.value))}
+                    className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-400"
+                  >
+                    {Array.from({ length: 30 }, (_, i) => i + 1).map(d => (
+                      <option key={d} value={d}>{d} day{d > 1 ? "s" : ""}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Threshold price (₹)</label>
+                  <input
+                    type="number"
+                    value={threshold}
+                    onChange={e => setThreshold(e.target.value)}
+                    placeholder="Buyer estimate"
+                    className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-400"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={startAuction}
+                  disabled={!approvalStatus.canStart}
+                  className="px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-sm font-semibold transition-colors"
+                >
+                  {approvalStatus.canStart
+                    ? `Start Auction (${approvalStatus.approvedCount} approved)`
+                    : 'Start Auction (needs ≥1 approval)'}
+                </button>
+              </div>
+              {!approvalStatus.canStart && (
+                <p className="mt-2 text-xs text-amber-600 flex items-center gap-1">
+                  <AlertCircle className="w-3.5 h-3.5" />
+                  At least one vendor must approve the document before starting the auction.
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Active Auction Panel */}
+      {config && (
+        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+          <div className="flex items-center justify-between px-4 py-3.5 bg-violet-50 border-b border-violet-100">
+            <div className="flex items-center gap-2">
+              <Gavel className="w-4 h-4 text-violet-600" />
+              <h2 className="text-sm font-bold text-slate-900">Reverse Auction</h2>
+            </div>
+            {config?.endsAt && (
+              <div className={[
+                "flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full",
+                expired ? "bg-red-100 text-red-700" : active ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-600",
+              ].join(" ")}>
+                <Timer className="w-3.5 h-3.5" />
+                {expired ? "Auction closed" : formatAuctionCountdown(config.endsAt)}
+              </div>
+            )}
+          </div>
+
+          <div className="p-4 space-y-4">
+            {expired && (
+              <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 font-medium">
+                Auction has ended. Extend to allow vendors to revise quotes.
+              </div>
+            )}
+            <div className="flex flex-wrap items-center gap-3 text-sm">
+              <span className="text-slate-500">Threshold:</span>
+              <span className="font-bold text-slate-800">
+                {config.threshold ? formatPrice(config.threshold) : "—"}
+              </span>
+              <span className="text-slate-300">|</span>
+              <span className="text-slate-500">Ends:</span>
+              <span className="font-semibold text-slate-700">
+                {new Date(config.endsAt).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+              </span>
+              <div className="flex gap-2 ml-auto">
+                {[1, 3, 7].map(d => (
+                  <button
+                    key={d}
+                    type="button"
+                    onClick={() => extendAuction(d)}
+                    className="px-3 py-1.5 text-xs font-semibold bg-white border border-violet-200 text-violet-700 rounded-lg hover:bg-violet-50"
+                  >
+                    +{d}d
+                  </button>
+                ))}
+                {!expired && canManage && (
+                  <button
+                    type="button"
+                    onClick={closeAuction}
+                    className="px-3 py-1.5 text-xs font-semibold bg-white border border-red-200 text-red-700 rounded-lg hover:bg-red-50"
+                  >
+                    Close Auction Now
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Approved Vendors Only in Active Auction */}
+            <div className="border border-slate-200 rounded-lg overflow-hidden">
+              <div className="bg-slate-50 px-4 py-2 border-b border-slate-100 flex items-center justify-between">
+                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Approved Vendors Only</p>
+                <span className="text-xs text-slate-500">{reqInvites.filter(inv => isVendorEligibleForAuction(inv, document?.vendorRevertDeadlineAt)).length} eligible</span>
+              </div>
+              <div className="divide-y divide-slate-100">
+                {reqInvites
+                  .filter(inv => isVendorEligibleForAuction(inv, document?.vendorRevertDeadlineAt))
+                  .map(inv => {
+                    const vendor = vendors.find(v => v.id === inv.vendorId)
+                    return (
+                      <div key={inv.id} className="flex items-center justify-between px-4 py-3 hover:bg-slate-50">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-full bg-violet-100 flex items-center justify-center text-violet-700 font-bold text-xs">
+                            {vendor?.vendorName?.charAt(0) ?? "V"}
+                          </div>
+                          <div>
+                            <p className="text-sm font-semibold text-slate-800">{vendor?.vendorName ?? inv.vendorId}</p>
+                            <p className="text-xs text-slate-500">{vendor?.vendorCode ?? ""}</p>
+                          </div>
+                          <span className={[
+                            "ml-2 text-[10px] font-semibold px-2 py-0.5 rounded-full",
+                            inv.status === "quote_received"
+                              ? "bg-green-100 text-green-700"
+                              : inv.status === "approved"
+                              ? "bg-emerald-100 text-emerald-700"
+                              : "bg-slate-100 text-slate-600",
+                          ].join(" ")}>
+                            {inv.status.replace("_", " ")}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => copyLink(inv)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-white border border-slate-200 text-slate-600 rounded-lg hover:bg-violet-50 hover:border-violet-200 hover:text-violet-700 transition-colors"
+                        >
+                          <Copy className="w-3.5 h-3.5" />
+                          Copy Link
+                        </button>
+                      </div>
+                    )
+                  })}
+              </div>
+              {uninvitedVendors.length > 0 && (
+                <div className="px-4 py-3 bg-slate-50/50 border-t border-slate-100">
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={newVendorId}
+                      onChange={e => setNewVendorId(e.target.value)}
+                      className="flex-1 text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-400 bg-white"
+                    >
+                      <option value="">Add vendor to auction…</option>
+                      {uninvitedVendors.map(v => (
+                        <option key={v.id} value={v.id}>{v.vendorName} ({v.vendorCode})</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={addVendorToAuction}
+                      disabled={!newVendorId}
+                      className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      Add
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {rankings.length > 0 && (
+              <div className="border border-slate-200 rounded-lg overflow-hidden">
+                <div className="bg-slate-50 px-4 py-2 border-b border-slate-100">
+                  <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Vendor Ranking</p>
+                </div>
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100">
+                      <th className="px-4 py-2 text-left">Rank</th>
+                      <th className="px-4 py-2 text-left">Vendor</th>
+                      <th className="px-4 py-2 text-right">Quote</th>
+                      <th className="px-4 py-2 text-right">Gap to L1</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {rankings.map(row => {
+                      const vendor = vendors.find(v => v.id === row.vendorId)
+                      const gap = l1Price !== null && row.rank > 1 ? row.price - l1Price : 0
+                      return (
+                        <tr key={row.inviteId} className={row.rank === 1 ? "bg-green-50/50" : ""}>
+                          <td className="px-4 py-2">
+                            <span className={[
+                              "text-xs font-bold px-2 py-0.5 rounded-full",
+                              row.rank === 1 ? "bg-green-100 text-green-800" : "bg-slate-100 text-slate-600",
+                            ].join(" ")}>
+                              {rankLabel(row.rank)}
+                            </span>
+                          </td>
+                          <td className="px-4 py-2 font-semibold text-slate-800">{vendor?.vendorName ?? row.vendorId}</td>
+                          <td className="px-4 py-2 text-right font-mono font-bold text-slate-800">{formatPrice(row.price)}</td>
+                          <td className="px-4 py-2 text-right">
+                            {row.rank === 1 ? (
+                              <span className="text-xs font-semibold text-green-700">Lowest</span>
+                            ) : (
+                              <span className="text-xs font-semibold text-amber-700">+{formatPrice(gap)}</span>
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 /* ── Main page ───────────────────────────────────────────────── */
 
 export default function CapexDetailPage() {
   const { id } = useParams<{ id: string }>()
-  const { requests, invites, vendors, updateRequest } = useCapex()
+  const { requests, invites, vendors, updateRequest, setSourcingMode, requestProformaInvoice, sendDocApprovalPackage, resendDocApprovalPackage } = useCapex()
   const [currentRole, setCurrentRole] = useState("buyer")
 
   useEffect(() => {
@@ -593,10 +1748,13 @@ export default function CapexDetailPage() {
 
   const request = requests.find(r => r.id === id)
   if (!request) {
-    return <div className="p-6"><p className="text-slate-400">Request not found.</p></div>
+    return <div className="p-5"><p className="text-slate-400">Request not found.</p></div>
   }
 
   const reqInvites      = invites.filter(i => i.requestId === id)
+  // Split-award (reverse auction): a request fans out into one fulfillment track per awarded vendor.
+  const awardBased      = isAwardBased(reqInvites)
+  const awardInvites    = awardedInvites(reqInvites)
   const approvedInvite  = reqInvites.find(i => i.status === "approved") ?? null
   const approvedVendor  = approvedInvite ? (vendors.find(v => v.id === approvedInvite.vendorId) ?? null) : null
   const approvedQuote   = approvedInvite?.quotes[approvedInvite.quotes.length - 1]
@@ -604,6 +1762,47 @@ export default function CapexDetailPage() {
 
   const currentUser  = ROLE_NAMES[currentRole] ?? currentRole
   const isBuyer      = currentRole.startsWith("buyer")
+  const isPlantHead  = currentRole.startsWith("plant_head")
+  const canManageSourcing = SOURCING_ROLES.includes(currentRole)
+  // Finalizing the winner + requesting the PI is restricted to the sourcing head / admin on both
+  // the RFQ and auction paths (sourcing_member runs the negotiation/auction but does not finalize).
+  const canFinalize = currentRole === "sourcing_head" || currentRole === "super_admin"
+  // Auction winner's contract-terms approval status — gates the Request-PI card (mirror RFQ).
+  const winnerDocStatus = approvedInvite ? effectiveDocApprovalStatus(approvedInvite.docApprovalStatus) : "not_sent"
+  const isBrownField = (request.fieldType ?? "brown_field") === "brown_field"
+  // Brown Field is RFQ-only by default; a reverse auction can only be started from within RFQ
+  // (RfqPanel sets sourcingMode='auction'). So RFQ shows unless the request was escalated to auction.
+  const isRfqMode = isBrownField && request.sourcingMode !== "auction"
+
+  // A timed reverse auction was run on this request (Brown Field escalation or a Green Field
+  // auction). This is what makes the flow mirror RFQ (no buyer sign-off); non-auction
+  // seeded-quote comparisons keep their buyer-approval step.
+  const ranAuction = !!request.auctionConfig?.endsAt
+  // The auction winner can only be finalized (and the PI requested) once the auction has ended:
+  // either the countdown reached `endsAt` or sourcing closed it early.
+  const auctionEnded = !ranAuction || isAuctionExpired(request.auctionConfig)
+  // Pre-PI states an auction winner may sit in before the PI is requested (the last two only for
+  // legacy/in-flight requests created before the buyer step was dropped).
+  const PRE_PI_STATUSES: CapexStatus[] = ["sourcing", "negotiation", "sourcing_approved", "buyer_approved"]
+
+  // Default a Brown Field request entering sourcing into RFQ mode (no chooser) so the supplier
+  // portal routes to the RFQ view and invites are stamped awaiting_quote.
+  useEffect(() => {
+    if (isBrownField && !request.sourcingMode && (request.status === "sourcing" || request.status === "negotiation")) {
+      setSourcingMode(id, "rfq")
+    }
+  }, [id, isBrownField, request.sourcingMode, request.status, setSourcingMode])
+
+  // Auction vendor selection state - shared between auction panel and vendor grid
+  const [auctionSelectedVendorIds, setAuctionSelectedVendorIds] = useState<string[]>(() =>
+    reqInvites.map(inv => inv.vendorId)
+  )
+
+  // Keep selection in sync when new invites are added
+  useEffect(() => {
+    const invitedIds = reqInvites.map(inv => inv.vendorId)
+    setAuctionSelectedVendorIds(prev => [...new Set([...prev, ...invitedIds])])
+  }, [reqInvites.map(inv => inv.vendorId).join(",")])
 
   const handleHeadApprove = () => {
     updateRequest(id, { status: "sourcing" }, ROLE_NAMES[currentRole] ?? currentRole);
@@ -613,9 +1812,26 @@ export default function CapexDetailPage() {
     updateRequest(id, { status: "rejected" }, ROLE_NAMES[currentRole] ?? currentRole);
     toast.error("Request rejected")
   }
-  const handleSelectFinal = (_inviteId: string) => {
-    updateRequest(id, { status: "sourcing_approved" }, currentUser)
-    toast.success("Vendor selected — sent to buyer for approval")
+  const handleSelectFinal = (inviteId: string) => {
+    const inv = reqInvites.find(i => i.id === inviteId)
+    if (ranAuction) {
+      // Reverse auction mirrors RFQ: finalizing the winner does NOT route through a
+      // separate buyer approval. The grid already marked the invite `approved`; we record
+      // the finalized vendor (field-only update, no status hop) so resolveFinalVendor resolves
+      // the correct winner, then auto-send the doc-package (Commercial Terms / PBG / DLC /
+      // payment terms) for the vendor to approve before the PI can be requested — exactly as
+      // RFQ does the moment a price is agreed.
+      if (inv) {
+        updateRequest(id, { finalVendorId: inv.vendorId }, currentUser)
+        sendDocApprovalPackage(id, [inv.vendorId])
+      }
+      toast.success("Winner finalized — contract terms sent to the vendor for approval")
+    } else {
+      // Non-auction seeded-quote comparison (Green Field / Digitisation / IT) keeps its
+      // existing buyer sign-off before the PI is requested.
+      updateRequest(id, { status: "sourcing_approved" }, currentUser)
+      toast.success("Vendor selected — sent to buyer for approval")
+    }
   }
   const handleBuyerApprove = () => {
     updateRequest(id, { status: "buyer_approved" }, ROLE_NAMES[currentRole] ?? currentRole);
@@ -627,7 +1843,7 @@ export default function CapexDetailPage() {
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-5 space-y-4">
 
       {/* Shared header */}
       <div>
@@ -636,13 +1852,15 @@ export default function CapexDetailPage() {
           <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${STATUS_COLORS[request.status] ?? "bg-slate-100 text-slate-600"}`}>
             {STATUS_LABELS[request.status] ?? request.status.replace(/_/g, " ")}
           </span>
+          {awardBased && (
+            <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-teal-50 text-teal-700">
+              {awardSummary(reqInvites).completed} / {awardSummary(reqInvites).total} awards complete
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2 mt-2 flex-wrap">
           <span className="text-xs font-semibold bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full">{request.category}</span>
           <span className="text-xs font-semibold bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full">Qty: {request.quantity}</span>
-          <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${PRIORITY_COLORS[request.priority] ?? "bg-slate-100 text-slate-600"}`}>
-            {request.priority.charAt(0).toUpperCase() + request.priority.slice(1)}
-          </span>
           {request.budget && (
             <span className="text-sm text-slate-500 font-semibold">{formatPrice(request.budget)}</span>
           )}
@@ -654,6 +1872,12 @@ export default function CapexDetailPage() {
           {request.requestNo && (
             <span className="text-xs font-bold bg-[#EBF0FB] text-[#153f90] px-2 py-0.5 rounded-full">{request.requestNo}</span>
           )}
+          <span className={[
+            "text-xs font-semibold px-2.5 py-1 rounded-full",
+            request.fieldType === "green_field" ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-600",
+          ].join(" ")}>
+            {request.fieldType === "green_field" ? "Green Field" : "Brown Field"}
+          </span>
           <span className="text-xs text-slate-400 font-mono">{request.id.slice(0, 8)}…</span>
         </div>
       </div>
@@ -662,7 +1886,7 @@ export default function CapexDetailPage() {
 
       <SourcingDecisionBanner request={request} vendors={vendors} />
 
-      <div className="space-y-6">
+      <div className="space-y-4">
 
       {/* Buyer view */}
       {isBuyer && (
@@ -681,7 +1905,7 @@ export default function CapexDetailPage() {
         <>
           {/* Head / plant_head approval gate */}
           {(currentRole === "sourcing_head" || currentRole.startsWith("plant_head")) && request.status === "pending_head_approval" && (
-            <div className="bg-orange-50 border border-orange-200 rounded-xl p-5 flex items-center justify-between gap-4">
+            <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 flex items-center justify-between gap-4">
               <div>
                 <p className="font-semibold text-orange-900">This request requires your approval before sourcing can begin.</p>
                 <p className="text-sm text-orange-700 mt-0.5">
@@ -701,14 +1925,192 @@ export default function CapexDetailPage() {
             </div>
           )}
 
-          {/* Vendor grid */}
-          <VendorGrid
-            request={request}
-            invites={reqInvites}
-            vendors={vendors}
-            currentRole={currentRole}
-            onSelectFinal={handleSelectFinal}
-          />
+          {/* RFQ path (Brown Field default) — hidden for plant_head roles (approval-only). */}
+          {isRfqMode && !isPlantHead && (
+            <RfqPanel
+              request={request}
+              invites={reqInvites}
+              vendors={vendors}
+              currentRole={currentRole}
+            />
+          )}
+
+          {/* Reverse auction path (non-Brown, or RFQ escalated to auction) */}
+          {!isRfqMode && (
+            <>
+              <ReverseAuctionPanel
+                request={request}
+                reqInvites={reqInvites}
+                vendors={vendors}
+                currentRole={currentRole}
+                selectedVendorIds={auctionSelectedVendorIds}
+                onSelectionChange={setAuctionSelectedVendorIds}
+              />
+
+              {/* Split award (reverse auction): one fulfillment track per awarded vendor. Each
+                  vendor approves its own contract terms, then sourcing requests that vendor's PI;
+                  thereafter the award progresses independently (PI → FA → PO → payments). */}
+              {awardBased && canManageSourcing && (
+                <div className="bg-card border border-border rounded-xl p-4 space-y-3">
+                  <p className="font-semibold text-foreground">
+                    Awarded vendors ({awardSummary(reqInvites).completed} / {awardSummary(reqInvites).total} complete)
+                  </p>
+                  {awardInvites.map(inv => {
+                    const v = vendors.find(vv => vv.id === inv.vendorId)
+                    const itemNames = (request.lineItems ?? [])
+                      .filter(li => inv.awardedItemIds?.includes(li.id))
+                      .map(li => li.description)
+                    // Auction terms were approved pre-bid (Business Rules), so an awarded vendor is
+                    // immediately ready for the PI request — no per-award doc-approval step.
+                    const prePi = (inv.awardStatus ?? "awarded") === "awarded"
+                    return (
+                      <div key={inv.id} className="border border-border rounded-lg p-3 flex items-start justify-between gap-4 flex-wrap">
+                        <div className="min-w-0">
+                          <p className="font-semibold text-foreground">{v?.vendorName ?? "Vendor"}</p>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            {itemNames.length} item{itemNames.length === 1 ? "" : "s"} · ₹{(inv.awardAmount ?? 0).toLocaleString("en-IN")} (incl. GST)
+                          </p>
+                          {itemNames.length > 0 && (
+                            <p className="text-xs text-muted-foreground mt-0.5 truncate" title={itemNames.join(", ")}>{itemNames.join(", ")}</p>
+                          )}
+                        </div>
+                        <div className="shrink-0">
+                          {!prePi ? (
+                            <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700">
+                              {AWARD_STATUS_LABEL[inv.awardStatus ?? "awarded"]}
+                            </span>
+                          ) : canFinalize ? (
+                            <button
+                              onClick={() => { requestProformaInvoice(id, inv.vendorId, currentUser); toast.success(`Proforma Invoice requested from ${v?.vendorName ?? "vendor"}`) }}
+                              className="px-3 py-1.5 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-semibold whitespace-nowrap"
+                            >
+                              Request PI
+                            </button>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">Awaiting sourcing head to request the PI</span>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
+              {/* Legacy single-vendor auction (finalized before split award existed): the finalized
+                  winner approves the doc-package, then sourcing requests one PI. */}
+              {!awardBased && approvedInvite && canManageSourcing && ranAuction && auctionEnded &&
+                PRE_PI_STATUSES.includes(request.status) && (
+                winnerDocStatus === "approved" ? (
+                  <div className="bg-card border border-border rounded-xl p-4 flex items-center justify-between gap-4 flex-wrap">
+                    <div>
+                      <p className="font-semibold text-foreground">Terms approved. Request the Proforma Invoice to begin fulfillment.</p>
+                      <p className="text-sm text-muted-foreground mt-0.5">{approvedVendor?.vendorName} will upload a PI for accounts to raise the PO.</p>
+                    </div>
+                    {canFinalize ? (
+                      <button
+                        onClick={() => {
+                          requestProformaInvoice(id, approvedInvite.vendorId, currentUser)
+                          toast.success("Proforma Invoice requested")
+                        }}
+                        className="px-4 py-2 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-semibold whitespace-nowrap"
+                      >
+                        Request Proforma Invoice
+                      </button>
+                    ) : (
+                      <p className="text-sm text-muted-foreground whitespace-nowrap">Awaiting sourcing head to request the PI.</p>
+                    )}
+                  </div>
+                ) : winnerDocStatus === "rejected" ? (
+                  <div className="bg-card border border-red-200 rounded-xl p-4 flex items-center justify-between gap-4 flex-wrap">
+                    <div>
+                      <p className="font-semibold text-foreground">{approvedVendor?.vendorName} declined the contract terms.</p>
+                      <p className="text-sm text-muted-foreground mt-0.5">Re-send the Commercial Terms / PBG / Delay Liability Clause for the vendor to review before requesting the PI.</p>
+                    </div>
+                    {canFinalize && (
+                      <button
+                        onClick={() => {
+                          resendDocApprovalPackage(approvedInvite.id)
+                          toast.success("Contract terms re-sent to the vendor")
+                        }}
+                        className="px-4 py-2 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-semibold whitespace-nowrap"
+                      >
+                        Re-send terms
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="bg-card border border-border rounded-xl p-4">
+                    <p className="font-semibold text-foreground">Winner finalized — waiting on {approvedVendor?.vendorName} to approve the contract terms.</p>
+                    <p className="text-sm text-muted-foreground mt-0.5">The Request Proforma Invoice action unlocks once the vendor accepts the Commercial Terms / PBG / Delay Liability Clause.</p>
+                  </div>
+                )
+              )}
+
+              {/* Non-auction seeded comparison (Green Field / Digitisation / IT): requests the PI
+                  after the buyer approves (buyer_approved) — existing behavior, unchanged. */}
+              {approvedInvite && canManageSourcing && !ranAuction && request.status === "buyer_approved" && (
+                <div className="bg-card border border-border rounded-xl p-4 flex items-center justify-between gap-4 flex-wrap">
+                  <div>
+                    <p className="font-semibold text-foreground">Winner finalized. Request the Proforma Invoice to begin fulfillment.</p>
+                    <p className="text-sm text-muted-foreground mt-0.5">{approvedVendor?.vendorName} will upload a PI for accounts to raise the PO.</p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      requestProformaInvoice(id, approvedInvite.vendorId, currentUser)
+                      toast.success("Proforma Invoice requested")
+                    }}
+                    className="px-4 py-2 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-semibold whitespace-nowrap"
+                  >
+                    Request Proforma Invoice
+                  </button>
+                </div>
+              )}
+
+              {/* Vendor grid */}
+              <VendorGrid
+                request={request}
+                invites={reqInvites}
+                vendors={vendors}
+                currentRole={currentRole}
+                onSelectFinal={handleSelectFinal}
+                auctionSelectedVendorIds={auctionSelectedVendorIds}
+                onAuctionSelectionChange={setAuctionSelectedVendorIds}
+              />
+            </>
+          )}
+
+          {/* Shared fulfillment: TAT clock + accounts FA codes, PO & payment milestones.
+              Award-based requests keep a coarse request.status (pi_requested), so also show this
+              whenever any award has reached the Accounts stage. */}
+          {(isFulfillmentStatus(request.status) ||
+            (awardBased && awardInvites.some(i => ["pi_submitted", "accounts_processing", "payment_in_progress", "completed"].includes(i.awardStatus ?? "")))) && (
+            <>
+              {awardBased ? (
+                awardInvites
+                  .filter(i => ["pi_submitted", "accounts_processing", "payment_in_progress", "completed"].includes(i.awardStatus ?? ""))
+                  .map(i => (
+                    <TatBanner
+                      key={i.id}
+                      piSubmittedAt={i.piSubmittedAt}
+                      tatStoppedAt={i.tatStoppedAt}
+                      vendorAmount={i.awardAmount ?? 0}
+                    />
+                  ))
+              ) : (
+                <TatBanner
+                  piSubmittedAt={request.piSubmittedAt}
+                  tatStoppedAt={request.tatStoppedAt}
+                  vendorAmount={resolveFinalVendor(request, reqInvites).amount}
+                />
+              )}
+              <AccountsPanel
+                request={request}
+                invites={reqInvites}
+                vendors={vendors}
+                currentRole={currentRole}
+              />
+            </>
+          )}
         </>
       )}
 

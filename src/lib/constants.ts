@@ -7,6 +7,9 @@ export const ROLE_NAMES: Record<string, string> = {
   plant_head_jhajjar_p1:  "Karan Mehta",
   plant_head_jhajjar_p2:  "Ajay Gupta",
   sourcing_head:          "Rajiv Sinha",
+  maintenance:            "Sunil Verma",
+  plant_accounts:         "Meera Iyer",
+  accounts:               "Priya Nair",
   super_admin:            "Super Admin",
 }
 
@@ -29,6 +32,11 @@ export const STATUS_COLORS: Record<string, string> = {
   negotiation:           "bg-[#FEF9C3] text-[#854D0E]",
   sourcing_approved:     "bg-emerald-100 text-emerald-800",
   buyer_approved:        "bg-[#DCFCE7] text-[#166534]",
+  pi_requested:          "bg-[#FFEDD5] text-[#9A3412]",
+  pi_submitted:          "bg-[#FEF3C7] text-[#92400E]",
+  accounts_processing:   "bg-[#CFFAFE] text-[#155E75]",
+  payment_in_progress:   "bg-[#E0E7FF] text-[#3730A3]",
+  completed:             "bg-[#DCFCE7] text-[#14532D]",
   rejected:              "bg-red-100 text-red-700",
 }
 
@@ -40,6 +48,11 @@ export const STATUS_LABELS: Record<string, string> = {
   negotiation:           "Negotiation",
   sourcing_approved:     "Sourcing Approved",
   buyer_approved:        "Approved",
+  pi_requested:          "PI Requested",
+  pi_submitted:          "PI Submitted",
+  accounts_processing:   "With Accounts",
+  payment_in_progress:   "Payment In Progress",
+  completed:             "Completed",
   rejected:              "Rejected",
 }
 
@@ -64,6 +77,13 @@ export function getPlantForRole(role: string): string | null {
   if (role.startsWith('plant_head_')) return role.slice(11)
   return null
 }
+
+/**
+ * Recipient for the FA-code notification email (sent once after Plant Accounts submit FA codes).
+ * The app has no email backend — the send is simulated (preview modal + toast). This is a
+ * placeholder address; the recipient is editable in the modal before sending.
+ */
+export const FA_CODE_RECIPIENT_EMAIL = "asset.register@amber-enterprises.in"
 
 export const PLANTS = [
   { value: "jhajjar_p1", label: "Jhajjar Plant 1", state: "Haryana" },

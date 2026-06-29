@@ -24,11 +24,11 @@ export default function VendorMasterPage() {
     setExpandedId(prev => prev === id ? null : id)
 
   return (
-    <div className="p-6 h-full flex flex-col">
-      <div className="flex items-center justify-between mb-6">
+    <div className="p-5 h-full flex flex-col">
+      <div className="flex items-center justify-between mb-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Vendor Master</h1>
-          <p className="text-sm text-slate-500 mt-1">All onboarded vendors across CAPEX requests.</p>
+          <h1 className="text-xl font-bold tracking-tight text-slate-900">Vendor Master</h1>
+          <p className="text-xs text-slate-500 mt-0.5">All onboarded vendors across CAPEX requests.</p>
         </div>
         <Button
           onClick={() => setShowModal(true)}
@@ -60,7 +60,7 @@ export default function VendorMasterPage() {
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
                 {["Vendor Code", "Name", "Category", "GSTIN", "Contact Name", "Contact Email", "Payment Terms", "Actions"].map(h => (
-                  <th key={h} className="px-4 py-3 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap">
+                  <th key={h} className="px-4 py-2 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap">
                     {h}
                   </th>
                 ))}
@@ -70,18 +70,18 @@ export default function VendorMasterPage() {
               {filtered.map((v, idx) => (
                 <React.Fragment key={v.id}>
                   <tr className={`transition-colors hover:bg-[#EBF0FB]/60 ${idx % 2 === 0 ? "bg-white" : "bg-slate-50"}`}>
-                    <td className="px-4 py-3 font-mono text-xs text-slate-600">{v.vendorCode}</td>
-                    <td className="px-4 py-3 font-semibold text-slate-800">{v.vendorName}</td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-2 font-mono text-xs text-slate-600">{v.vendorCode}</td>
+                    <td className="px-4 py-2 font-semibold text-slate-800">{v.vendorName}</td>
+                    <td className="px-4 py-2">
                       <span className="text-xs font-semibold bg-[#EBF0FB] text-[#153f90] px-2 py-0.5 rounded-full">{v.category}</span>
                     </td>
-                    <td className="px-4 py-3 text-slate-600 font-mono text-xs">{v.gstin || "—"}</td>
-                    <td className="px-4 py-3 text-slate-700">{v.contactName || "—"}</td>
-                    <td className="px-4 py-3 text-slate-600 text-xs">{v.contactEmail}</td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-2 text-slate-600 font-mono text-xs">{v.gstin || "—"}</td>
+                    <td className="px-4 py-2 text-slate-700">{v.contactName || "—"}</td>
+                    <td className="px-4 py-2 text-slate-600 text-xs">{v.contactEmail}</td>
+                    <td className="px-4 py-2">
                       <span className="text-xs font-semibold bg-blue-600 text-white px-2 py-0.5 rounded-full">{v.paymentTerms}</span>
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-2">
                       <button
                         onClick={() => toggleExpand(v.id)}
                         className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-slate-800 transition-colors"
@@ -92,7 +92,7 @@ export default function VendorMasterPage() {
                   </tr>
                   {expandedId === v.id && (
                     <tr className="bg-slate-50">
-                      <td colSpan={8} className="px-6 py-4">
+                      <td colSpan={8} className="px-5 py-3.5">
                         <ExpandedVendor vendor={v} />
                       </td>
                     </tr>
@@ -118,7 +118,7 @@ export default function VendorMasterPage() {
 
 function ExpandedVendor({ vendor: v }: { vendor: Vendor }) {
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1">
       {[
         { label: "Bank Name",       value: v.bankName },
         { label: "Account Number",  value: v.accountNumber },
@@ -126,9 +126,9 @@ function ExpandedVendor({ vendor: v }: { vendor: Vendor }) {
         { label: "PAN",             value: v.pan },
         { label: "Onboarded At",    value: new Date(v.onboardedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) },
       ].map(({ label, value }) => (
-        <div key={label}>
-          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">{label}</p>
-          <p className="text-slate-700">{value || "—"}</p>
+        <div key={label} className="flex items-baseline gap-1.5 text-xs min-w-0">
+          <span className="font-bold text-slate-400 uppercase tracking-wider shrink-0">{label}:</span>
+          <span className="font-semibold text-slate-700 break-words min-w-0">{value || "—"}</span>
         </div>
       ))}
     </div>
