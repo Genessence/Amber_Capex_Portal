@@ -45,11 +45,11 @@ const HEAD_STYLE: Record<string, {
   chip: string
   dot: string
 }> = {
-  'Automation':        { badge: 'bg-violet-100 text-violet-700 border border-violet-200', border: 'border-l-violet-400', row: 'bg-violet-50/30',  chip: 'bg-violet-50 border-violet-200 text-violet-700',  dot: 'bg-violet-400' },
+  'Automation':        { badge: 'bg-slate-100 text-slate-700 border border-slate-200', border: 'border-l-slate-400', row: 'bg-slate-50/30',  chip: 'bg-slate-50 border-slate-200 text-slate-700',  dot: 'bg-slate-400' },
   'Machinery':         { badge: 'bg-blue-100 text-blue-700 border border-blue-200',       border: 'border-l-blue-400',   row: 'bg-blue-50/30',    chip: 'bg-blue-50 border-blue-200 text-blue-700',        dot: 'bg-blue-400'   },
   'General':           { badge: 'bg-slate-100 text-slate-600 border border-slate-200',    border: 'border-l-slate-300',  row: 'bg-slate-50/30',   chip: 'bg-slate-50 border-slate-200 text-slate-600',     dot: 'bg-slate-400'  },
-  'Digitization':      { badge: 'bg-teal-100 text-teal-700 border border-teal-200',       border: 'border-l-teal-400',   row: 'bg-teal-50/30',    chip: 'bg-teal-50 border-teal-200 text-teal-700',        dot: 'bg-teal-400'   },
-  'New Business':      { badge: 'bg-orange-100 text-orange-700 border border-orange-200', border: 'border-l-orange-400', row: 'bg-orange-50/30',  chip: 'bg-orange-50 border-orange-200 text-orange-700',  dot: 'bg-orange-400' },
+  'Digitization':      { badge: 'bg-blue-100 text-blue-700 border border-blue-200',       border: 'border-l-blue-400',   row: 'bg-blue-50/30',    chip: 'bg-blue-50 border-blue-200 text-blue-700',        dot: 'bg-blue-400'   },
+  'New Business':      { badge: 'bg-slate-100 text-slate-700 border border-slate-200', border: 'border-l-slate-400', row: 'bg-slate-50/30',  chip: 'bg-slate-50 border-slate-200 text-slate-700',  dot: 'bg-slate-400' },
   'Safety & Security': { badge: 'bg-red-100 text-red-700 border border-red-200',          border: 'border-l-red-400',    row: 'bg-red-50/20',     chip: 'bg-red-50 border-red-200 text-red-700',           dot: 'bg-red-400'    },
   'Misc.':             { badge: 'bg-stone-100 text-stone-500 border border-stone-200',    border: 'border-l-stone-300',  row: 'bg-stone-50/30',   chip: 'bg-stone-50 border-stone-200 text-stone-500',     dot: 'bg-stone-400'  },
 }
@@ -57,33 +57,33 @@ const HEAD_STYLE: Record<string, {
 const HEAD_ORDER = ['Automation', 'Machinery', 'General', 'Digitization', 'New Business', 'Safety & Security', 'Utilities', 'Misc.']
 
 const GF_HEAD_STYLE: Record<string, typeof HEAD_STYLE[string]> = {
-  'Land Buying':              { badge: 'bg-emerald-100 text-emerald-800 border border-emerald-200', border: 'border-l-emerald-500', row: 'bg-emerald-50/30', chip: 'bg-emerald-50 border-emerald-200 text-emerald-800', dot: 'bg-emerald-500' },
-  'Land Infrastructure':      { badge: 'bg-lime-100 text-lime-800 border border-lime-200',         border: 'border-l-lime-500',    row: 'bg-lime-50/30',    chip: 'bg-lime-50 border-lime-200 text-lime-800',         dot: 'bg-lime-500'    },
-  'Admin Blocks':             { badge: 'bg-teal-100 text-teal-800 border border-teal-200',         border: 'border-l-teal-500',    row: 'bg-teal-50/30',    chip: 'bg-teal-50 border-teal-200 text-teal-800',         dot: 'bg-teal-500'    },
-  'Furniture':                { badge: 'bg-amber-100 text-amber-800 border border-amber-200',       border: 'border-l-amber-500',   row: 'bg-amber-50/30',   chip: 'bg-amber-50 border-amber-200 text-amber-800',       dot: 'bg-amber-500'   },
-  'Compliances':              { badge: 'bg-rose-100 text-rose-800 border border-rose-200',          border: 'border-l-rose-500',    row: 'bg-rose-50/30',    chip: 'bg-rose-50 border-rose-200 text-rose-800',          dot: 'bg-rose-500'    },
-  'Moulding Shop':                 { badge: 'bg-sky-100 text-sky-800 border border-sky-200',             border: 'border-l-sky-500',     row: 'bg-sky-50/30',     chip: 'bg-sky-50 border-sky-200 text-sky-800',             dot: 'bg-sky-500'     },
-  'Paint Shop':               { badge: 'bg-indigo-100 text-indigo-800 border border-indigo-200',     border: 'border-l-indigo-500',  row: 'bg-indigo-50/30',  chip: 'bg-indigo-50 border-indigo-200 text-indigo-800',   dot: 'bg-indigo-500'  },
+  'Land Buying':              { badge: 'bg-slate-100 text-slate-800 border border-slate-200', border: 'border-l-slate-500', row: 'bg-slate-50/30', chip: 'bg-slate-50 border-slate-200 text-slate-800', dot: 'bg-slate-500' },
+  'Land Infrastructure':      { badge: 'bg-slate-100 text-slate-800 border border-slate-200',         border: 'border-l-slate-500',    row: 'bg-slate-50/30',    chip: 'bg-slate-50 border-slate-200 text-slate-800',         dot: 'bg-slate-500'    },
+  'Admin Blocks':             { badge: 'bg-blue-100 text-blue-800 border border-blue-200',         border: 'border-l-blue-500',    row: 'bg-blue-50/30',    chip: 'bg-blue-50 border-blue-200 text-blue-800',         dot: 'bg-blue-500'    },
+  'Furniture':                { badge: 'bg-slate-100 text-slate-800 border border-slate-200',       border: 'border-l-slate-500',   row: 'bg-slate-50/30',   chip: 'bg-slate-50 border-slate-200 text-slate-800',       dot: 'bg-slate-500'   },
+  'Compliances':              { badge: 'bg-slate-100 text-slate-800 border border-slate-200',          border: 'border-l-slate-500',    row: 'bg-slate-50/30',    chip: 'bg-slate-50 border-slate-200 text-slate-800',          dot: 'bg-slate-500'    },
+  'Moulding Shop':                 { badge: 'bg-slate-100 text-slate-800 border border-slate-200',             border: 'border-l-slate-500',     row: 'bg-slate-50/30',     chip: 'bg-slate-50 border-slate-200 text-slate-800',             dot: 'bg-slate-500'     },
+  'Paint Shop':               { badge: 'bg-slate-100 text-slate-800 border border-slate-200',     border: 'border-l-slate-500',  row: 'bg-slate-50/30',  chip: 'bg-slate-50 border-slate-200 text-slate-800',   dot: 'bg-slate-500'  },
   'Press Shop':                    { badge: 'bg-blue-100 text-blue-800 border border-blue-200',           border: 'border-l-blue-500',    row: 'bg-blue-50/30',    chip: 'bg-blue-50 border-blue-200 text-blue-800',           dot: 'bg-blue-500'    },
-  'Copper Shop':                 { badge: 'bg-violet-100 text-violet-800 border border-violet-200',     border: 'border-l-violet-500',  row: 'bg-violet-50/30',  chip: 'bg-violet-50 border-violet-200 text-violet-800',   dot: 'bg-violet-500'  },
-  'Assembly Shop':                 { badge: 'bg-cyan-100 text-cyan-800 border border-cyan-200',           border: 'border-l-cyan-500',    row: 'bg-cyan-50/30',    chip: 'bg-cyan-50 border-cyan-200 text-cyan-800',          dot: 'bg-cyan-500'    },
+  'Copper Shop':                 { badge: 'bg-slate-100 text-slate-800 border border-slate-200',     border: 'border-l-slate-500',  row: 'bg-slate-50/30',  chip: 'bg-slate-50 border-slate-200 text-slate-800',   dot: 'bg-slate-500'  },
+  'Assembly Shop':                 { badge: 'bg-slate-100 text-slate-800 border border-slate-200',           border: 'border-l-slate-500',    row: 'bg-slate-50/30',    chip: 'bg-slate-50 border-slate-200 text-slate-800',          dot: 'bg-slate-500'    },
   'IT Shop':                       { badge: 'bg-slate-100 text-slate-700 border border-slate-200',       border: 'border-l-slate-500',   row: 'bg-slate-50/30',   chip: 'bg-slate-50 border-slate-200 text-slate-700',       dot: 'bg-slate-500'   },
-  'Automation Shop':               { badge: 'bg-fuchsia-100 text-fuchsia-800 border border-fuchsia-200', border: 'border-l-fuchsia-500', row: 'bg-fuchsia-50/30', chip: 'bg-fuchsia-50 border-fuchsia-200 text-fuchsia-800', dot: 'bg-fuchsia-500' },
-  'Tool Room Shop':                { badge: 'bg-orange-100 text-orange-800 border border-orange-200',     border: 'border-l-orange-500',  row: 'bg-orange-50/30',  chip: 'bg-orange-50 border-orange-200 text-orange-800',   dot: 'bg-orange-500'  },
-  'Tool Room':                     { badge: 'bg-orange-100 text-orange-800 border border-orange-200',     border: 'border-l-orange-500',  row: 'bg-orange-50/30',  chip: 'bg-orange-50 border-orange-200 text-orange-800',   dot: 'bg-orange-500'  },
-  'Research and Development':        { badge: 'bg-fuchsia-100 text-fuchsia-800 border border-fuchsia-200', border: 'border-l-fuchsia-500', row: 'bg-fuchsia-50/30', chip: 'bg-fuchsia-50 border-fuchsia-200 text-fuchsia-800', dot: 'bg-fuchsia-500' },
-  'Plant Machinery':                 { badge: 'bg-emerald-100 text-emerald-800 border border-emerald-200',   border: 'border-l-emerald-500', row: 'bg-emerald-50/30', chip: 'bg-emerald-50 border-emerald-200 text-emerald-800', dot: 'bg-emerald-500' },
-  'Information Technology':          { badge: 'bg-indigo-100 text-indigo-800 border border-indigo-200',     border: 'border-l-indigo-500',  row: 'bg-indigo-50/30',  chip: 'bg-indigo-50 border-indigo-200 text-indigo-800',   dot: 'bg-indigo-500'  },
-  'Lab & Quality Shop':            { badge: 'bg-pink-100 text-pink-800 border border-pink-200',           border: 'border-l-pink-500',    row: 'bg-pink-50/30',    chip: 'bg-pink-50 border-pink-200 text-pink-800',          dot: 'bg-pink-500'    },
-  'Storage Shop':                  { badge: 'bg-yellow-100 text-yellow-800 border border-yellow-200',     border: 'border-l-yellow-500',  row: 'bg-yellow-50/30',  chip: 'bg-yellow-50 border-yellow-200 text-yellow-800',   dot: 'bg-yellow-500'  },
+  'Automation Shop':               { badge: 'bg-slate-100 text-slate-800 border border-slate-200', border: 'border-l-slate-500', row: 'bg-slate-50/30', chip: 'bg-slate-50 border-slate-200 text-slate-800', dot: 'bg-slate-500' },
+  'Tool Room Shop':                { badge: 'bg-slate-100 text-slate-800 border border-slate-200',     border: 'border-l-slate-500',  row: 'bg-slate-50/30',  chip: 'bg-slate-50 border-slate-200 text-slate-800',   dot: 'bg-slate-500'  },
+  'Tool Room':                     { badge: 'bg-slate-100 text-slate-800 border border-slate-200',     border: 'border-l-slate-500',  row: 'bg-slate-50/30',  chip: 'bg-slate-50 border-slate-200 text-slate-800',   dot: 'bg-slate-500'  },
+  'Research and Development':        { badge: 'bg-slate-100 text-slate-800 border border-slate-200', border: 'border-l-slate-500', row: 'bg-slate-50/30', chip: 'bg-slate-50 border-slate-200 text-slate-800', dot: 'bg-slate-500' },
+  'Plant Machinery':                 { badge: 'bg-slate-100 text-slate-800 border border-slate-200',   border: 'border-l-slate-500', row: 'bg-slate-50/30', chip: 'bg-slate-50 border-slate-200 text-slate-800', dot: 'bg-slate-500' },
+  'Information Technology':          { badge: 'bg-slate-100 text-slate-800 border border-slate-200',     border: 'border-l-slate-500',  row: 'bg-slate-50/30',  chip: 'bg-slate-50 border-slate-200 text-slate-800',   dot: 'bg-slate-500'  },
+  'Lab & Quality Shop':            { badge: 'bg-slate-100 text-slate-800 border border-slate-200',           border: 'border-l-slate-500',    row: 'bg-slate-50/30',    chip: 'bg-slate-50 border-slate-200 text-slate-800',          dot: 'bg-slate-500'    },
+  'Storage Shop':                  { badge: 'bg-slate-100 text-slate-800 border border-slate-200',     border: 'border-l-slate-500',  row: 'bg-slate-50/30',  chip: 'bg-slate-50 border-slate-200 text-slate-800',   dot: 'bg-slate-500'  },
   'Fire & Safety':            { badge: 'bg-red-100 text-red-800 border border-red-200',              border: 'border-l-red-500',     row: 'bg-red-50/30',     chip: 'bg-red-50 border-red-200 text-red-800',             dot: 'bg-red-500'     },
-  'N2/O2/Helium/LPG/PNG':     { badge: 'bg-purple-100 text-purple-800 border border-purple-200',     border: 'border-l-purple-500',  row: 'bg-purple-50/30',  chip: 'bg-purple-50 border-purple-200 text-purple-800',   dot: 'bg-purple-500'  },
-  'ETP/STP':                  { badge: 'bg-green-100 text-green-800 border border-green-200',        border: 'border-l-green-500',   row: 'bg-green-50/30',   chip: 'bg-green-50 border-green-200 text-green-800',       dot: 'bg-green-500'   },
-  'Electrical':               { badge: 'bg-amber-100 text-amber-900 border border-amber-300',        border: 'border-l-amber-600',   row: 'bg-amber-50/30',   chip: 'bg-amber-50 border-amber-300 text-amber-900',       dot: 'bg-amber-600'   },
+  'N2/O2/Helium/LPG/PNG':     { badge: 'bg-slate-100 text-slate-800 border border-slate-200',     border: 'border-l-slate-500',  row: 'bg-slate-50/30',  chip: 'bg-slate-50 border-slate-200 text-slate-800',   dot: 'bg-slate-500'  },
+  'ETP/STP':                  { badge: 'bg-slate-100 text-slate-800 border border-slate-200',        border: 'border-l-slate-500',   row: 'bg-slate-50/30',   chip: 'bg-slate-50 border-slate-200 text-slate-800',       dot: 'bg-slate-500'   },
+  'Electrical':               { badge: 'bg-slate-100 text-slate-900 border border-slate-300',        border: 'border-l-slate-600',   row: 'bg-slate-50/30',   chip: 'bg-slate-50 border-slate-300 text-slate-900',       dot: 'bg-slate-600'   },
   'Misc.':                    { badge: 'bg-stone-100 text-stone-500 border border-stone-200',       border: 'border-l-stone-300',   row: 'bg-stone-50/30',   chip: 'bg-stone-50 border-stone-200 text-stone-500',       dot: 'bg-stone-400'   },
 }
 
-HEAD_STYLE['Utilities'] = { badge: 'bg-cyan-100 text-cyan-700 border border-cyan-200', border: 'border-l-cyan-400', row: 'bg-cyan-50/30', chip: 'bg-cyan-50 border-cyan-200 text-cyan-700', dot: 'bg-cyan-400' }
+HEAD_STYLE['Utilities'] = { badge: 'bg-slate-100 text-slate-700 border border-slate-200', border: 'border-l-slate-400', row: 'bg-slate-50/30', chip: 'bg-slate-50 border-slate-200 text-slate-700', dot: 'bg-slate-400' }
 
 function headStyle(head: string) {
   return GF_HEAD_STYLE[head] ?? HEAD_STYLE[head] ?? {
@@ -888,12 +888,12 @@ export default function CapexMasterPage() {
 
   // ── FY clone banner (shared between views) ─────────────────────────────────
   const fyBanner = showFyModal && (
-    <div className="flex items-center gap-3 bg-[#CCFBF1] border border-[#5EEAD4] rounded-xl px-4 py-3 shrink-0">
-      <p className="text-sm font-medium text-[#115E59] shrink-0">Clone all items to new FY:</p>
+    <div className="flex items-center gap-3 bg-[#DBEAFE] border border-[#93C5FD] rounded-xl px-4 py-3 shrink-0">
+      <p className="text-sm font-medium text-[#1D4ED8] shrink-0">Clone all items to new FY:</p>
       <input value={newFyInput} onChange={e => setNewFyInput(e.target.value)} placeholder="e.g. 2026-27"
-        className="text-sm border border-[#5EEAD4] rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#0D9488] w-36" />
+        className="text-sm border border-[#93C5FD] rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#2563EB] w-36" />
       <button onClick={handleCloneFY} disabled={!newFyInput.trim()}
-        className="px-3 py-1.5 text-xs font-semibold bg-[#0D9488] hover:bg-[#115E59] disabled:opacity-40 text-white rounded-lg">
+        className="px-3 py-1.5 text-xs font-semibold bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-40 text-white rounded-lg">
         Clone
       </button>
       <button onClick={() => setShowFyModal(false)} className="p-1.5 text-slate-400 hover:text-slate-700 rounded ml-auto">
@@ -929,12 +929,12 @@ export default function CapexMasterPage() {
                     'px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors',
                     fieldTab === tab
                       ? tab === 'green_field'
-                        ? 'bg-emerald-600 text-white border-emerald-600'
+                        ? 'bg-slate-600 text-white border-slate-600'
                         : tab === 'digitisation'
-                          ? 'bg-teal-600 text-white border-teal-600'
+                          ? 'bg-blue-600 text-white border-blue-600'
                           : tab === 'information_technology'
-                            ? 'bg-indigo-600 text-white border-indigo-600'
-                            : 'bg-[#153f90] text-white border-[#153f90]'
+                            ? 'bg-slate-600 text-white border-slate-600'
+                            : 'bg-[#1D4ED8] text-white border-[#1D4ED8]'
                       : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50',
                   ].join(' ')}
                 >
@@ -948,7 +948,7 @@ export default function CapexMasterPage() {
             <select
               value={activeFy}
               onChange={e => setSelectedFy(e.target.value)}
-              className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-[#0D9488]"
+              className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
             >
               {allFys.map(fy => <option key={fy} value={fy}>{fy}</option>)}
               {activeFy && !allFys.includes(activeFy) && (
@@ -979,7 +979,7 @@ export default function CapexMasterPage() {
         {needsProjectTypeStep ? (
           <div className="flex-1 min-h-0 overflow-y-auto">
             <p className="text-sm text-slate-500 mb-4 flex items-center gap-2">
-              <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-bold bg-[#153f90] text-white">Amber</span>
+              <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-bold bg-[#1D4ED8] text-white">Amber</span>
               Choose a business category before selecting a plant.
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pb-4">
@@ -991,13 +991,13 @@ export default function CapexMasterPage() {
                     key={pt}
                     type="button"
                     onClick={() => setSelectedProjectType(pt)}
-                    className="group text-left rounded-xl border border-slate-200 bg-white p-4 hover:shadow-lg hover:border-emerald-400 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+                    className="group text-left rounded-xl border border-slate-200 bg-white p-4 hover:shadow-lg hover:border-slate-400 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-600"
                   >
                     <div className="flex items-start justify-between">
-                      <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center">
-                        <Building2 className="w-5 h-5 text-emerald-700" aria-hidden="true" />
+                      <div className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center">
+                        <Building2 className="w-5 h-5 text-slate-700" aria-hidden="true" />
                       </div>
-                      <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-emerald-700 mt-1 transition-colors" aria-hidden="true" />
+                      <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-slate-700 mt-1 transition-colors" aria-hidden="true" />
                     </div>
                     <div className="mt-3">
                       <p className="text-[16px] font-bold text-slate-900 leading-tight">
@@ -1010,7 +1010,7 @@ export default function CapexMasterPage() {
                         <p className="text-[12px] text-slate-400 italic">No items for FY {activeFy}</p>
                       ) : (
                         <div>
-                          <p className="text-[24px] font-black font-mono leading-none text-emerald-700">
+                          <p className="text-[24px] font-black font-mono leading-none text-slate-700">
                             ₹{total.toFixed(2)}
                           </p>
                           <p className="text-[11px] text-slate-400 mt-1">Crore · {count} line items</p>
@@ -1039,7 +1039,7 @@ export default function CapexMasterPage() {
                 <span>Categories</span>
               </button>
               <span className="text-slate-200 select-none">/</span>
-              <span className="text-sm font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-full">
+              <span className="text-sm font-semibold text-slate-800 bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-full">
                 {PROJECT_TYPE_LABELS[selectedProjectType]}
               </span>
             </div>
@@ -1071,22 +1071,22 @@ export default function CapexMasterPage() {
                     setView('detail')
                   }}
                   className={[
-                    'group text-left rounded-xl border bg-white p-4 hover:shadow-lg transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D9488]',
+                    'group text-left rounded-xl border bg-white p-4 hover:shadow-lg transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]',
                     hasOverrun ? 'border-red-300 hover:border-red-400' : 'border-slate-200 hover:border-[#5B82D4]',
                   ].join(' ')}
                 >
                   <div className="flex items-start justify-between">
                     <div className="w-10 h-10 rounded-xl bg-[#EBF0FB] flex items-center justify-center">
-                      <Building2 className="w-5 h-5 text-[#153f90]" aria-hidden="true" />
+                      <Building2 className="w-5 h-5 text-[#1D4ED8]" aria-hidden="true" />
                     </div>
-                    <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-[#153f90] mt-1 transition-colors" aria-hidden="true" />
+                    <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-[#1D4ED8] mt-1 transition-colors" aria-hidden="true" />
                   </div>
                   <div className="mt-3">
                     <p className="text-[16px] font-bold text-slate-900 leading-tight">{plant.label}</p>
                     <p className="text-[12px] text-slate-400 mt-0.5">{plant.state}</p>
                     {plant.assignedUser && (
-                      <p className="text-[11px] text-[#0D9488] mt-1.5 font-medium flex items-center gap-1">
-                        <span className="inline-block w-3.5 h-3.5 rounded-full bg-[#CCFBF1] text-[#0D9488] text-center leading-3.5 text-[9px] font-bold">P</span>
+                      <p className="text-[11px] text-[#2563EB] mt-1.5 font-medium flex items-center gap-1">
+                        <span className="inline-block w-3.5 h-3.5 rounded-full bg-[#DBEAFE] text-[#2563EB] text-center leading-3.5 text-[9px] font-bold">P</span>
                         {plant.assignedUser}
                       </p>
                     )}
@@ -1095,7 +1095,7 @@ export default function CapexMasterPage() {
                     {fieldTab === 'green_field' && gfStat?.hasPlantBudget ? (
                       <div>
                         <p className="text-[11px] text-slate-500 font-medium">Plant budget</p>
-                        <p className={['text-[24px] font-black font-mono leading-none mt-0.5', gfStat.plantOver ? 'text-red-600' : 'text-emerald-700'].join(' ')}>
+                        <p className={['text-[24px] font-black font-mono leading-none mt-0.5', gfStat.plantOver ? 'text-red-600' : 'text-slate-700'].join(' ')}>
                           ₹{gfStat.allocatedCr!.toFixed(2)}
                         </p>
                         <p className="text-[11px] text-slate-400 mt-1">
@@ -1106,7 +1106,7 @@ export default function CapexMasterPage() {
                             Over by ₹{Math.abs(gfStat.plantRemainingCr!).toFixed(2)} Cr (head allocation)
                           </p>
                         ) : gfStat.hasPlantBudget && gfStat.plantRemainingCr! > 0 ? (
-                          <p className="text-[11px] font-semibold text-emerald-700 mt-1">
+                          <p className="text-[11px] font-semibold text-slate-700 mt-1">
                             ₹{gfStat.plantRemainingCr!.toFixed(2)} Cr unallocated to sections
                           </p>
                         ) : null}
@@ -1115,7 +1115,7 @@ export default function CapexMasterPage() {
                       <p className="text-[12px] text-slate-400 italic">No items for FY {activeFy}</p>
                     ) : (
                       <div>
-                        <p className={['text-[24px] font-black font-mono leading-none', hasOverrun ? 'text-red-600' : 'text-[#0D9488]'].join(' ')}>
+                        <p className={['text-[24px] font-black font-mono leading-none', hasOverrun ? 'text-red-600' : 'text-[#2563EB]'].join(' ')}>
                           ₹{total.toFixed(2)}
                         </p>
                         <p className="text-[11px] text-slate-400 mt-1">Crore · {count} line items</p>
@@ -1134,23 +1134,23 @@ export default function CapexMasterPage() {
               <button
                 type="button"
                 onClick={openCreateGreenPlantModal}
-                className="group text-left rounded-xl border-2 border-dashed border-emerald-300 bg-emerald-50/30 p-4
-                           hover:border-emerald-500 hover:bg-emerald-50 transition-all
-                           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+                className="group text-left rounded-xl border-2 border-dashed border-slate-300 bg-slate-50/30 p-4
+                           hover:border-slate-500 hover:bg-slate-50 transition-all
+                           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-600"
               >
-                <div className="w-10 h-10 rounded-xl bg-emerald-100 group-hover:bg-emerald-200 flex items-center justify-center transition-colors">
-                  <Plus className="w-5 h-5 text-emerald-700 group-hover:text-emerald-800 transition-colors" aria-hidden="true" />
+                <div className="w-10 h-10 rounded-xl bg-slate-100 group-hover:bg-slate-200 flex items-center justify-center transition-colors">
+                  <Plus className="w-5 h-5 text-slate-700 group-hover:text-slate-800 transition-colors" aria-hidden="true" />
                 </div>
                 <div className="mt-3">
-                  <p className="text-[16px] font-bold text-emerald-800 group-hover:text-emerald-900 transition-colors leading-tight">
+                  <p className="text-[16px] font-bold text-slate-800 group-hover:text-slate-900 transition-colors leading-tight">
                     Create Green Field Plant
                   </p>
-                  <p className="text-[12px] text-emerald-700/70 mt-0.5">
+                  <p className="text-[12px] text-slate-700/70 mt-0.5">
                     Add plant for FY {PROJECT_TYPE_LABELS[selectedProjectType]} · budgets added on detail page
                   </p>
                 </div>
-                <div className="mt-3 pt-3 border-t border-emerald-200/60">
-                  <p className="text-[11px] text-emerald-700/60">Available in Brown Field after creation</p>
+                <div className="mt-3 pt-3 border-t border-slate-200/60">
+                  <p className="text-[11px] text-slate-700/60">Available in Brown Field after creation</p>
                 </div>
               </button>
             )}
@@ -1160,14 +1160,14 @@ export default function CapexMasterPage() {
               <button
                 onClick={() => setShowAddPlant(true)}
                 className="group text-left rounded-xl border-2 border-dashed border-slate-200 bg-transparent p-4
-                           hover:border-[#0D9488] hover:bg-[#CCFBF1]/20 transition-all
-                           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0D9488]"
+                           hover:border-[#2563EB] hover:bg-[#DBEAFE]/20 transition-all
+                           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]"
               >
-                <div className="w-10 h-10 rounded-xl bg-slate-100 group-hover:bg-[#CCFBF1] flex items-center justify-center transition-colors">
-                  <Plus className="w-5 h-5 text-slate-400 group-hover:text-[#0D9488] transition-colors" aria-hidden="true" />
+                <div className="w-10 h-10 rounded-xl bg-slate-100 group-hover:bg-[#DBEAFE] flex items-center justify-center transition-colors">
+                  <Plus className="w-5 h-5 text-slate-400 group-hover:text-[#2563EB] transition-colors" aria-hidden="true" />
                 </div>
                 <div className="mt-3">
-                  <p className="text-[16px] font-bold text-slate-400 group-hover:text-[#0D9488] transition-colors leading-tight">Add Plant</p>
+                  <p className="text-[16px] font-bold text-slate-400 group-hover:text-[#2563EB] transition-colors leading-tight">Add Plant</p>
                   <p className="text-[12px] text-slate-400 mt-0.5">Configure a new plant location</p>
                 </div>
                 <div className="mt-3 pt-3 border-t border-slate-100">
@@ -1201,13 +1201,13 @@ export default function CapexMasterPage() {
                 onChange={e => setSetFyInput(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && handleSetFy()}
                 placeholder="e.g. 2026-27"
-                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-600 mb-4"
+                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-slate-600 mb-4"
               />
               <div className="flex gap-2">
                 <button
                   onClick={handleSetFy}
                   disabled={!setFyInput.trim()}
-                  className="flex-1 px-4 py-2.5 text-sm font-semibold bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white rounded-lg"
+                  className="flex-1 px-4 py-2.5 text-sm font-semibold bg-slate-600 hover:bg-slate-700 disabled:opacity-40 text-white rounded-lg"
                 >
                   Apply FY
                 </button>
@@ -1251,7 +1251,7 @@ export default function CapexMasterPage() {
                       value={greenPlantForm.label}
                       onChange={e => setGreenPlantForm(f => ({ ...f, label: e.target.value }))}
                       placeholder="e.g. Pune Greenfield"
-                      className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                      className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-slate-600"
                     />
                   </div>
                   <div>
@@ -1261,7 +1261,7 @@ export default function CapexMasterPage() {
                       value={greenPlantForm.state}
                       onChange={e => setGreenPlantForm(f => ({ ...f, state: e.target.value }))}
                       placeholder="e.g. Maharashtra"
-                      className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                      className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-slate-600"
                     />
                   </div>
                   <div>
@@ -1273,7 +1273,7 @@ export default function CapexMasterPage() {
                       value={greenPlantForm.fy}
                       onChange={e => setGreenPlantForm(f => ({ ...f, fy: e.target.value }))}
                       placeholder="e.g. 2026-27"
-                      className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                      className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-slate-600"
                     />
                   </div>
                   <div>
@@ -1281,7 +1281,7 @@ export default function CapexMasterPage() {
                     <select
                       value={greenPlantForm.projectType}
                       onChange={e => setGreenPlantForm(f => ({ ...f, projectType: e.target.value as ProjectType }))}
-                      className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                      className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 bg-white focus:outline-none focus:ring-2 focus:ring-slate-600"
                     >
                       {PROJECT_TYPES.map(pt => (
                         <option key={pt} value={pt}>{PROJECT_TYPE_LABELS[pt]}</option>
@@ -1295,7 +1295,7 @@ export default function CapexMasterPage() {
                       value={greenPlantForm.assignedUser}
                       onChange={e => setGreenPlantForm(f => ({ ...f, assignedUser: e.target.value }))}
                       placeholder="e.g. Vikram Nair"
-                      className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                      className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-slate-600"
                     />
                   </div>
                   <div className="sm:col-span-2">
@@ -1309,7 +1309,7 @@ export default function CapexMasterPage() {
                       value={greenPlantForm.budgetCr}
                       onChange={e => setGreenPlantForm(f => ({ ...f, budgetCr: e.target.value }))}
                       placeholder="e.g. 150.00"
-                      className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                      className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-slate-600"
                     />
                     <p className="text-[11px] text-slate-400 mt-1">
                       Total envelope for this plant — distribute to section heads after creation.
@@ -1321,7 +1321,7 @@ export default function CapexMasterPage() {
                 <button
                   onClick={handleCreateGreenFieldPlant}
                   disabled={!greenPlantForm.label.trim() || !greenPlantForm.fy.trim() || !greenPlantForm.budgetCr.trim() || parseFloat(greenPlantForm.budgetCr) <= 0}
-                  className="flex-1 px-4 py-2.5 text-sm font-semibold bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white rounded-lg"
+                  className="flex-1 px-4 py-2.5 text-sm font-semibold bg-slate-600 hover:bg-slate-700 disabled:opacity-40 text-white rounded-lg"
                 >
                   Create Plant
                 </button>
@@ -1362,7 +1362,7 @@ export default function CapexMasterPage() {
                     onChange={e => setPlantForm(f => ({ ...f, label: e.target.value }))}
                     onKeyDown={e => e.key === 'Enter' && handleAddPlant()}
                     placeholder="e.g. Manesar Plant 1"
-                    className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-[#0D9488]"
+                    className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
                   />
                 </div>
                 <div>
@@ -1373,7 +1373,7 @@ export default function CapexMasterPage() {
                     onChange={e => setPlantForm(f => ({ ...f, state: e.target.value }))}
                     onKeyDown={e => e.key === 'Enter' && handleAddPlant()}
                     placeholder="e.g. Haryana"
-                    className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-[#0D9488]"
+                    className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
                   />
                 </div>
                 <div>
@@ -1384,7 +1384,7 @@ export default function CapexMasterPage() {
                     onChange={e => setPlantForm(f => ({ ...f, assignedUser: e.target.value }))}
                     onKeyDown={e => e.key === 'Enter' && handleAddPlant()}
                     placeholder="e.g. Vikram Nair"
-                    className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-[#0D9488]"
+                    className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
                   />
                 </div>
               </div>
@@ -1392,7 +1392,7 @@ export default function CapexMasterPage() {
                 <button
                   onClick={handleAddPlant}
                   disabled={!plantForm.label.trim()}
-                  className="flex-1 px-4 py-2.5 text-sm font-semibold bg-[#0D9488] hover:bg-[#115E59] disabled:opacity-40 text-white rounded-lg transition-colors"
+                  className="flex-1 px-4 py-2.5 text-sm font-semibold bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-40 text-white rounded-lg transition-colors"
                 >
                   Add Plant
                 </button>
@@ -1460,7 +1460,7 @@ export default function CapexMasterPage() {
               {activePlant ? plantLabel(activePlant) : 'Plant'}
             </button>
             <span className="text-slate-200 select-none">/</span>
-            <span className="text-sm font-semibold text-[#153f90]">{selectedHeadFilter}</span>
+            <span className="text-sm font-semibold text-[#1D4ED8]">{selectedHeadFilter}</span>
           </>
         )}
         {fieldTab === 'green_field' && selectedGreenFieldSection && (
@@ -1500,7 +1500,7 @@ export default function CapexMasterPage() {
             {selectedHeadFilter && (
               <>
                 <span className="text-slate-200 select-none">/</span>
-                <span className="text-sm font-semibold text-emerald-800">{selectedHeadFilter}</span>
+                <span className="text-sm font-semibold text-slate-800">{selectedHeadFilter}</span>
               </>
             )}
           </>
@@ -1522,15 +1522,15 @@ export default function CapexMasterPage() {
             <>
               <span className={[
                 'ml-2 text-xs font-semibold px-2 py-0.5 rounded-full align-middle',
-                fieldTab === 'green_field' ? 'bg-emerald-100 text-emerald-800' :
-                fieldTab === 'digitisation' ? 'bg-teal-100 text-teal-800' :
-                fieldTab === 'information_technology' ? 'bg-indigo-100 text-indigo-800' :
+                fieldTab === 'green_field' ? 'bg-slate-100 text-slate-800' :
+                fieldTab === 'digitisation' ? 'bg-blue-100 text-blue-800' :
+                fieldTab === 'information_technology' ? 'bg-slate-100 text-slate-800' :
                 'bg-slate-100 text-slate-600',
               ].join(' ')}>
                 {FIELD_TYPE_LABELS[fieldTab]}
               </span>
               {isProjectTypeScopedField(fieldTab) && selectedProjectType && (
-                <span className="ml-2 text-xs font-semibold px-2 py-0.5 rounded-full align-middle bg-emerald-50 text-emerald-700 border border-emerald-200">
+                <span className="ml-2 text-xs font-semibold px-2 py-0.5 rounded-full align-middle bg-slate-50 text-slate-700 border border-slate-200">
                   {PROJECT_TYPE_LABELS[selectedProjectType]}
                 </span>
               )}
@@ -1553,10 +1553,10 @@ export default function CapexMasterPage() {
               className={[
                 'px-2.5 py-1 text-[11px] font-semibold rounded-lg border transition-colors',
                 fieldTab === tab
-                  ? tab === 'green_field' ? 'bg-emerald-600 text-white border-emerald-600'
-                  : tab === 'digitisation' ? 'bg-teal-600 text-white border-teal-600'
-                  : tab === 'information_technology' ? 'bg-indigo-600 text-white border-indigo-600'
-                  : 'bg-[#153f90] text-white border-[#153f90]'
+                  ? tab === 'green_field' ? 'bg-slate-600 text-white border-slate-600'
+                  : tab === 'digitisation' ? 'bg-blue-600 text-white border-blue-600'
+                  : tab === 'information_technology' ? 'bg-slate-600 text-white border-slate-600'
+                  : 'bg-[#1D4ED8] text-white border-[#1D4ED8]'
                   : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50',
               ].join(' ')}
             >
@@ -1567,14 +1567,14 @@ export default function CapexMasterPage() {
           <select
             value={activeFy}
             onChange={e => setSelectedFy(e.target.value)}
-            className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-[#0D9488]"
+            className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
           >
             {allFys.map(fy => <option key={fy} value={fy}>{fy}</option>)}
           </select>
           {brownFieldLocked ? (
             <Link
               href="/capex/budget-proposals"
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-amber-500 hover:bg-amber-600 text-white rounded-lg transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-slate-500 hover:bg-slate-600 text-white rounded-lg transition-colors"
             >
               <ClipboardList className="w-3.5 h-3.5" /> Plan Next-FY Budget
             </Link>
@@ -1597,7 +1597,7 @@ export default function CapexMasterPage() {
           {canAddMasterItem && (
             <button
               onClick={openAddItemForm}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-[#0D9488] hover:bg-[#115E59] text-white rounded-lg transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg transition-colors"
             >
               <Plus className="w-3.5 h-3.5" /> Add Item
             </button>
@@ -1606,7 +1606,7 @@ export default function CapexMasterPage() {
             <button
               type="button"
               onClick={() => openHeadBudgetModal(selectedHeadFilter, selectedGreenFieldSection, true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-slate-50 hover:bg-slate-100 text-slate-800 border border-slate-200 rounded-lg transition-colors"
             >
               <Pencil className="w-3.5 h-3.5" /> Edit Head Budget
             </button>
@@ -1615,7 +1615,7 @@ export default function CapexMasterPage() {
             <button
               type="button"
               onClick={() => openSectionBudgetModal(selectedGreenFieldSection, true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-slate-50 hover:bg-slate-100 text-slate-800 border border-slate-200 rounded-lg transition-colors"
             >
               <Pencil className="w-3.5 h-3.5" /> Edit Section Budget
             </button>
@@ -1630,7 +1630,7 @@ export default function CapexMasterPage() {
           'flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl border px-4 py-3 shrink-0 text-sm',
           activeGreenFieldPlantBudget.over
             ? 'bg-red-50 border-red-200 text-red-800'
-            : 'bg-emerald-50 border-emerald-200 text-emerald-900',
+            : 'bg-slate-50 border-slate-200 text-slate-900',
         ].join(' ')}>
           <div>
             <span className="text-xs font-semibold uppercase tracking-wide opacity-70">Plant budget</span>
@@ -1650,11 +1650,11 @@ export default function CapexMasterPage() {
                 Section allocation over by ₹{Math.abs(activeGreenFieldPlantBudget.remainingCr).toFixed(2)} Cr
               </span>
             ) : activeGreenFieldPlantBudget.remainingCr > 0 ? (
-              <span className="text-xs font-semibold text-emerald-800">
+              <span className="text-xs font-semibold text-slate-800">
                 ₹{activeGreenFieldPlantBudget.remainingCr.toFixed(2)} Cr unallocated to sections
               </span>
             ) : (
-              <span className="text-xs font-semibold text-emerald-800">Fully allocated to sections</span>
+              <span className="text-xs font-semibold text-slate-800">Fully allocated to sections</span>
             )}
           </div>
         </div>
@@ -1665,7 +1665,7 @@ export default function CapexMasterPage() {
           'flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl border px-4 py-3 shrink-0 text-sm',
           activeGreenFieldSectionBudget.over
             ? 'bg-red-50 border-red-200 text-red-800'
-            : 'bg-emerald-50 border-emerald-200 text-emerald-900',
+            : 'bg-slate-50 border-slate-200 text-slate-900',
         ].join(' ')}>
           <div>
             <span className="text-xs font-semibold uppercase tracking-wide opacity-70">{selectedGreenFieldSection} budget</span>
@@ -1685,11 +1685,11 @@ export default function CapexMasterPage() {
                 Head allocation over by ₹{Math.abs(activeGreenFieldSectionBudget.remainingCr).toFixed(2)} Cr
               </span>
             ) : activeGreenFieldSectionBudget.remainingCr > 0 ? (
-              <span className="text-xs font-semibold text-emerald-800">
+              <span className="text-xs font-semibold text-slate-800">
                 ₹{activeGreenFieldSectionBudget.remainingCr.toFixed(2)} Cr unallocated to heads
               </span>
             ) : (
-              <span className="text-xs font-semibold text-emerald-800">Fully allocated to heads</span>
+              <span className="text-xs font-semibold text-slate-800">Fully allocated to heads</span>
             )}
           </div>
         </div>
@@ -1700,7 +1700,7 @@ export default function CapexMasterPage() {
           'flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl border px-4 py-3 shrink-0 text-sm',
           activeGreenFieldHeadBudget.over
             ? 'bg-red-50 border-red-200 text-red-800'
-            : 'bg-emerald-50 border-emerald-200 text-emerald-900',
+            : 'bg-slate-50 border-slate-200 text-slate-900',
         ].join(' ')}>
           <div>
             <span className="text-xs font-semibold uppercase tracking-wide opacity-70">{selectedHeadFilter} budget</span>
@@ -1716,11 +1716,11 @@ export default function CapexMasterPage() {
                 Over by ₹{Math.abs(activeGreenFieldHeadBudget.remainingCr).toFixed(2)} Cr
               </span>
             ) : activeGreenFieldHeadBudget.remainingCr > 0 ? (
-              <span className="text-xs font-semibold text-emerald-800">
+              <span className="text-xs font-semibold text-slate-800">
                 ₹{activeGreenFieldHeadBudget.remainingCr.toFixed(2)} Cr remaining
               </span>
             ) : (
-              <span className="text-xs font-semibold text-emerald-800">Fully utilised</span>
+              <span className="text-xs font-semibold text-slate-800">Fully utilised</span>
             )}
           </div>
         </div>
@@ -1736,7 +1736,7 @@ export default function CapexMasterPage() {
             <div>
               <label className="text-xs text-slate-500 font-medium" htmlFor="head-select">Head</label>
               {selectedHeadFilter ? (
-                <div className="mt-1 inline-flex items-center px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                <div className="mt-1 inline-flex items-center px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-50 text-slate-800 border border-slate-200">
                   {selectedHeadFilter}
                 </div>
               ) : !showCustomHead ? (
@@ -1751,7 +1751,7 @@ export default function CapexMasterPage() {
                       setForm(f => ({ ...f, head: e.target.value }))
                     }
                   }}
-                  className="mt-1 w-full text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#0D9488] bg-white"
+                  className="mt-1 w-full text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#2563EB] bg-white"
                 >
                   {activeHeads.map(h => <option key={h} value={h}>{h}</option>)}
                   <option disabled>──────────</option>
@@ -1768,7 +1768,7 @@ export default function CapexMasterPage() {
                       placeholder="New head name"
                       maxLength={40}
                       aria-label="New budget head name"
-                      className="flex-1 text-sm border border-[#5EEAD4] rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#0D9488]"
+                      className="flex-1 text-sm border border-[#93C5FD] rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
                     />
                     <button
                       type="button"
@@ -1779,7 +1779,7 @@ export default function CapexMasterPage() {
                       <X className="w-4 h-4" />
                     </button>
                   </div>
-                  <p className="text-[11px] text-[#115E59] bg-[#CCFBF1] border border-[#5EEAD4] rounded px-2 py-1 leading-snug">
+                  <p className="text-[11px] text-[#1D4ED8] bg-[#DBEAFE] border border-[#93C5FD] rounded px-2 py-1 leading-snug">
                     This head will be added for FY {activeFy}. You can rename it later from the section header.
                   </p>
                 </div>
@@ -1789,38 +1789,38 @@ export default function CapexMasterPage() {
               <label className="text-xs text-slate-500 font-medium">Department</label>
               <input type="text" value={form.department} onChange={e => setForm(f => ({ ...f, department: e.target.value }))}
                 placeholder="e.g. HEX"
-                className="mt-1 w-full text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#0D9488]" />
+                className="mt-1 w-full text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#2563EB]" />
             </div>
             <div>
               <label className="text-xs text-slate-500 font-medium">Sub Particulars</label>
               <input type="text" value={form.subParticulars} onChange={e => setForm(f => ({ ...f, subParticulars: e.target.value }))}
                 placeholder="Item description"
-                className="mt-1 w-full text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#0D9488]" />
+                className="mt-1 w-full text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#2563EB]" />
             </div>
             <div>
               <label className="text-xs text-slate-500 font-medium">Qty</label>
               <input type="number" step="1" min="0" value={form.qty} onChange={e => setForm(f => ({ ...f, qty: e.target.value }))}
                 placeholder="0"
-                className="mt-1 w-full text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#0D9488]" />
+                className="mt-1 w-full text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#2563EB]" />
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className="text-xs text-slate-500 font-medium">Rate</label>
                 <input type="number" step="0.01" value={form.rate} onChange={e => setForm(f => ({ ...f, rate: e.target.value }))}
                   placeholder="0.00"
-                  className="mt-1 w-full text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#0D9488]" />
+                  className="mt-1 w-full text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#2563EB]" />
               </div>
               <div>
                 <label className="text-xs text-slate-500 font-medium">Total (Cr)</label>
                 <input type="number" step="0.01" value={form.totalCost} onChange={e => setForm(f => ({ ...f, totalCost: e.target.value }))}
                   placeholder="0.00"
-                  className="mt-1 w-full text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#0D9488]" />
+                  className="mt-1 w-full text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#2563EB]" />
               </div>
             </div>
           </div>
           <div className="flex gap-2 mt-3">
             <button onClick={handleAddItem} disabled={!form.subParticulars.trim()}
-              className="px-4 py-1.5 text-xs font-semibold bg-[#0D9488] hover:bg-[#115E59] disabled:opacity-40 text-white rounded-lg">Add</button>
+              className="px-4 py-1.5 text-xs font-semibold bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-40 text-white rounded-lg">Add</button>
             <button onClick={() => { setShowAddForm(false); setShowCustomHead(false); setCustomHeadInput(''); setForm({ ...BLANK_FORM, head: getDefaultHeadForAddForm() }) }}
               className="px-4 py-1.5 text-xs font-semibold bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 rounded-lg">Cancel</button>
           </div>
@@ -1847,8 +1847,8 @@ export default function CapexMasterPage() {
                     type="button"
                     onClick={() => handleSelectGreenFieldSection(section)}
                     className={[
-                      'group text-left rounded-xl border bg-white p-4 hover:shadow-md transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600',
-                      over ? 'border-red-300 hover:border-red-400' : 'border-slate-200 hover:border-emerald-500',
+                      'group text-left rounded-xl border bg-white p-4 hover:shadow-md transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-600',
+                      over ? 'border-red-300 hover:border-red-400' : 'border-slate-200 hover:border-slate-500',
                     ].join(' ')}
                   >
                     <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold ${s.badge}`}>
@@ -1856,7 +1856,7 @@ export default function CapexMasterPage() {
                     </span>
                     {hasAllocation ? (
                       <>
-                        <p className={['text-2xl font-black font-mono mt-3', over ? 'text-red-700' : 'text-emerald-700'].join(' ')}>
+                        <p className={['text-2xl font-black font-mono mt-3', over ? 'text-red-700' : 'text-slate-700'].join(' ')}>
                           ₹{allocatedCr.toFixed(2)} <span className="text-xs font-semibold">Cr allocated</span>
                         </p>
                         <p className="text-[11px] text-slate-400 mt-1">
@@ -1865,12 +1865,12 @@ export default function CapexMasterPage() {
                         {over ? (
                           <p className="text-[11px] font-bold text-red-600 mt-1">Over by ₹{Math.abs(remainingCr).toFixed(2)} Cr</p>
                         ) : remainingCr > 0 ? (
-                          <p className="text-[11px] font-semibold text-emerald-700 mt-1">₹{remainingCr.toFixed(2)} Cr remaining</p>
+                          <p className="text-[11px] font-semibold text-slate-700 mt-1">₹{remainingCr.toFixed(2)} Cr remaining</p>
                         ) : null}
                       </>
                     ) : (
                       <>
-                        <p className="text-2xl font-black font-mono text-emerald-700 mt-3">
+                        <p className="text-2xl font-black font-mono text-slate-700 mt-3">
                           Assign budget
                         </p>
                         <p className="text-[11px] text-slate-400 mt-1">
@@ -1878,7 +1878,7 @@ export default function CapexMasterPage() {
                         </p>
                       </>
                     )}
-                    <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-emerald-600 mt-3 transition-colors" aria-hidden="true" />
+                    <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-slate-600 mt-3 transition-colors" aria-hidden="true" />
                   </button>
                 )
               })}
@@ -1901,7 +1901,7 @@ export default function CapexMasterPage() {
                 <button
                   type="button"
                   onClick={openHeadsModal}
-                  className="mt-1 flex items-center gap-1.5 px-4 py-2 text-xs font-semibold bg-[#153f90] hover:bg-[#0f2d6b] text-white rounded-lg transition-colors"
+                  className="mt-1 flex items-center gap-1.5 px-4 py-2 text-xs font-semibold bg-[#1D4ED8] hover:bg-[#0f2d6b] text-white rounded-lg transition-colors"
                 >
                   <SlidersHorizontal className="w-3.5 h-3.5" /> Manage Heads
                 </button>
@@ -1928,12 +1928,12 @@ export default function CapexMasterPage() {
                     }}
                     className={[
                       'text-left rounded-xl border-2 p-4 transition-all hover:shadow-md focus-visible:outline-none focus-visible:ring-2',
-                      isGreen ? 'focus-visible:ring-emerald-600' : 'focus-visible:ring-[#153f90]',
+                      isGreen ? 'focus-visible:ring-slate-600' : 'focus-visible:ring-[#1D4ED8]',
                       over
                         ? 'border-red-300 bg-red-50/80 hover:border-red-400'
                         : isGreen
-                          ? 'border-slate-200 bg-white hover:border-emerald-500'
-                          : 'border-slate-200 bg-white hover:border-[#153f90]',
+                          ? 'border-slate-200 bg-white hover:border-slate-500'
+                          : 'border-slate-200 bg-white hover:border-[#1D4ED8]',
                     ].join(' ')}
                   >
                     <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold ${s.badge}`}>
@@ -1943,7 +1943,7 @@ export default function CapexMasterPage() {
                       <>
                         <p className={[
                           'text-xl font-black font-mono mt-3',
-                          over ? 'text-red-700' : 'text-emerald-700',
+                          over ? 'text-red-700' : 'text-slate-700',
                         ].join(' ')}>
                           ₹{total.toFixed(2)} <span className="text-[10px] font-semibold">Cr allocated</span>
                         </p>
@@ -1953,16 +1953,16 @@ export default function CapexMasterPage() {
                         {over ? (
                           <p className="text-[10px] font-bold text-red-600 mt-1">Over by ₹{overCr.toFixed(2)} Cr</p>
                         ) : remainingCr > 0 ? (
-                          <p className="text-[10px] font-semibold text-emerald-700 mt-1">₹{remainingCr.toFixed(2)} Cr remaining</p>
+                          <p className="text-[10px] font-semibold text-slate-700 mt-1">₹{remainingCr.toFixed(2)} Cr remaining</p>
                         ) : !hasAllocation ? (
-                          <p className="text-[10px] text-amber-600 mt-1 font-medium">Click to assign budget</p>
+                          <p className="text-[10px] text-slate-600 mt-1 font-medium">Click to assign budget</p>
                         ) : null}
                       </>
                     ) : (
                       <>
                         <p className={[
                           'text-xl font-black font-mono mt-3',
-                          over ? 'text-red-700' : isGreen ? 'text-emerald-700' : 'text-[#153f90]',
+                          over ? 'text-red-700' : isGreen ? 'text-slate-700' : 'text-[#1D4ED8]',
                         ].join(' ')}>
                           {isGreen ? 'Assign budget' : `₹${total.toFixed(2)}`}{' '}
                           {!isGreen && <span className="text-[10px] font-semibold">Cr</span>}
@@ -1977,7 +1977,7 @@ export default function CapexMasterPage() {
                     )}
                     <ChevronRight className={[
                       'w-4 h-4 text-slate-300 mt-3',
-                      isGreen ? 'group-hover:text-emerald-600' : '',
+                      isGreen ? 'group-hover:text-slate-600' : '',
                     ].join(' ')} aria-hidden="true" />
                   </button>
                 )
@@ -1996,7 +1996,7 @@ export default function CapexMasterPage() {
                 <p className="text-xs text-slate-400">Live FY budgets are locked. Plan changes in the next FY.</p>
                 <Link
                   href="/capex/budget-proposals"
-                  className="mt-1 flex items-center gap-1.5 px-4 py-2 text-xs font-semibold bg-amber-500 hover:bg-amber-600 text-white rounded-lg transition-colors"
+                  className="mt-1 flex items-center gap-1.5 px-4 py-2 text-xs font-semibold bg-slate-500 hover:bg-slate-600 text-white rounded-lg transition-colors"
                 >
                   <ClipboardList className="w-3.5 h-3.5" /> Plan Next-FY Budget
                 </Link>
@@ -2006,7 +2006,7 @@ export default function CapexMasterPage() {
                 <p className="text-xs text-slate-400">Use &quot;Add Item&quot; to begin planning this head&apos;s budget.</p>
                 <button
                   onClick={openAddItemForm}
-                  className="mt-1 flex items-center gap-1.5 px-4 py-2 text-xs font-semibold bg-[#0D9488] hover:bg-[#115E59] text-white rounded-lg transition-colors"
+                  className="mt-1 flex items-center gap-1.5 px-4 py-2 text-xs font-semibold bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg transition-colors"
                 >
                   <Plus className="w-3.5 h-3.5" /> Add First Item
                 </button>
@@ -2025,7 +2025,7 @@ export default function CapexMasterPage() {
             {canAddMasterItem && (
               <button
                 onClick={openAddItemForm}
-                className="mt-1 flex items-center gap-1.5 px-4 py-2 text-xs font-semibold bg-[#0D9488] hover:bg-[#115E59] text-white rounded-lg transition-colors"
+                className="mt-1 flex items-center gap-1.5 px-4 py-2 text-xs font-semibold bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg transition-colors"
               >
                 <Plus className="w-3.5 h-3.5" /> Add First Item
               </button>
@@ -2048,12 +2048,12 @@ export default function CapexMasterPage() {
                   className={[
                     'text-left rounded-xl border-2 p-3 transition-all',
                     selectedHeadFilter === null
-                      ? 'border-[#153f90] bg-white shadow-sm ring-2 ring-[#153f90]/15'
+                      ? 'border-[#1D4ED8] bg-white shadow-sm ring-2 ring-[#1D4ED8]/15'
                       : 'border-slate-200 bg-white hover:border-slate-300',
                   ].join(' ')}
                 >
                   <p className="text-xs font-bold text-slate-800">All Heads</p>
-                  <p className="text-lg font-black font-mono mt-1 text-[#153f90]">
+                  <p className="text-lg font-black font-mono mt-1 text-[#1D4ED8]">
                     ₹{scopeItems.reduce((s, i) => s + i.totalCost, 0).toFixed(2)}
                   </p>
                   <p className="text-[10px] text-slate-400 mt-1">{scopeItems.length} items</p>
@@ -2076,14 +2076,14 @@ export default function CapexMasterPage() {
                         selected
                           ? over
                             ? 'border-red-500 bg-red-50 ring-2 ring-red-200'
-                            : 'bg-white shadow-sm ring-2 border-[#153f90] ring-[#153f90]/15'
+                            : 'bg-white shadow-sm ring-2 border-[#1D4ED8] ring-[#1D4ED8]/15'
                           : over
                             ? 'border-red-300 bg-red-50/80 hover:border-red-400'
                             : 'border-slate-200 bg-white hover:border-slate-300',
                       ].join(' ')}
                     >
                       <p className="text-xs font-bold text-slate-800 leading-snug">{head}</p>
-                      <p className={['text-lg font-black font-mono mt-1', over ? 'text-red-700' : 'text-[#153f90]'].join(' ')}>
+                      <p className={['text-lg font-black font-mono mt-1', over ? 'text-red-700' : 'text-[#1D4ED8]'].join(' ')}>
                         ₹{total.toFixed(2)} <span className="text-[10px] font-semibold">Cr</span>
                       </p>
                       <p className="text-[10px] text-slate-400 mt-1">{count} sub-particular{count !== 1 ? 's' : ''}</p>
@@ -2125,13 +2125,13 @@ export default function CapexMasterPage() {
                           ? over
                             ? 'border-red-500 bg-red-50 font-bold text-red-800'
                             : isGreen
-                              ? 'border-emerald-600 bg-emerald-50 font-bold text-emerald-800'
-                              : 'border-[#153f90] bg-[#EBF0FB] font-bold text-[#153f90]'
+                              ? 'border-slate-600 bg-slate-50 font-bold text-slate-800'
+                              : 'border-[#1D4ED8] bg-[#EBF0FB] font-bold text-[#1D4ED8]'
                           : over
                             ? 'border-red-200 bg-red-50/50 text-red-700 hover:border-red-400'
                             : isGreen
-                              ? 'border-slate-200 bg-white text-slate-600 hover:border-emerald-400'
-                              : 'border-slate-200 bg-white text-slate-600 hover:border-[#153f90]',
+                              ? 'border-slate-200 bg-white text-slate-600 hover:border-slate-400'
+                              : 'border-slate-200 bg-white text-slate-600 hover:border-[#1D4ED8]',
                       ].join(' ')}
                     >
                       {head}
@@ -2193,7 +2193,7 @@ export default function CapexMasterPage() {
                                   onChange={e => setEditHead(e.target.value)}
                                   autoFocus
                                   aria-label="Change budget head"
-                                  className="w-full text-[12px] font-semibold border border-violet-300 rounded px-1.5 py-0.5 bg-white focus:outline-none focus:ring-2 focus:ring-violet-500 text-slate-700 leading-tight"
+                                  className="w-full text-[12px] font-semibold border border-slate-300 rounded px-1.5 py-0.5 bg-white focus:outline-none focus:ring-2 focus:ring-slate-500 text-slate-700 leading-tight"
                                 >
                                   {activeHeads.map(h => <option key={h} value={h}>{h}</option>)}
                                 </select>
@@ -2209,7 +2209,7 @@ export default function CapexMasterPage() {
                               {isEditing ? (
                                 <input type="number" step="1" min="0" value={editQty}
                                   onChange={e => setEditQty(e.target.value)}
-                                  className="w-16 text-right text-sm border border-violet-300 rounded px-1.5 py-0.5 focus:outline-none focus:ring-2 focus:ring-violet-500"
+                                  className="w-16 text-right text-sm border border-slate-300 rounded px-1.5 py-0.5 focus:outline-none focus:ring-2 focus:ring-slate-500"
                                   aria-label="Edit quantity" />
                               ) : item.qty != null && item.qty > 0 ? (
                                 item.qty.toLocaleString('en-IN')
@@ -2221,7 +2221,7 @@ export default function CapexMasterPage() {
                               {isEditing ? (
                                 <input type="number" step="0.001" value={editRate}
                                   onChange={e => setEditRate(e.target.value)}
-                                  className="w-24 text-right text-sm border border-violet-300 rounded px-1.5 py-0.5 focus:outline-none focus:ring-2 focus:ring-violet-500"
+                                  className="w-24 text-right text-sm border border-slate-300 rounded px-1.5 py-0.5 focus:outline-none focus:ring-2 focus:ring-slate-500"
                                   aria-label="Edit rate" />
                               ) : item.rateRs != null && item.rateRs > 0 ? (
                                 item.rateRs.toLocaleString('en-IN')
@@ -2235,7 +2235,7 @@ export default function CapexMasterPage() {
                               {isEditing ? (
                                 <input type="number" step="0.01" value={editAlloc}
                                   onChange={e => setEditAlloc(e.target.value)}
-                                  className="w-24 text-right text-sm border border-violet-300 rounded px-1.5 py-0.5 focus:outline-none focus:ring-2 focus:ring-violet-500"
+                                  className="w-24 text-right text-sm border border-slate-300 rounded px-1.5 py-0.5 focus:outline-none focus:ring-2 focus:ring-slate-500"
                                   aria-label="Edit total cost" />
                               ) : (
                                 <span className="inline-flex items-center gap-1.5 justify-end">
@@ -2256,7 +2256,7 @@ export default function CapexMasterPage() {
                                   <div className="flex flex-col gap-1">
                                     {linked.map(req => (
                                       <Link key={req.id} href={`/capex/${req.id}`}
-                                        className="inline-block text-[11px] font-bold text-[#153f90] bg-[#EBF0FB] border border-[#C8D5F4] px-1.5 py-0.5 rounded hover:bg-[#C8D5F4] transition-colors">
+                                        className="inline-block text-[11px] font-bold text-[#1D4ED8] bg-[#EBF0FB] border border-[#C8D5F4] px-1.5 py-0.5 rounded hover:bg-[#C8D5F4] transition-colors">
                                         {req.requestNo ?? req.id.slice(0, 8)}
                                       </Link>
                                     ))}
@@ -2279,12 +2279,12 @@ export default function CapexMasterPage() {
                                 </span>
                               ) : isEditing ? (
                                 <button onClick={() => saveEdit(item.id, item.head)} aria-label="Save changes"
-                                  className="p-1 text-violet-600 hover:bg-violet-100 rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400">
+                                  className="p-1 text-slate-600 hover:bg-slate-100 rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400">
                                   <Check className="w-3.5 h-3.5" />
                                 </button>
                               ) : (
                                 <button onClick={() => startEdit(item)} aria-label={`Edit ${item.subParticulars}`}
-                                  className="p-1 text-slate-300 hover:text-violet-600 hover:bg-violet-50 rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400">
+                                  className="p-1 text-slate-300 hover:text-slate-600 hover:bg-slate-50 rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400">
                                   <Pencil className="w-3 h-3" />
                                 </button>
                               )}
@@ -2297,12 +2297,12 @@ export default function CapexMasterPage() {
                 })}
 
                 <tfoot>
-                  <tr className="bg-[#1e1b4b]">
-                    <td colSpan={6} className="pl-5 pr-4 py-3.5 text-[12px] font-bold text-indigo-300/60 uppercase tracking-wider">
+                  <tr className="bg-[#1E293B]">
+                    <td colSpan={6} className="pl-5 pr-4 py-3.5 text-[12px] font-bold text-slate-300/60 uppercase tracking-wider">
                       {plantLabel(activePlant!)} — Grand Total
-                      <span className="ml-2 text-indigo-300/40 font-normal normal-case tracking-normal text-[11px]">({displayItems.length} items)</span>
+                      <span className="ml-2 text-slate-300/40 font-normal normal-case tracking-normal text-[11px]">({displayItems.length} items)</span>
                     </td>
-                    <td className="px-4 py-3.5 text-right text-[19px] font-black text-amber-300 font-mono tracking-tight">
+                    <td className="px-4 py-3.5 text-right text-[19px] font-black text-slate-300 font-mono tracking-tight">
                       ₹{grandTotal.toFixed(2)} Cr
                     </td>
                     <td colSpan={4} />
@@ -2338,13 +2338,13 @@ export default function CapexMasterPage() {
                   onKeyDown={e => e.key === 'Enter' && handleAddManageHead()}
                   placeholder="New head name"
                   maxLength={40}
-                  className="flex-1 text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#153f90]"
+                  className="flex-1 text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#1D4ED8]"
                 />
                 <button
                   type="button"
                   onClick={handleAddManageHead}
                   disabled={!newManageHeadInput.trim()}
-                  className="px-3 py-1.5 text-xs font-semibold bg-[#153f90] hover:bg-[#0f2d6b] disabled:opacity-40 text-white rounded-lg"
+                  className="px-3 py-1.5 text-xs font-semibold bg-[#1D4ED8] hover:bg-[#0f2d6b] disabled:opacity-40 text-white rounded-lg"
                 >
                   Add Head
                 </button>
@@ -2366,7 +2366,7 @@ export default function CapexMasterPage() {
                       onChange={e => setHeadEdits(prev => ({ ...prev, [head]: e.target.value }))}
                       maxLength={40}
                       disabled={markedForDelete}
-                      className="flex-1 text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#0D9488] disabled:bg-slate-50 disabled:text-slate-400"
+                      className="flex-1 text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#2563EB] disabled:bg-slate-50 disabled:text-slate-400"
                     />
                     {isCustomHead && (
                       <button
@@ -2391,7 +2391,7 @@ export default function CapexMasterPage() {
             <div className="flex gap-2 mt-5">
               <button
                 onClick={saveHeadEdits}
-                className="flex-1 px-4 py-2.5 text-sm font-semibold bg-[#0D9488] hover:bg-[#115E59] text-white rounded-lg transition-colors"
+                className="flex-1 px-4 py-2.5 text-sm font-semibold bg-[#2563EB] hover:bg-[#1D4ED8] text-white rounded-lg transition-colors"
               >
                 Save Changes
               </button>
@@ -2448,7 +2448,7 @@ export default function CapexMasterPage() {
               onChange={e => setSectionBudgetInput(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && saveSectionBudget()}
               placeholder="e.g. 40.00"
-              className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-600"
+              className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-slate-600"
             />
             <p className="text-[11px] text-slate-400 mt-2">
               Head budgets inside this section will be deducted from this section envelope. Over-budget is shown as a warning only.
@@ -2457,7 +2457,7 @@ export default function CapexMasterPage() {
               <button
                 onClick={saveSectionBudget}
                 disabled={!sectionBudgetInput.trim() || parseFloat(sectionBudgetInput) < 0}
-                className="flex-1 px-4 py-2.5 text-sm font-semibold bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white rounded-lg"
+                className="flex-1 px-4 py-2.5 text-sm font-semibold bg-slate-600 hover:bg-slate-700 disabled:opacity-40 text-white rounded-lg"
               >
                 {sectionBudgetModalTarget.isEdit ? 'Save Budget' : 'Assign & Open Section'}
               </button>
@@ -2518,7 +2518,7 @@ export default function CapexMasterPage() {
               onChange={e => setHeadBudgetInput(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && saveHeadBudget()}
               placeholder="e.g. 25.00"
-              className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-600"
+              className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-slate-600"
             />
             <p className="text-[11px] text-slate-400 mt-2">
               Sub-particular line items will be deducted from this head budget. Over-budget is shown as a warning only.
@@ -2527,7 +2527,7 @@ export default function CapexMasterPage() {
               <button
                 onClick={saveHeadBudget}
                 disabled={!headBudgetInput.trim() || parseFloat(headBudgetInput) < 0}
-                className="flex-1 px-4 py-2.5 text-sm font-semibold bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white rounded-lg"
+                className="flex-1 px-4 py-2.5 text-sm font-semibold bg-slate-600 hover:bg-slate-700 disabled:opacity-40 text-white rounded-lg"
               >
                 {headBudgetModalTarget.isEdit ? 'Save Budget' : 'Assign & Open Head'}
               </button>

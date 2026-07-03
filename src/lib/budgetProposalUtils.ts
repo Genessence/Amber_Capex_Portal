@@ -21,10 +21,10 @@ export const BUDGET_PROPOSAL_STATUS_LABELS: Record<BudgetProposalStatus, string>
 };
 
 export const BUDGET_PROPOSAL_STATUS_COLORS: Record<BudgetProposalStatus, string> = {
-  draft: 'bg-slate-100 text-slate-600',
-  pending_admin: 'bg-amber-100 text-amber-800',
-  approved: 'bg-emerald-100 text-emerald-800',
-  rejected: 'bg-red-100 text-red-700',
+  draft: 'bg-slate-100 text-slate-600 border border-slate-200',
+  pending_admin: 'bg-amber-50 text-amber-700 border border-amber-200',
+  approved: 'bg-emerald-50 text-emerald-700 border border-emerald-200',
+  rejected: 'bg-red-50 text-red-700 border border-red-200',
 };
 
 /** Given an FY code like "2026-27", return the next one ("2027-28"). */

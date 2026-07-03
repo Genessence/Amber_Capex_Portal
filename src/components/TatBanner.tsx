@@ -34,11 +34,11 @@ export function TatBanner({
   // Closed — final payment made.
   if (!tat.running) {
     return (
-      <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 flex items-start gap-3">
-        <CheckCircle2 className="w-5 h-5 text-emerald-600 mt-0.5" />
+      <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 flex items-start gap-3">
+        <CheckCircle2 className="w-5 h-5 text-slate-600 mt-0.5" />
         <div>
-          <p className="font-semibold text-emerald-900">TAT Closed — Final Payment Made</p>
-          <p className="text-sm text-emerald-800/80 mt-0.5">
+          <p className="font-semibold text-slate-900">TAT Closed — Final Payment Made</p>
+          <p className="text-sm text-slate-800/80 mt-0.5">
             {tat.deductionPct > 0
               ? `Delay liability of ${tat.deductionPct}% (${fmt(tat.deductionAmount)}) applied.`
               : 'Delivered within TAT — no delay deduction.'}
@@ -51,11 +51,11 @@ export function TatBanner({
   // Within grace — clock hasn't started accruing yet.
   if (tat.weeksLate === 0 && tat.msToGrace > 0) {
     return (
-      <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 flex items-start gap-3">
-        <Timer className="w-5 h-5 text-sky-600 mt-0.5" />
+      <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 flex items-start gap-3">
+        <Timer className="w-5 h-5 text-slate-600 mt-0.5" />
         <div>
-          <p className="font-semibold text-sky-900">TAT Clock — Grace Period</p>
-          <p className="text-sm text-sky-800/80 mt-0.5">
+          <p className="font-semibold text-slate-900">TAT Clock — Grace Period</p>
+          <p className="text-sm text-slate-800/80 mt-0.5">
             Delay liability begins in {formatDaysFromMs(tat.msToGrace)} (PI + 1 week). No deduction yet.
           </p>
         </div>
@@ -66,13 +66,13 @@ export function TatBanner({
   // Running and late.
   const escalated = tat.escalated
   return (
-    <div className={`rounded-xl border p-4 flex items-start gap-3 ${escalated ? 'border-red-300 bg-red-50' : 'border-amber-200 bg-amber-50'}`}>
-      <AlertTriangle className={`w-5 h-5 mt-0.5 ${escalated ? 'text-red-600' : 'text-amber-600'}`} />
+    <div className={`rounded-xl border p-4 flex items-start gap-3 ${escalated ? 'border-red-300 bg-red-50' : 'border-slate-200 bg-slate-50'}`}>
+      <AlertTriangle className={`w-5 h-5 mt-0.5 ${escalated ? 'text-red-600' : 'text-slate-600'}`} />
       <div>
-        <p className={`font-semibold ${escalated ? 'text-red-900' : 'text-amber-900'}`}>
+        <p className={`font-semibold ${escalated ? 'text-red-900' : 'text-slate-900'}`}>
           TAT Running — {tat.weeksLate} week{tat.weeksLate === 1 ? '' : 's'} late
         </p>
-        <p className={`text-sm mt-0.5 ${escalated ? 'text-red-800/80' : 'text-amber-800/80'}`}>
+        <p className={`text-sm mt-0.5 ${escalated ? 'text-red-800/80' : 'text-slate-800/80'}`}>
           Delay liability: <span className="font-bold">{tat.deductionPct}%</span> ({fmt(tat.deductionAmount)})
           {escalated
             ? ' — escalated rate of 5% per week is in effect (past the 5% threshold).'

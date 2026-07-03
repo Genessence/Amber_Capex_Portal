@@ -84,14 +84,14 @@ const CR_TO_INR = 10_000_000
 const PRIORITY_DOT: Record<string, string> = {
   low:      "bg-slate-400",
   medium:   "bg-blue-500",
-  high:     "bg-orange-500",
+  high:     "bg-slate-500",
   critical: "bg-red-600",
 }
 
 const PRIORITY_TEXT: Record<string, string> = {
   low:      "text-slate-500",
   medium:   "text-blue-600",
-  high:     "text-orange-600",
+  high:     "text-slate-600",
   critical: "text-red-600 font-bold",
 }
 
@@ -106,7 +106,7 @@ const cellCtrl =
 // Error state: red border + light red bg. Text remains slate-900 for contrast.
 const cellCtrlError = "border-red-400 bg-red-50 focus:ring-red-500 focus:border-red-500"
 
-// Required but empty: teal-tinted to signal "needs input" without screaming error.
+// Required but empty: blue-tinted to signal "needs input" without screaming error.
 const cellCtrlRequired = "border-primary/40 bg-accent/50 focus:ring-ring focus:border-primary"
 
 // Sub-field labels inside quote expand panel
@@ -186,10 +186,10 @@ function WizardChangeButton({ onClick, label }: { onClick: () => void; label: st
 
 function FieldTypeBadge({ fieldType }: { fieldType: FieldType }) {
   const styles: Record<FieldType, string> = {
-    green_field: "bg-emerald-50 text-emerald-800 border-emerald-200",
+    green_field: "bg-slate-50 text-slate-800 border-slate-200",
     brown_field: "bg-secondary text-secondary-foreground border-border",
-    digitisation: "bg-teal-50 text-teal-800 border-teal-200",
-    information_technology: "bg-indigo-50 text-indigo-800 border-indigo-200",
+    digitisation: "bg-blue-50 text-blue-800 border-blue-200",
+    information_technology: "bg-slate-50 text-slate-800 border-slate-200",
   }
   return (
     <span className={cn(
@@ -211,7 +211,7 @@ function DivisionBadge({ division }: { division: string }) {
 
 function ProjectTypeBadge({ projectType }: { projectType: ProjectType }) {
   return (
-    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
+    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-50 text-slate-800 border border-slate-200">
       {PROJECT_TYPE_LABELS[projectType]}
     </span>
   )
@@ -219,7 +219,7 @@ function ProjectTypeBadge({ projectType }: { projectType: ProjectType }) {
 
 function AmberHeader() {
   return (
-    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-[#153f90] text-white border border-[#153f90]">
+    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-[#1D4ED8] text-white border border-[#1D4ED8]">
       Amber
     </span>
   )
@@ -277,7 +277,7 @@ function QuoteAllocationChip({
     )
   }
   return (
-    <span className="inline-flex items-center gap-1 text-[11px] font-bold text-green-700 bg-green-100 border border-green-300 px-2 py-0.5 rounded-full">
+    <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
       {formatINR(status.delta)} under allocation
     </span>
   )
@@ -360,7 +360,7 @@ function LineQuoteSection({
                   className={cn(
                     "rounded-md border border-border bg-card p-3 space-y-3",
                     incomplete && "border-red-300 bg-red-50/30",
-                    currencyConflict && "ring-1 ring-amber-300",
+                    currencyConflict && "ring-1 ring-slate-300",
                   )}
                 >
                   <div className="flex items-center justify-between gap-2">
@@ -427,19 +427,19 @@ function LineQuoteSection({
                         ))}
                       </select>
                       {currencyConflict && (
-                        <p className="text-[11px] text-amber-700 mt-1">Same vendor must use one currency.</p>
+                        <p className="text-[11px] text-slate-700 mt-1">Same vendor must use one currency.</p>
                       )}
                     </div>
 
                     <div>
                       <label className={fieldLabel}>Document</label>
                       {qr.attachmentName ? (
-                        <div className="flex items-center gap-1.5 px-2 py-1.5 rounded-md bg-teal-50 border border-teal-200 text-teal-800 text-xs">
+                        <div className="flex items-center gap-1.5 px-2 py-1.5 rounded-md bg-blue-50 border border-blue-200 text-blue-800 text-xs">
                           <span className="truncate font-medium" title={qr.attachmentName}>{qr.attachmentName}</span>
                           <button
                             type="button"
                             onClick={() => onUpdateMulti(qr.id, { attachmentName: "", attachmentBase64: "" })}
-                            className="ml-auto text-teal-500 hover:text-red-600 shrink-0"
+                            className="ml-auto text-blue-500 hover:text-red-600 shrink-0"
                           >
                             ✕
                           </button>
@@ -1098,9 +1098,9 @@ export default function NewCapexPage() {
             onClick={() => setFieldType(type)}
             className={cn(
               selectionCardBase,
-              type === "green_field" ? "hover:border-emerald-600 focus-visible:ring-emerald-600" :
-              type === "digitisation" ? "hover:border-teal-600 focus-visible:ring-teal-600" :
-              type === "information_technology" ? "hover:border-indigo-600 focus-visible:ring-indigo-600" :
+              type === "green_field" ? "hover:border-slate-600 focus-visible:ring-slate-600" :
+              type === "digitisation" ? "hover:border-blue-600 focus-visible:ring-blue-600" :
+              type === "information_technology" ? "hover:border-slate-600 focus-visible:ring-slate-600" :
               "hover:border-primary",
             )}
           >
@@ -1138,7 +1138,7 @@ export default function NewCapexPage() {
               setGreenFieldHead(null)
               setRows([emptyRow()])
             }}
-            className={cn(selectionCardBase, "hover:border-emerald-600 focus-visible:ring-emerald-600")}
+            className={cn(selectionCardBase, "hover:border-slate-600 focus-visible:ring-slate-600")}
           >
             <p className="text-lg font-bold text-slate-900">{PROJECT_TYPE_LABELS[pt]}</p>
             <p className="text-sm text-slate-500 mt-2 leading-relaxed">
@@ -1209,7 +1209,7 @@ export default function NewCapexPage() {
             key={plant.value}
             type="button"
             onClick={() => setSelectedPlant(plant.value)}
-            className={cn(selectionCardBase, "hover:border-emerald-600")}
+            className={cn(selectionCardBase, "hover:border-slate-600")}
           >
             <p className="text-lg font-bold text-slate-900">{plant.label}</p>
             <p className="text-sm text-slate-500 mt-1">{plant.state}</p>
@@ -1248,14 +1248,14 @@ export default function NewCapexPage() {
             onClick={() => selectGreenFieldSection(section)}
             className={cn(
               "text-left rounded-xl border-2 bg-card p-4 shadow-xs hover:shadow-md transition-all",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600",
-              over ? "border-red-300 hover:border-red-400" : "border-border hover:border-emerald-600",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-600",
+              over ? "border-red-300 hover:border-red-400" : "border-border hover:border-slate-600",
             )}
           >
             <p className="text-sm font-bold text-slate-900 leading-snug">{section}</p>
             {hasAllocation ? (
               <>
-                <p className={cn("text-xl font-black font-mono mt-2", over ? "text-red-700" : "text-emerald-700")}>
+                <p className={cn("text-xl font-black font-mono mt-2", over ? "text-red-700" : "text-slate-700")}>
                   ₹{allocatedCr.toFixed(2)} <span className="text-xs font-semibold">Cr allocated</span>
                 </p>
                 <p className="text-[11px] text-slate-400 mt-2 font-medium">
@@ -1264,12 +1264,12 @@ export default function NewCapexPage() {
                 {over ? (
                   <p className="text-[11px] font-bold text-red-600 mt-1">Over by ₹{Math.abs(remainingCr).toFixed(2)} Cr</p>
                 ) : remainingCr > 0 ? (
-                  <p className="text-[11px] font-semibold text-emerald-700 mt-1">₹{remainingCr.toFixed(2)} Cr remaining</p>
+                  <p className="text-[11px] font-semibold text-slate-700 mt-1">₹{remainingCr.toFixed(2)} Cr remaining</p>
                 ) : null}
               </>
             ) : (
               <>
-                <p className="text-xl font-black font-mono text-emerald-700 mt-2">
+                <p className="text-xl font-black font-mono text-slate-700 mt-2">
                   Budget not set
                 </p>
                 <p className="text-[11px] text-slate-400 mt-2 font-medium">
@@ -1308,14 +1308,14 @@ export default function NewCapexPage() {
             onClick={() => selectGreenFieldHead(head)}
             className={cn(
               "text-left rounded-xl border-2 bg-card p-4 shadow-xs hover:shadow-md transition-all",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600",
-              over ? "border-red-300 hover:border-red-400" : "border-border hover:border-emerald-600",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-600",
+              over ? "border-red-300 hover:border-red-400" : "border-border hover:border-slate-600",
             )}
           >
             <p className="text-sm font-bold text-slate-900 leading-snug">{head}</p>
             {hasAllocation ? (
               <>
-                <p className={cn("text-xl font-black font-mono mt-2", over ? "text-red-700" : "text-emerald-700")}>
+                <p className={cn("text-xl font-black font-mono mt-2", over ? "text-red-700" : "text-slate-700")}>
                   ₹{totalCr.toFixed(2)} <span className="text-xs font-semibold">Cr allocated</span>
                 </p>
                 <p className="text-[11px] text-slate-400 mt-2 font-medium">
@@ -1324,12 +1324,12 @@ export default function NewCapexPage() {
                 {over ? (
                   <p className="text-[11px] font-bold text-red-600 mt-1">Over by ₹{Math.abs(remainingCr).toFixed(2)} Cr</p>
                 ) : remainingCr > 0 ? (
-                  <p className="text-[11px] font-semibold text-emerald-700 mt-1">₹{remainingCr.toFixed(2)} Cr remaining</p>
+                  <p className="text-[11px] font-semibold text-slate-700 mt-1">₹{remainingCr.toFixed(2)} Cr remaining</p>
                 ) : null}
               </>
             ) : (
               <>
-                <p className="text-xl font-black font-mono text-emerald-700 mt-2">
+                <p className="text-xl font-black font-mono text-slate-700 mt-2">
                   ₹{totalCr.toFixed(2)} <span className="text-xs font-semibold">Cr</span>
                 </p>
                 <p className="text-[11px] text-slate-400 mt-2 font-medium">
@@ -1415,12 +1415,12 @@ export default function NewCapexPage() {
             onClick={() => selectBrownFieldHead(head)}
             className={cn(
               "text-left rounded-xl border-2 border-border bg-card p-4 shadow-xs hover:shadow-md transition-all",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#153f90]",
-              "hover:border-[#153f90]",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1D4ED8]",
+              "hover:border-[#1D4ED8]",
             )}
           >
             <p className="text-sm font-bold text-slate-900 leading-snug">{head}</p>
-            <p className="text-xl font-black font-mono text-[#153f90] mt-2">
+            <p className="text-xl font-black font-mono text-[#1D4ED8] mt-2">
               ₹{totalCr.toFixed(2)} <span className="text-xs font-semibold">Cr</span>
             </p>
             <p className="text-[11px] text-slate-400 mt-2 font-medium">
@@ -1622,10 +1622,10 @@ export default function NewCapexPage() {
                   <div className="flex flex-col gap-1 min-w-0">
                     {lockedHeadForRow ? (
                       <span
-                        className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold bg-sky-100 text-sky-800 border border-sky-200 leading-tight"
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold bg-slate-100 text-slate-800 border border-slate-200 leading-tight"
                         title="Head is fixed for this request"
                       >
-                        <svg aria-hidden="true" className="w-3 h-3 text-sky-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <svg aria-hidden="true" className="w-3 h-3 text-slate-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                           <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
                           <path d="M7 11V7a5 5 0 0 1 10 0v4" />
                         </svg>
@@ -2247,10 +2247,10 @@ export default function NewCapexPage() {
         className="mt-8 mb-6 flex items-start gap-4"
       >
         <div
-          className="w-12 h-12 rounded-full bg-green-100 border-2 border-green-300 flex items-center justify-center shrink-0"
+          className="w-12 h-12 rounded-full bg-slate-100 border-2 border-slate-300 flex items-center justify-center shrink-0"
           aria-hidden="true"
         >
-          <svg className="w-6 h-6 text-green-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+          <svg className="w-6 h-6 text-slate-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
           </svg>
         </div>
@@ -2267,7 +2267,7 @@ export default function NewCapexPage() {
       {/* Email preview */}
       <div className="rounded-xl border border-border shadow-sm overflow-hidden bg-card">
         <div className="bg-slate-50 border-b border-slate-200 px-5 py-2.5 flex items-center gap-2">
-          <svg aria-hidden="true" className="w-4 h-4 text-[#0D9488]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <svg aria-hidden="true" className="w-4 h-4 text-[#2563EB]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
           </svg>
           <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Email Preview</span>

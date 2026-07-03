@@ -5,7 +5,8 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Wallet } from 'lucide-react'
 import { useCapex } from '@/lib/capexContext'
-import { PLANTS, STATUS_COLORS, STATUS_LABELS } from '@/lib/constants'
+import { PLANTS } from '@/lib/constants'
+import { StatusBadge } from '@/components/StatusBadge'
 import {
   resolveFinalVendor,
   totalPaid,
@@ -93,14 +94,12 @@ export default function AccountsQueuePage() {
         <td className="px-4 py-2 text-sm text-muted-foreground">{plantLabel(req.plant)}</td>
         <td className="px-4 py-2 text-sm text-foreground">{vName}</td>
         <td className="px-4 py-2">
-          <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${STATUS_COLORS[status] ?? 'bg-slate-100 text-slate-600'}`}>
-            {STATUS_LABELS[status] ?? status}
-          </span>
+          <StatusBadge status={status} />
         </td>
         <td className="px-4 py-2 text-right text-sm">
           {ms.length > 0 ? (
             <span className="text-muted-foreground">
-              Paid <span className="font-semibold text-emerald-700">{fmt(totalPaid(ms))}</span>
+              Paid <span className="font-semibold text-slate-700">{fmt(totalPaid(ms))}</span>
               {totalOutstanding(ms) > 0 && <> · Due <span className="font-semibold text-foreground">{fmt(totalOutstanding(ms))}</span></>}
             </span>
           ) : po ? fmt(po.amount) : '—'}
@@ -124,7 +123,7 @@ export default function AccountsQueuePage() {
     <div className="p-5 h-full flex flex-col gap-4">
       <div className="shrink-0">
         <h1 className="text-lg font-bold text-foreground flex items-center gap-2">
-          <Wallet className="w-5 h-5 text-teal-700" /> Accounts Queue
+          <Wallet className="w-5 h-5 text-blue-700" /> Accounts Queue
         </h1>
         <p className="text-sm text-muted-foreground mt-0.5">
           Assign FA codes, raise purchase orders, and record milestone payments for finalized requests

@@ -131,7 +131,7 @@ export default function BudgetProposalsPage() {
         </Link>
         <div>
           <h1 className="text-lg font-bold text-foreground flex items-center gap-2">
-            <ClipboardList className="w-5 h-5 text-amber-600" /> Budget Planning
+            <ClipboardList className="w-5 h-5 text-slate-600" /> Budget Planning
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
             Author next-FY Brown Field budgets. Submitted proposals go to admin for approval, then publish as the new live FY.
@@ -162,7 +162,7 @@ export default function BudgetProposalsPage() {
         </select>
         {plant && (
           <button onClick={handleCreate}
-            className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-amber-500 hover:bg-amber-600 text-white rounded-lg transition-colors">
+            className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-slate-500 hover:bg-slate-600 text-white rounded-lg transition-colors">
             <Plus className="w-3.5 h-3.5" /> New Next-FY Proposal
           </button>
         )}
@@ -368,7 +368,7 @@ function BudgetProposalEditor({ proposal, plantLabel, onBack, onSave, onSubmit, 
             {h.head}: <span className="font-mono font-semibold">{fmtCr(h.totalCr)}</span> · {h.count}
           </span>
         ))}
-        <span className="text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-200 rounded-full px-2.5 py-1 ml-auto">
+        <span className="text-[11px] font-bold bg-slate-50 text-slate-800 border border-slate-200 rounded-full px-2.5 py-1 ml-auto">
           Total: {fmtCr(total)}
         </span>
       </div>

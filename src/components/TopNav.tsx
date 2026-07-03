@@ -47,11 +47,12 @@ function getInitials(name: string) {
 
 function getRoleBg(value: string): string {
   if (value.startsWith("buyer"))        return "bg-blue-600"
-  if (value.startsWith("plant_head"))   return "bg-[#0D9488]"
-  if (value === "sourcing_member") return "bg-violet-600"
-  if (value === "sourcing_head")   return "bg-violet-800"
-  if (value === "maintenance")     return "bg-amber-600"
-  if (value === "accounts")        return "bg-teal-700"
+  if (value.startsWith("plant_head"))   return "bg-[#2563EB]"
+  if (value === "sourcing_member") return "bg-slate-600"
+  if (value === "sourcing_head")   return "bg-slate-800"
+  if (value === "maintenance")     return "bg-slate-600"
+  if (value === "accounts")        return "bg-neutral-800"
+  if (value === "plant_accounts")  return "bg-neutral-600"
   return "bg-slate-700"
 }
 

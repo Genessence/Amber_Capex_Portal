@@ -22,7 +22,8 @@ import {
 import { useCapex } from '@/lib/capexContext'
 import { buildSupplierLink } from '@/lib/tokenUtils'
 import { ROLE_NAMES } from '@/lib/constants'
-import type { CapexLineItem, CapexRequest, IncoTermsDoc, RfqQuote, Vendor, VendorInvite } from '@/lib/types'
+import { FinalDecisionActions } from '@/components/FinalDecisionActions'
+import type { CapexLineItem, CapexRequest, DocApprovalDoc, DocSelection, IncoTermsDoc, RfqQuote, Vendor, VendorInvite } from '@/lib/types'
 import {
   RFQ_STATUS_COLORS,
   RFQ_STATUS_LABELS,
@@ -38,6 +39,7 @@ import {
 import {
   DOC_APPROVAL_STATUS_COLORS,
   DOC_APPROVAL_STATUS_LABELS,
+  DOC_OPTIONS,
   effectiveDocApprovalStatus,
 } from '@/lib/docPackageUtils'
 import {
@@ -59,7 +61,7 @@ const SOURCING_ROLES = ['sourcing_member', 'sourcing_head', 'super_admin']
 const FULFILLMENT_STATUSES = ['pi_requested', 'pi_submitted', 'accounts_processing', 'payment_in_progress', 'completed']
 const CURRENCIES = ['INR', 'USD', 'EUR']
 const SINGLE_LINE_ID = '__single__'
-const FD_INPUT = 'w-full border border-slate-200 rounded px-1.5 py-1 text-xs text-right tabular-nums bg-white focus:outline-none focus:ring-1 focus:ring-teal-400'
+const FD_INPUT = 'w-full border border-slate-200 rounded px-1.5 py-1 text-xs text-right tabular-nums bg-white focus:outline-none focus:ring-1 focus:ring-slate-400'
 
 // Per-vendor quotation form: per-line unit prices keyed by line-item id, plus footer charges.
 type QuoteForm = {
@@ -154,6 +156,11 @@ export function RfqPanel({
   const [showHistory, setShowHistory] = useState(false)
   const [showNewVendor, setShowNewVendor] = useState(false)
   const [newVendor, setNewVendor] = useState({ name: '', email: '', phone: '' })
+  // Per-vendor document selection chosen at invite time (which docs each vendor must approve).
+  const [docSel, setDocSel] = useState<Record<string, DocSelection>>({})
+  const [customDocs, setCustomDocs] = useState<DocApprovalDoc[]>([])
+  const [newDoc, setNewDoc] = useState({ title: '', text: '' })
+  const [newVendorDocSel, setNewVendorDocSel] = useState<DocSelection>({ commercialTerms: true, pbg: true, dlc: true, paymentTerms: true, extraDocs: [] })
   const [incoReviewId, setIncoReviewId] = useState<string | null>(null)
   const [incoEdits, setIncoEdits] = useState<Record<string, IncoTermsDoc>>({})
 
@@ -206,7 +213,17 @@ export function RfqPanel({
     if (val) next[itemId] = val
     else delete next[itemId]
     setFinalVendorPerItem(next)
-    persistDecision(finalPrices, next)
+    // Auto-fill the Final Decision price from the chosen vendor's quoted unit price for this line.
+    let nextPrices = finalPrices
+    if (val) {
+      const inv = invites.find(i => i.vendorId === val)
+      const u = inv ? unitFor(inv, itemId) : null
+      if (u != null) {
+        nextPrices = { ...finalPrices, [`${itemId}-price`]: String(u) }
+        setFinalPrices(nextPrices)
+      }
+    }
+    persistDecision(nextPrices, next)
   }
   function fdNet(item: CapexLineItem): number {
     const p = Number(finalPrices[`${item.id}-price`] ?? 0)
@@ -299,14 +316,42 @@ export function RfqPanel({
     setEditingId(null)
   }
 
+  // ── Per-vendor document selection (which docs each invited vendor must approve) ──
+  function defaultDocSel(vendor?: Vendor): DocSelection {
+    return { commercialTerms: true, pbg: true, dlc: true, paymentTerms: !!vendor?.oneTime, extraDocs: [] }
+  }
+  function toggleStdDoc(vendorId: string, key: 'commercialTerms' | 'pbg' | 'dlc' | 'paymentTerms') {
+    setDocSel(prev => {
+      const sel = prev[vendorId] ?? defaultDocSel(vendors.find(v => v.id === vendorId))
+      return { ...prev, [vendorId]: { ...sel, [key]: !sel[key] } }
+    })
+  }
+  function toggleCustomDoc(vendorId: string, doc: DocApprovalDoc) {
+    setDocSel(prev => {
+      const sel = prev[vendorId] ?? defaultDocSel(vendors.find(v => v.id === vendorId))
+      const has = (sel.extraDocs ?? []).some(d => d.id === doc.id)
+      const extraDocs = has ? (sel.extraDocs ?? []).filter(d => d.id !== doc.id) : [...(sel.extraDocs ?? []), doc]
+      return { ...prev, [vendorId]: { ...sel, extraDocs } }
+    })
+  }
+  function addCustomDoc() {
+    const title = newDoc.title.trim()
+    if (!title) { toast.error('Enter a document name'); return }
+    setCustomDocs(prev => [...prev, { id: `cd-${Date.now()}`, title, text: newDoc.text.trim() || title }])
+    setNewDoc({ title: '', text: '' })
+  }
+
   function toggleInvite(id: string) {
     if (invitedIds.has(id)) return
     setSelectedToInvite(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
+    setDocSel(prev => prev[id] ? prev : { ...prev, [id]: defaultDocSel(vendors.find(v => v.id === id)) })
   }
   function addVendors() {
     if (!selectedToInvite.length) return
     const n = selectedToInvite.length
-    inviteVendors(request.id, selectedToInvite)
+    const selections: Record<string, DocSelection> = {}
+    for (const vid of selectedToInvite) selections[vid] = docSel[vid] ?? defaultDocSel(vendors.find(v => v.id === vid))
+    inviteVendors(request.id, selectedToInvite, selections)
     setSelectedToInvite([])
     setShowVendorSelect(false)
     toast.success(`Invited ${n} vendor(s) — link sent`)
@@ -315,8 +360,9 @@ export function RfqPanel({
     const name = newVendor.name.trim()
     const email = newVendor.email.trim()
     if (!name || !email) { toast.error('Enter the vendor name and email'); return }
-    inviteNewVendor(request.id, { name, email, phone: newVendor.phone.trim() }, senderName)
+    inviteNewVendor(request.id, { name, email, phone: newVendor.phone.trim() }, senderName, newVendorDocSel)
     setNewVendor({ name: '', email: '', phone: '' })
+    setNewVendorDocSel({ commercialTerms: true, pbg: true, dlc: true, paymentTerms: true, extraDocs: [] })
     setShowNewVendor(false)
     toast.success(`Invited ${name} — INCO Terms sent`)
   }
@@ -428,7 +474,7 @@ export function RfqPanel({
     <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 space-y-4">
       {/* Header */}
       <div className="flex items-start gap-3">
-        <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-lg bg-[#EFF6FF] text-[#2563EB]">
+        <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-lg bg-[#F4F4F5] text-[#171717]">
           <FileText className="w-5 h-5" />
         </div>
         <div className="flex-1 min-w-0">
@@ -439,16 +485,16 @@ export function RfqPanel({
           {invites.length > 0 && (
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
               {counts.awaiting_quote > 0 && (
-                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800">{counts.awaiting_quote} awaiting quote</span>
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-800">{counts.awaiting_quote} awaiting quote</span>
               )}
               {counts.pending_sourcing > 0 && (
-                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-sky-100 text-sky-800">{counts.pending_sourcing} need review</span>
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-800">{counts.pending_sourcing} need review</span>
               )}
               {counts.pending_vendor > 0 && (
-                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">{counts.pending_vendor} counter sent</span>
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-800">{counts.pending_vendor} counter sent</span>
               )}
               {counts.approved > 0 && (
-                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">{counts.approved} approved</span>
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-800">{counts.approved} approved</span>
               )}
             </div>
           )}
@@ -457,7 +503,7 @@ export function RfqPanel({
 
       {/* Fulfillment: PI tracking after a vendor is finalized */}
       {inFulfillment && finalInvite ? (
-        <div className="rounded-lg border border-slate-200 bg-[#F0F4FB] p-4 space-y-3">
+        <div className="rounded-lg border border-slate-200 bg-[#F4F4F5] p-4 space-y-3">
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div>
               <p className="text-sm font-semibold text-slate-900">{vendorName(finalInvite.vendorId)}</p>
@@ -465,7 +511,7 @@ export function RfqPanel({
                 Approved RFQ total: <span className="tabular-nums font-semibold text-slate-900">{finalInvite.rfqQuote ? fmtCurrency(rfqTotal(finalInvite.rfqQuote)) : '—'}</span>
               </p>
             </div>
-            <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+            <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-800">
               {request.status === 'pi_requested' ? 'Awaiting PI' : 'PI Received'}
             </span>
           </div>
@@ -477,7 +523,7 @@ export function RfqPanel({
                 <button
                   onClick={() => copyLink(finalInvite)}
                   aria-label={`Copy supplier link for ${vendorName(finalInvite.vendorId)}`}
-                  className={`flex items-center gap-1 text-[#2563EB] font-semibold hover:underline ${FOCUS_RING} rounded`}
+                  className={`flex items-center gap-1 text-[#171717] font-semibold hover:underline ${FOCUS_RING} rounded`}
                 >
                   <Link2 className="w-3.5 h-3.5" /> Copy supplier link
                 </button>
@@ -485,12 +531,12 @@ export function RfqPanel({
             </div>
           ) : finalInvite.proformaInvoice ? (
             <div className="flex items-center gap-3 text-sm flex-wrap">
-              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+              <CheckCircle2 className="w-4 h-4 text-slate-600" />
               <span className="text-slate-900">PI submitted — forwarded to buyer &amp; accounts.</span>
               <a
                 href={`data:${finalInvite.proformaInvoice.mimeType ?? 'application/octet-stream'};base64,${finalInvite.proformaInvoice.base64}`}
                 download={finalInvite.proformaInvoice.name}
-                className={`flex items-center gap-1 text-[#2563EB] font-semibold hover:underline ${FOCUS_RING} rounded`}
+                className={`flex items-center gap-1 text-[#171717] font-semibold hover:underline ${FOCUS_RING} rounded`}
               >
                 <Download className="w-3.5 h-3.5" /> {finalInvite.proformaInvoice.name}
               </a>
@@ -524,7 +570,7 @@ export function RfqPanel({
               {/* New one-time vendor form — INCO Terms are sent automatically on invite */}
               {showNewVendor && (
                 <div className="mt-3 border border-slate-200 rounded-lg overflow-hidden">
-                  <div className="bg-[#F0F4FB] px-4 py-2 border-b border-slate-200">
+                  <div className="bg-[#F4F4F5] px-4 py-2 border-b border-slate-200">
                     <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">New vendor — INCO Terms sent on invite (must be approved before quoting)</p>
                   </div>
                   <div className="p-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -547,11 +593,11 @@ export function RfqPanel({
                         placeholder="Optional" className={INPUT} />
                     </div>
                   </div>
-                  <div className="px-3 py-2 border-t border-slate-200 bg-[#F0F4FB] flex justify-end">
+                  <div className="px-3 py-2 border-t border-slate-200 bg-[#F4F4F5] flex justify-end">
                     <button onClick={sendNewVendor}
                       disabled={!newVendor.name.trim() || !newVendor.email.trim()}
                       aria-label="Send invite and INCO Terms to the new vendor"
-                      className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-[#2563EB] hover:bg-[#1d4fd7] disabled:opacity-50 text-white rounded-lg ${FOCUS_RING}`}>
+                      className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-[#171717] hover:bg-[#000000] disabled:opacity-50 text-white rounded-lg ${FOCUS_RING}`}>
                       <Send className="w-3.5 h-3.5" /> Send invite
                     </button>
                   </div>
@@ -559,39 +605,98 @@ export function RfqPanel({
               )}
               {showVendorSelect && (
                 <div className="mt-3 border border-slate-200 rounded-lg overflow-hidden">
-                  <div className="bg-[#F0F4FB] px-4 py-2 border-b border-slate-200">
-                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Choose vendors — they will receive the quotation link</p>
+                  <div className="bg-[#F4F4F5] px-4 py-2 border-b border-slate-200">
+                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Choose vendors &amp; the documents each must approve</p>
                   </div>
-                  <div className="max-h-60 overflow-y-auto p-3">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {vendors.map(vendor => {
-                        const isInvited = invitedIds.has(vendor.id)
-                        const isSelected = selectedToInvite.includes(vendor.id)
-                        return (
-                          <label key={vendor.id}
-                            className={[
-                              'flex items-center gap-3 px-3 py-2 rounded-lg border cursor-pointer transition-colors',
-                              isSelected ? 'bg-[#EFF6FF] border-[#2563EB]/40' : 'bg-white border-slate-200 hover:border-[#2563EB]/40',
-                              isInvited && 'opacity-75',
-                            ].filter(Boolean).join(' ')}>
+
+                  {/* Custom-document manager — add any other document (e.g. NDA) to the checklist */}
+                  <div className="px-3 pt-3">
+                    <div className="flex flex-wrap items-end gap-2">
+                      <div className="flex-1 min-w-[140px]">
+                        <p className="text-[10px] font-bold text-slate-500 uppercase mb-0.5">Add custom document</p>
+                        <input value={newDoc.title} onChange={e => setNewDoc(d => ({ ...d, title: e.target.value }))}
+                          placeholder="Document name (e.g. NDA)" aria-label="Custom document name" className={INPUT} />
+                      </div>
+                      <div className="flex-[2] min-w-[180px]">
+                        <input value={newDoc.text} onChange={e => setNewDoc(d => ({ ...d, text: e.target.value }))}
+                          placeholder="Optional details / clause text" aria-label="Custom document text" className={INPUT} />
+                      </div>
+                      <button type="button" onClick={addCustomDoc}
+                        className={`px-3 py-2 text-xs font-semibold bg-[#171717] hover:bg-black text-white rounded-lg ${FOCUS_RING}`}>+ Add</button>
+                    </div>
+                    {customDocs.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {customDocs.map(d => (
+                          <span key={d.id} className="inline-flex items-center gap-1 text-[10px] font-semibold bg-slate-100 text-slate-700 border border-slate-200 px-2 py-0.5 rounded-full">
+                            {d.title}
+                            <button type="button" onClick={() => setCustomDocs(prev => prev.filter(x => x.id !== d.id))}
+                              aria-label={`Remove ${d.title}`} className="text-slate-400 hover:text-red-600"><X className="w-3 h-3" /></button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="max-h-72 overflow-y-auto p-3 space-y-2">
+                    {vendors.map(vendor => {
+                      const isInvited = invitedIds.has(vendor.id)
+                      const isSelected = selectedToInvite.includes(vendor.id)
+                      const sel = docSel[vendor.id] ?? defaultDocSel(vendor)
+                      return (
+                        <div key={vendor.id}
+                          className={[
+                            'px-3 py-2 rounded-lg border transition-colors',
+                            isSelected ? 'bg-[#F4F4F5] border-[#171717]/40' : 'bg-white border-slate-200',
+                            isInvited && 'opacity-75',
+                          ].filter(Boolean).join(' ')}>
+                          <label className="flex items-center gap-3 cursor-pointer">
                             <input type="checkbox" checked={isSelected || isInvited} disabled={isInvited}
                               onChange={() => toggleInvite(vendor.id)}
                               aria-label={`Invite ${vendor.vendorName}`}
-                              className="w-4 h-4 rounded border-slate-300 text-[#2563EB] focus:ring-[#2563EB]" />
+                              className="w-4 h-4 rounded border-slate-300 text-[#171717] focus:ring-[#171717]" />
                             <div className="flex-1 min-w-0">
                               <p className="text-sm font-semibold text-slate-900 truncate">{vendor.vendorName}</p>
-                              <p className="text-xs text-slate-500">{vendor.vendorCode}</p>
+                              <p className="text-xs text-slate-500">{vendor.vendorCode}{vendor.oneTime ? ' · one-time' : ''}</p>
                             </div>
-                            {isInvited && <span className="text-[10px] font-medium text-[#2563EB] bg-[#EFF6FF] px-2 py-0.5 rounded-full">Invited</span>}
+                            {isInvited && <span className="text-[10px] font-medium text-[#171717] bg-white border border-slate-200 px-2 py-0.5 rounded-full">Invited</span>}
                           </label>
-                        )
-                      })}
-                    </div>
+                          {isSelected && !isInvited && (
+                            <div className="mt-2 pl-7 flex flex-wrap gap-1.5">
+                              <span className="text-[10px] font-bold text-slate-400 uppercase self-center mr-1">Send:</span>
+                              {DOC_OPTIONS.map(opt => {
+                                const on = !!sel[opt.key]
+                                return (
+                                  <button key={opt.key} type="button" onClick={() => toggleStdDoc(vendor.id, opt.key)}
+                                    className={[
+                                      'text-[10px] font-semibold px-2 py-0.5 rounded-full border transition-colors',
+                                      on ? 'bg-[#171717] text-white border-[#171717]' : 'bg-white text-slate-500 border-slate-300',
+                                    ].join(' ')}>
+                                    {on ? '✓ ' : ''}{opt.label}
+                                  </button>
+                                )
+                              })}
+                              {customDocs.map(d => {
+                                const on = (sel.extraDocs ?? []).some(x => x.id === d.id)
+                                return (
+                                  <button key={d.id} type="button" onClick={() => toggleCustomDoc(vendor.id, d)}
+                                    className={[
+                                      'text-[10px] font-semibold px-2 py-0.5 rounded-full border transition-colors',
+                                      on ? 'bg-[#171717] text-white border-[#171717]' : 'bg-white text-slate-500 border-slate-300',
+                                    ].join(' ')}>
+                                    {on ? '✓ ' : ''}{d.title}
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
                   </div>
-                  <div className="px-3 py-2 border-t border-slate-200 bg-[#F0F4FB] flex justify-end">
+                  <div className="px-3 py-2 border-t border-slate-200 bg-[#F4F4F5] flex justify-end">
                     <button onClick={addVendors} disabled={!selectedToInvite.length}
                       aria-label="Send quotation link to selected vendors"
-                      className={`px-3 py-1.5 text-xs font-semibold bg-[#2563EB] hover:bg-[#1d4fd7] disabled:opacity-50 text-white rounded-lg ${FOCUS_RING}`}>
+                      className={`px-3 py-1.5 text-xs font-semibold bg-[#171717] hover:bg-[#000000] disabled:opacity-50 text-white rounded-lg ${FOCUS_RING}`}>
                       Send link
                     </button>
                   </div>
@@ -608,8 +713,8 @@ export function RfqPanel({
               <div className="hidden lg:block overflow-x-auto rounded-lg border border-slate-200">
                 <table className="w-full text-sm border-collapse" aria-label="RFQ comparison grid">
                   <thead>
-                    <tr className="bg-[#1E3A5F] text-white">
-                      <th scope="col" className="sticky left-0 z-20 bg-[#1E3A5F] text-left px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider min-w-[150px]">Item</th>
+                    <tr className="bg-[#171717] text-white">
+                      <th scope="col" className="sticky left-0 z-20 bg-[#171717] text-left px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider min-w-[150px]">Item</th>
                       <th scope="col" className="text-left px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider min-w-[140px]">Description</th>
                       <th scope="col" className="text-right px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider w-16">Qty</th>
                       <th scope="col" className="text-left px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider min-w-[150px] border-l border-white/15">HSN / GST</th>
@@ -626,7 +731,7 @@ export function RfqPanel({
                               <span className="text-[11px] font-bold text-white truncate max-w-[130px]">{vendorName(inv.vendorId)}</span>
                               <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${RFQ_STATUS_COLORS[s]}`}>{RFQ_STATUS_LABELS[s]}</span>
                               {isOneTime(inv) && effectiveIncoTermsStatus(inv) !== 'approved' && (
-                                <span className="text-[9px] font-semibold text-amber-200 leading-tight max-w-[130px]">Awaiting INCO Terms approval</span>
+                                <span className="text-[9px] font-semibold text-slate-200 leading-tight max-w-[130px]">Awaiting INCO Terms approval</span>
                               )}
                               {canManage && !isEditing && (s === 'pending_sourcing' || s === 'pending_vendor') && (
                                 <button
@@ -651,7 +756,7 @@ export function RfqPanel({
                         )
                       })}
                       {canManage && (
-                        <th scope="col" className="sticky right-0 z-20 bg-[#0D9488] text-left px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider min-w-[190px] border-l border-white/15">
+                        <th scope="col" className="sticky right-0 z-20 bg-[#171717] text-left px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider min-w-[190px] border-l border-white/15">
                           Final Decision
                         </th>
                       )}
@@ -663,10 +768,10 @@ export function RfqPanel({
                       const qty = qtyOf(item)
                       const low = lowestUnit(item.id)
                       return (
-                        <tr key={item.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-[#F8FAFF]'}>
-                          <td className={`sticky left-0 z-10 px-3 py-2 ${idx % 2 === 0 ? 'bg-white' : 'bg-[#F8FAFF]'}`}>
+                        <tr key={item.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-[#FAFAFA]'}>
+                          <td className={`sticky left-0 z-10 px-3 py-2 ${idx % 2 === 0 ? 'bg-white' : 'bg-[#FAFAFA]'}`}>
                             <p className="font-semibold text-slate-800 text-[12px] leading-snug">{item.description}</p>
-                            {item.machineCapacity && <p className="text-[10px] text-sky-700 mt-0.5">Capacity: {item.machineCapacity}</p>}
+                            {item.machineCapacity && <p className="text-[10px] text-slate-700 mt-0.5">Capacity: {item.machineCapacity}</p>}
                             {item.masterHead && <p className="text-[10px] text-slate-400 mt-0.5">{item.masterHead}</p>}
                           </td>
                           <td className="px-3 py-2 text-[11px] text-slate-500 leading-snug">{item.remarks || item.specs || <span className="text-slate-300">—</span>}</td>
@@ -676,7 +781,7 @@ export function RfqPanel({
                             {item.hsnCode ? (
                               <>
                                 <p className="text-[12px] font-semibold text-slate-700">{item.hsnCode}</p>
-                                <p className="text-[10px] font-semibold text-emerald-700">GST {gstRateForHsn(item.hsnCode)}%</p>
+                                <p className="text-[10px] font-semibold text-slate-700">GST {gstRateForHsn(item.hsnCode)}%</p>
                               </>
                             ) : (
                               <span className="text-[12px] text-slate-300">—</span>
@@ -686,7 +791,7 @@ export function RfqPanel({
                             const isEditing = editingId === inv.id
                             if (isEditing) {
                               return (
-                                <td key={inv.id} className="px-2 py-1.5 border-l border-slate-100 bg-amber-50/40">
+                                <td key={inv.id} className="px-2 py-1.5 border-l border-slate-100 bg-slate-50/40">
                                   <input
                                     type="number" min="0" inputMode="decimal" placeholder="0"
                                     value={getForm(inv).lines[item.id] ?? ''}
@@ -700,12 +805,12 @@ export function RfqPanel({
                             const unit = unitFor(inv, item.id)
                             const isLow = unit != null && unit > 0 && low != null && unit === low
                             return (
-                              <td key={inv.id} className={`px-3 py-2 text-center border-l border-slate-100 ${isLow ? 'bg-green-50' : ''}`}>
+                              <td key={inv.id} className={`px-3 py-2 text-center border-l border-slate-100 ${isLow ? 'bg-emerald-50' : ''}`}>
                                 {unit != null && unit > 0 ? (
                                   <>
-                                    <p className={`font-bold text-[12px] ${isLow ? 'text-green-700' : 'text-slate-800'}`}>{fmtCurrency(unit)}</p>
-                                    <p className={`text-[11px] ${isLow ? 'text-green-600' : 'text-slate-500'}`}>Total: {fmtCurrency(unit * qty)}</p>
-                                    {isLow && <span className="inline-block mt-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 leading-none">↓ Lowest</span>}
+                                    <p className={`font-bold text-[12px] ${isLow ? 'text-emerald-700' : 'text-slate-800'}`}>{fmtCurrency(unit)}</p>
+                                    <p className={`text-[11px] ${isLow ? 'text-emerald-600' : 'text-slate-500'}`}>Total: {fmtCurrency(unit * qty)}</p>
+                                    {isLow && <span className="inline-block mt-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 leading-none">↓ Lowest</span>}
                                   </>
                                 ) : (
                                   <p className="text-[12px] text-slate-300">—</p>
@@ -714,17 +819,17 @@ export function RfqPanel({
                             )
                           })}
                           {canManage && (
-                            <td className="sticky right-0 z-10 px-2 py-2 bg-[#F0FAF6] border-l border-teal-100 align-top min-w-[190px]">
+                            <td className="sticky right-0 z-10 px-2 py-2 bg-[#F4F4F5] border-l border-slate-200 align-top min-w-[190px]">
                               <div className="flex gap-1.5 mb-1">
                                 <div className="flex-1">
-                                  <p className="text-[10px] font-bold text-teal-700 uppercase mb-0.5">Price (₹)</p>
+                                  <p className="text-[10px] font-bold text-slate-700 uppercase mb-0.5">Price (₹)</p>
                                   <input type="number" min="0" inputMode="decimal" placeholder="0"
                                     value={finalPrices[`${item.id}-price`] ?? ''}
                                     onChange={e => setFinalPrice(`${item.id}-price`, e.target.value)}
                                     aria-label={`Final price for ${item.description}`} className={FD_INPUT} />
                                 </div>
                                 <div className="w-12">
-                                  <p className="text-[10px] font-bold text-teal-700 uppercase mb-0.5">Disc %</p>
+                                  <p className="text-[10px] font-bold text-slate-700 uppercase mb-0.5">Disc %</p>
                                   <input type="number" min="0" inputMode="decimal" placeholder="0"
                                     value={finalPrices[`${item.id}-disc`] ?? ''}
                                     onChange={e => setFinalPrice(`${item.id}-disc`, e.target.value)}
@@ -735,7 +840,7 @@ export function RfqPanel({
                                 value={finalVendorPerItem[item.id] ?? ''}
                                 onChange={e => setFinalVendor(item.id, e.target.value)}
                                 aria-label={`Final decision vendor for ${item.description}`}
-                                className="w-full text-[11px] border border-slate-200 rounded px-1.5 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-teal-400 text-slate-700"
+                                className="w-full text-[11px] border border-slate-200 rounded px-1.5 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-slate-400 text-slate-700"
                               >
                                 <option value="">Select vendor…</option>
                                 {quotedInvites.map(inv => {
@@ -743,7 +848,7 @@ export function RfqPanel({
                                   return <option key={inv.id} value={inv.vendorId}>{vendorName(inv.vendorId)}{u != null ? ` — ${fmtCurrency(u)}` : ''}</option>
                                 })}
                               </select>
-                              <p className="text-[11px] font-bold text-teal-700 text-right mt-1">Price × Qty: {fmtCurrency(fdNet(item))}</p>
+                              <p className="text-[11px] font-bold text-slate-700 text-right mt-1">Price × Qty: {fmtCurrency(fdNet(item))}</p>
                             </td>
                           )}
                         </tr>
@@ -761,7 +866,7 @@ export function RfqPanel({
                           if (isEditing) {
                             const form = getForm(inv)
                             return (
-                              <td key={inv.id} className="px-2 py-1 border-l border-slate-100 bg-amber-50/40">
+                              <td key={inv.id} className="px-2 py-1 border-l border-slate-100 bg-slate-50/40">
                                 {attr.select ? (
                                   <select value={form.currency} onChange={e => setForm(inv.id, { currency: e.target.value })}
                                     aria-label={`${vendorName(inv.vendorId)} — ${attr.label}`} className={`${INPUT_RIGHT} py-1`}>
@@ -782,13 +887,13 @@ export function RfqPanel({
                             </td>
                           )
                         })}
-                        {canManage && <td className="sticky right-0 z-10 bg-[#F0FAF6] border-l border-teal-100" />}
+                        {canManage && <td className="sticky right-0 z-10 bg-[#F4F4F5] border-l border-slate-200" />}
                       </tr>
                     ))}
 
                     {/* Grand total (incl. item-wise GST) */}
-                    <tr className="border-t-2 border-slate-200 bg-[#F0F4FB]">
-                      <th scope="row" colSpan={4} className="sticky left-0 z-10 px-3 py-2 text-left font-bold text-slate-900 text-[12px] bg-[#F0F4FB]">Grand Total <span className="font-normal text-slate-400">(incl. GST)</span></th>
+                    <tr className="border-t-2 border-slate-200 bg-[#F4F4F5]">
+                      <th scope="row" colSpan={4} className="sticky left-0 z-10 px-3 py-2 text-left font-bold text-slate-900 text-[12px] bg-[#F4F4F5]">Grand Total <span className="font-normal text-slate-400">(incl. GST)</span></th>
                       {invites.map(inv => {
                         const total = grandTotalOf(inv)
                         const gst = gstOf(inv)
@@ -796,12 +901,12 @@ export function RfqPanel({
                         return (
                           <td key={inv.id} className={`px-3 py-2 text-center font-bold tabular-nums border-l border-slate-100 ${isLowest ? 'text-emerald-700 bg-emerald-50' : 'text-slate-900'}`}>
                             {total != null ? fmtCurrency(total) : '—'}
-                            {isLowest && <span className="ml-1 align-middle text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700">L1</span>}
+                            {isLowest && <span className="ml-1 align-middle text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800">L1</span>}
                             {total != null && gst > 0 && <p className="text-[10px] font-normal text-slate-500 mt-0.5">incl. {fmtCurrency(gst)} GST</p>}
                           </td>
                         )
                       })}
-                      {canManage && <td className="sticky right-0 z-10 bg-[#F0FAF6] border-l border-teal-100" />}
+                      {canManage && <td className="sticky right-0 z-10 bg-[#F4F4F5] border-l border-slate-200" />}
                     </tr>
 
                     {/* Per-column action footer */}
@@ -812,7 +917,7 @@ export function RfqPanel({
                           <VendorActions {...actionsProps(inv, false)} />
                         </td>
                       ))}
-                      {canManage && <td className="sticky right-0 z-10 bg-[#F0FAF6] border-l border-teal-100" />}
+                      {canManage && <td className="sticky right-0 z-10 bg-[#F4F4F5] border-l border-slate-200" />}
                     </tr>
                   </tbody>
                 </table>
@@ -832,7 +937,7 @@ export function RfqPanel({
                         <div className="min-w-0">
                           <p className="text-sm font-semibold text-slate-900">{vendorName(inv.vendorId)}</p>
                           {isOneTime(inv) && effectiveIncoTermsStatus(inv) !== 'approved' && (
-                            <p className="text-[10px] font-semibold text-amber-700">Awaiting INCO Terms approval</p>
+                            <p className="text-[10px] font-semibold text-slate-700">Awaiting INCO Terms approval</p>
                           )}
                         </div>
                         <div className="flex items-center gap-2">
@@ -841,7 +946,7 @@ export function RfqPanel({
                             <button
                               onClick={() => copyLink(inv)}
                               aria-label={`Copy supplier link for ${vendorName(inv.vendorId)}`}
-                              className={`flex items-center gap-1 text-[10px] font-semibold text-[#2563EB] hover:underline ${FOCUS_RING} rounded`}
+                              className={`flex items-center gap-1 text-[10px] font-semibold text-[#171717] hover:underline ${FOCUS_RING} rounded`}
                             >
                               <Link2 className="w-3 h-3" /> Link
                             </button>
@@ -869,7 +974,7 @@ export function RfqPanel({
                             <div key={item.id} className="flex items-center justify-between gap-2 text-[12px]">
                               <span className="text-slate-600 truncate">
                                 {item.description} <span className="text-slate-400">×{item.quantity}</span>
-                                {item.hsnCode && <span className="text-[10px] text-emerald-700 ml-1">HSN {item.hsnCode} · {rfqLineGstRate(item)}%</span>}
+                                {item.hsnCode && <span className="text-[10px] text-slate-700 ml-1">HSN {item.hsnCode} · {rfqLineGstRate(item)}%</span>}
                               </span>
                               <span className="text-slate-800 font-semibold tabular-nums shrink-0">
                                 {unit != null && unit > 0 ? `${fmtCurrency(unit)} · ${fmtCurrency(unit * qty)}` : '—'}
@@ -914,7 +1019,7 @@ export function RfqPanel({
                         </div>
                         <span className={`text-sm font-bold tabular-nums px-1.5 rounded ${isLowest ? 'text-emerald-700 bg-emerald-50' : 'text-slate-900'}`}>
                           {total != null ? fmtCurrency(total) : '—'}
-                          {isLowest && <span className="ml-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700">L1</span>}
+                          {isLowest && <span className="ml-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800">L1</span>}
                         </span>
                       </div>
 
@@ -925,21 +1030,21 @@ export function RfqPanel({
 
                 {/* Final Decision per item (mobile) — Price / Disc / Vendor, like the auction */}
                 {canManage && quotedInvites.length > 0 && (
-                  <div className="rounded-lg border border-teal-200 bg-[#F0FAF6] p-3 space-y-3">
-                    <p className="text-[11px] font-bold text-teal-800 uppercase tracking-wider">Final Decision</p>
+                  <div className="rounded-lg border border-slate-300 bg-[#F4F4F5] p-3 space-y-3">
+                    <p className="text-[11px] font-bold text-slate-900 uppercase tracking-wider">Final Decision</p>
                     {gridItems.map(item => (
-                      <div key={item.id} className="space-y-1.5 border-t border-teal-100 pt-2 first:border-0 first:pt-0">
+                      <div key={item.id} className="space-y-1.5 border-t border-slate-200 pt-2 first:border-0 first:pt-0">
                         <p className="text-[12px] font-semibold text-slate-700">{item.description} <span className="text-slate-400">×{item.quantity}</span></p>
                         <div className="flex gap-2">
                           <div className="flex-1">
-                            <p className="text-[10px] font-bold text-teal-700 uppercase mb-0.5">Price (₹)</p>
+                            <p className="text-[10px] font-bold text-slate-700 uppercase mb-0.5">Price (₹)</p>
                             <input type="number" min="0" inputMode="decimal" placeholder="0"
                               value={finalPrices[`${item.id}-price`] ?? ''}
                               onChange={e => setFinalPrice(`${item.id}-price`, e.target.value)}
                               aria-label={`Final price for ${item.description}`} className={FD_INPUT} />
                           </div>
                           <div className="w-16">
-                            <p className="text-[10px] font-bold text-teal-700 uppercase mb-0.5">Disc %</p>
+                            <p className="text-[10px] font-bold text-slate-700 uppercase mb-0.5">Disc %</p>
                             <input type="number" min="0" inputMode="decimal" placeholder="0"
                               value={finalPrices[`${item.id}-disc`] ?? ''}
                               onChange={e => setFinalPrice(`${item.id}-disc`, e.target.value)}
@@ -950,12 +1055,12 @@ export function RfqPanel({
                           value={finalVendorPerItem[item.id] ?? ''}
                           onChange={e => setFinalVendor(item.id, e.target.value)}
                           aria-label={`Final decision vendor for ${item.description}`}
-                          className="w-full text-[11px] border border-slate-200 rounded px-1.5 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-teal-400 text-slate-700"
+                          className="w-full text-[11px] border border-slate-200 rounded px-1.5 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-slate-400 text-slate-700"
                         >
                           <option value="">Select vendor…</option>
                           {quotedInvites.map(inv => <option key={inv.id} value={inv.vendorId}>{vendorName(inv.vendorId)}</option>)}
                         </select>
-                        <p className="text-[11px] font-bold text-teal-700 text-right">Price × Qty: {fmtCurrency(fdNet(item))}</p>
+                        <p className="text-[11px] font-bold text-slate-700 text-right">Price × Qty: {fmtCurrency(fdNet(item))}</p>
                       </div>
                     ))}
                   </div>
@@ -972,7 +1077,7 @@ export function RfqPanel({
               {/* INCO Terms tracker — one-time vendors only (gates their quoting) */}
               {oneTimeInvites.length > 0 && (
                 <div className="rounded-lg border border-slate-200 overflow-hidden">
-                  <div className="flex items-center gap-1.5 px-3 py-2 bg-[#F0F4FB] border-b border-slate-200">
+                  <div className="flex items-center gap-1.5 px-3 py-2 bg-[#F4F4F5] border-b border-slate-200">
                     <ScrollText className="w-3.5 h-3.5 text-slate-400" />
                     <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">INCO Terms — New / One-time Vendors</span>
                   </div>
@@ -988,7 +1093,7 @@ export function RfqPanel({
                             <div className="min-w-0">
                               <p className="text-sm font-semibold text-slate-900 truncate">{vendorName(inv.vendorId)}</p>
                               {incoStatus !== 'approved' && (
-                                <p className="text-[11px] text-amber-700">Awaiting INCO Terms approval — vendor can’t quote yet</p>
+                                <p className="text-[11px] text-slate-700">Awaiting INCO Terms approval — vendor can’t quote yet</p>
                               )}
                             </div>
                             <div className="flex items-center gap-2">
@@ -1000,7 +1105,7 @@ export function RfqPanel({
                                   onClick={() => setIncoReviewId(isReviewing ? null : inv.id)}
                                   aria-expanded={isReviewing}
                                   aria-label={`Review INCO Terms from ${vendorName(inv.vendorId)}`}
-                                  className={`flex items-center gap-1 text-[11px] font-semibold text-[#2563EB] hover:underline ${FOCUS_RING} rounded`}
+                                  className={`flex items-center gap-1 text-[11px] font-semibold text-[#171717] hover:underline ${FOCUS_RING} rounded`}
                                 >
                                   {isReviewing ? 'Close' : 'Review'}
                                   <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isReviewing ? 'rotate-180' : ''}`} />
@@ -1044,12 +1149,12 @@ export function RfqPanel({
                               <div className="flex flex-wrap items-center gap-2 pt-1">
                                 <button onClick={() => approveInco(inv)}
                                   aria-label={`Approve INCO Terms for ${vendorName(inv.vendorId)}`}
-                                  className={`flex items-center gap-1 px-3 py-1.5 text-[11px] font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg ${FOCUS_RING}`}>
+                                  className={`flex items-center gap-1 px-3 py-1.5 text-[11px] font-semibold bg-slate-600 hover:bg-slate-700 text-white rounded-lg ${FOCUS_RING}`}>
                                   <CheckCircle2 className="w-3.5 h-3.5" /> Approve
                                 </button>
                                 <button onClick={() => editResendInco(inv)}
                                   aria-label={`Edit and resend INCO Terms to ${vendorName(inv.vendorId)}`}
-                                  className={`flex items-center gap-1 px-3 py-1.5 text-[11px] font-semibold bg-[#2563EB] hover:bg-[#1d4fd7] text-white rounded-lg ${FOCUS_RING}`}>
+                                  className={`flex items-center gap-1 px-3 py-1.5 text-[11px] font-semibold bg-[#171717] hover:bg-[#000000] text-white rounded-lg ${FOCUS_RING}`}>
                                   <Send className="w-3.5 h-3.5" /> Edit &amp; resend
                                 </button>
                                 <button onClick={() => rejectInco(inv)}
@@ -1067,11 +1172,22 @@ export function RfqPanel({
                 </div>
               )}
 
+              {/* Unified Final-Decision approve + Request-PI (split award; bulk or per-vendor) */}
+              {canManage && quotedCount >= 1 && !inFulfillment && (
+                <FinalDecisionActions
+                  request={request}
+                  invites={invites}
+                  vendors={vendors}
+                  currentRole={currentRole}
+                  canAward={true}
+                />
+              )}
+
               {/* Start Reverse Auction CTA */}
               {canManage && quotedCount >= 1 && (
-                <div className="rounded-lg bg-[#EFF6FF] border border-[#2563EB]/20 p-4 flex items-center justify-between gap-4 flex-wrap">
+                <div className="rounded-lg bg-[#F4F4F5] border border-[#171717]/20 p-4 flex items-center justify-between gap-4 flex-wrap">
                   <div className="flex items-start gap-3">
-                    <div className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-lg bg-[#1E3A5F]/10 text-[#1E3A5F]">
+                    <div className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-lg bg-[#171717]/10 text-[#171717]">
                       <Gavel className="w-4 h-4" />
                     </div>
                     <div className="max-w-md space-y-1">
@@ -1079,7 +1195,7 @@ export function RfqPanel({
                         Escalate to a live reverse auction. Each vendor’s quoted prices carry over as their opening bid — lowest{lowest != null ? <> (<span className="font-semibold tabular-nums text-slate-900">{fmtCurrency(lowest)}</span>)</> : ''} becomes L1 and vendors can rebid lower.
                       </p>
                       {!canStartAuction && (
-                        <p className="text-[11px] font-semibold text-amber-700">Need at least 2 vendor quotes to start an auction.</p>
+                        <p className="text-[11px] font-semibold text-slate-700">Need at least 2 vendor quotes to start an auction.</p>
                       )}
                     </div>
                   </div>
@@ -1088,7 +1204,7 @@ export function RfqPanel({
                     disabled={!canStartAuction}
                     aria-label="Start a reverse auction"
                     title={canStartAuction ? undefined : 'Need at least 2 vendor quotes to start an auction.'}
-                    className={`flex items-center gap-1.5 px-4 py-2 text-xs font-semibold bg-[#1E3A5F] hover:bg-[#162c47] disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg whitespace-nowrap ${FOCUS_RING}`}
+                    className={`flex items-center gap-1.5 px-4 py-2 text-xs font-semibold bg-[#171717] hover:bg-[#171717] disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg whitespace-nowrap ${FOCUS_RING}`}
                   >
                     <Gavel className="w-4 h-4" /> Start Reverse Auction
                   </button>
@@ -1102,7 +1218,7 @@ export function RfqPanel({
                     onClick={() => setShowHistory(h => !h)}
                     aria-expanded={showHistory}
                     aria-label="Toggle negotiation history"
-                    className={`w-full flex items-center justify-between gap-2 px-3 py-2 bg-[#F0F4FB] hover:bg-slate-100 ${FOCUS_RING}`}
+                    className={`w-full flex items-center justify-between gap-2 px-3 py-2 bg-[#F4F4F5] hover:bg-slate-100 ${FOCUS_RING}`}
                   >
                     <span className="flex items-center gap-1.5 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
                       <History className="w-3.5 h-3.5" /> Negotiation History ({historyEntries.length})
@@ -1184,7 +1300,7 @@ function VendorActions({
           onClick={onSend}
           disabled={!formValid}
           aria-label={`Send counter to ${vendorLabel}`}
-          className={`flex items-center justify-center gap-1 px-2 py-1.5 text-[11px] font-semibold bg-[#2563EB] hover:bg-[#1d4fd7] disabled:opacity-50 text-white rounded-lg ${FOCUS_RING}`}
+          className={`flex items-center justify-center gap-1 px-2 py-1.5 text-[11px] font-semibold bg-[#171717] hover:bg-[#000000] disabled:opacity-50 text-white rounded-lg ${FOCUS_RING}`}
         >
           <Send className="w-3.5 h-3.5" /> Send to vendor
         </button>
@@ -1208,19 +1324,9 @@ function VendorActions({
         {canManage && (
           <>
             {readyForPi ? (
-              canFinalize ? (
-                <button
-                  onClick={onRequestPi}
-                  aria-label={`Request Proforma Invoice from ${vendorLabel}`}
-                  className={`flex items-center justify-center gap-1 px-2 py-1.5 text-[11px] font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg ${FOCUS_RING}`}
-                >
-                  <FileText className="w-3.5 h-3.5" /> Request PI
-                </button>
-              ) : (
-                <p className="text-[10px] text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 leading-snug">
-                  Awaiting sourcing head to request the Proforma Invoice.
-                </p>
-              )
+              <p className="text-[10px] text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 leading-snug text-center">
+                Quotation &amp; docs approved — approve &amp; request PI in the <span className="font-semibold">Final Decision</span> area below.
+              </p>
             ) : docStatus === 'rejected' ? (
               <>
                 <p className="text-[10px] text-red-700 bg-red-50 border border-red-200 rounded-lg px-2 py-1 leading-snug">
@@ -1229,13 +1335,13 @@ function VendorActions({
                 <button
                   onClick={onResendDocs}
                   aria-label={`Re-send approval documents to ${vendorLabel}`}
-                  className={`flex items-center justify-center gap-1 px-2 py-1.5 text-[11px] font-semibold bg-[#2563EB] hover:bg-[#1d4fd7] text-white rounded-lg ${FOCUS_RING}`}
+                  className={`flex items-center justify-center gap-1 px-2 py-1.5 text-[11px] font-semibold bg-[#171717] hover:bg-[#000000] text-white rounded-lg ${FOCUS_RING}`}
                 >
                   <Send className="w-3.5 h-3.5" /> Re-send documents
                 </button>
               </>
             ) : (
-              <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1 leading-snug">
+              <p className="text-[10px] text-slate-700 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 leading-snug">
                 Vendor must approve the documents before a Proforma Invoice can be requested.
               </p>
             )}
@@ -1318,7 +1424,7 @@ function VendorActions({
         <button
           onClick={onStartCounter}
           aria-label={`Counter ${vendorLabel}'s quotation`}
-          className={`flex items-center justify-center gap-1 px-2 py-1.5 text-[11px] font-semibold bg-white border border-[#2563EB]/30 text-[#2563EB] rounded-lg ${FOCUS_RING}`}
+          className={`flex items-center justify-center gap-1 px-2 py-1.5 text-[11px] font-semibold bg-white border border-[#171717]/30 text-[#171717] rounded-lg ${FOCUS_RING}`}
         >
           <Pencil className="w-3.5 h-3.5" /> Counter
         </button>
@@ -1326,7 +1432,7 @@ function VendorActions({
       <button
         onClick={onAccept}
         aria-label={`Accept ${vendorLabel}'s quotation`}
-        className={`flex items-center justify-center gap-1 px-2 py-1.5 text-[11px] font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg ${FOCUS_RING}`}
+        className={`flex items-center justify-center gap-1 px-2 py-1.5 text-[11px] font-semibold bg-slate-600 hover:bg-slate-700 text-white rounded-lg ${FOCUS_RING}`}
       >
         <CheckCircle2 className="w-3.5 h-3.5" /> Accept
       </button>

@@ -5,6 +5,7 @@ import { useParams } from "next/navigation"
 import { toast } from "sonner"
 import { CheckIcon, ClockIcon, SearchIcon, BellIcon, CheckCircleIcon, XCircleIcon, Gavel, Timer, Copy, Users, Plus, X, FileText, Printer, Bell, UserX, AlertCircle, ArrowLeftRight } from "lucide-react"
 import { VendorGrid } from "@/components/VendorGrid"
+import { FinalDecisionActions } from "@/components/FinalDecisionActions"
 import { RfqPanel } from "@/components/RfqPanel"
 import { AccountsPanel } from "@/components/AccountsPanel"
 import { TatBanner } from "@/components/TatBanner"
@@ -14,7 +15,8 @@ import { lowestRfqTotal } from "@/lib/rfqUtils"
 import { effectiveDocApprovalStatus } from "@/lib/docPackageUtils"
 import { useCapex } from "@/lib/capexContext"
 import type { AuctionConfig, CapexMasterItem, CapexRequest, CapexStatus, Vendor, Quote, VendorInvite } from "@/lib/types"
-import { ROLE_NAMES, STATUS_COLORS, STATUS_LABELS, SOURCING_ENGINEERS, PLANTS } from "@/lib/constants"
+import { ROLE_NAMES, SOURCING_ENGINEERS, PLANTS } from "@/lib/constants"
+import { StatusBadge } from "@/components/StatusBadge"
 import { CARD } from "@/lib/uiTokens"
 
 const FIELD_TYPE_LABELS: Record<string, string> = {
@@ -72,7 +74,7 @@ function BudgetStatusChip({ budget, allocatedINR }: { budget?: number; allocated
   }
   if (diff < 0) {
     return (
-      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold text-emerald-700 bg-emerald-100 border border-emerald-200 whitespace-nowrap">
+      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 whitespace-nowrap">
         {formatPrice(Math.abs(diff))} under
       </span>
     )
@@ -154,7 +156,7 @@ function RequestInfoCard({ request }: { request: CapexRequest }) {
         <div className="border border-slate-200 rounded-lg overflow-hidden mb-4">
           <table className="w-full text-xs">
             <thead>
-              <tr className="bg-[#F0F4FB] text-slate-600">
+              <tr className="bg-[#F4F4F5] text-slate-600">
                 <th className="px-3 py-2 text-left font-bold uppercase tracking-wider w-8">#</th>
                 <th className="px-3 py-2 text-left font-bold uppercase tracking-wider">Description</th>
                 <th className="px-3 py-2 text-left font-bold uppercase tracking-wider hidden sm:table-cell">Category</th>
@@ -183,10 +185,10 @@ function RequestInfoCard({ request }: { request: CapexRequest }) {
                     <td className="px-3 py-2 text-slate-400 font-bold">{idx + 1}</td>
                     <td className="px-3 py-2">
                       <span className="font-semibold text-slate-800">{item.description}</span>
-                      {item.division && <span className="ml-1.5 text-emerald-600 text-xs font-semibold">{item.division}</span>}
+                      {item.division && <span className="ml-1.5 text-slate-600 text-xs font-semibold">{item.division}</span>}
                       {item.masterHead && <span className="ml-1.5 text-slate-400">· {item.masterHead}</span>}
                       {item.machineCapacity && (
-                        <span className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-sky-100 text-sky-800 border border-sky-200">
+                        <span className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-800 border border-slate-200">
                           Capacity: {item.machineCapacity}
                         </span>
                       )}
@@ -205,7 +207,7 @@ function RequestInfoCard({ request }: { request: CapexRequest }) {
                     </td>
                     <td className="px-3 py-2 hidden lg:table-cell">
                       {item.attachmentName
-                        ? <span className="text-teal-700 font-medium truncate max-w-[100px] block" title={item.attachmentName}>{item.attachmentName}</span>
+                        ? <span className="text-blue-700 font-medium truncate max-w-[100px] block" title={item.attachmentName}>{item.attachmentName}</span>
                         : <span className="text-slate-300">—</span>}
                     </td>
                   </tr>
@@ -288,7 +290,7 @@ function RequestInfoCard({ request }: { request: CapexRequest }) {
                   a.click()
                   URL.revokeObjectURL(url)
                 }}
-                className="ml-1 inline-flex items-center gap-1 text-xs font-semibold text-[#0D9488] hover:text-[#115E59] bg-[#CCFBF1] hover:bg-[#5EEAD4]/40 border border-[#5EEAD4] px-2 py-1 rounded-md transition-colors"
+                className="ml-1 inline-flex items-center gap-1 text-xs font-semibold text-[#2563EB] hover:text-[#1D4ED8] bg-[#DBEAFE] hover:bg-[#93C5FD]/40 border border-[#93C5FD] px-2 py-1 rounded-md transition-colors"
               >
                 <svg aria-hidden="true" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -355,27 +357,27 @@ const STATUS_MESSAGES: Partial<Record<CapexStatus, {
     body: "Your request has been received and is in the queue.",
   },
   pending_head_approval: {
-    icon: ClockIcon, color: "border-orange-400 bg-orange-50", textColor: "text-orange-800",
+    icon: ClockIcon, color: "border-slate-400 bg-slate-50", textColor: "text-slate-800",
     title: "Awaiting Plant Head Approval",
     body: "Your request is with the Plant Head for review. Sourcing will begin once approved.",
   },
   sourcing: {
-    icon: SearchIcon, color: "border-violet-400 bg-violet-50", textColor: "text-violet-800",
+    icon: SearchIcon, color: "border-slate-400 bg-slate-50", textColor: "text-slate-800",
     title: "Being Sourced",
     body: "The sourcing team is actively working on vendor quotes for this request.",
   },
   negotiation: {
-    icon: SearchIcon, color: "border-[#14B8A6] bg-[#CCFBF1]", textColor: "text-[#115E59]",
+    icon: SearchIcon, color: "border-[#2563EB] bg-[#DBEAFE]", textColor: "text-[#1D4ED8]",
     title: "Vendor Negotiation Ongoing",
     body: "The sourcing team is negotiating with shortlisted vendors to secure the best terms.",
   },
   sourcing_approved: {
-    icon: BellIcon, color: "border-[#0D9488] bg-[#CCFBF1]", textColor: "text-[#115E59]",
+    icon: BellIcon, color: "border-[#2563EB] bg-[#DBEAFE]", textColor: "text-[#1D4ED8]",
     title: "Action Required",
     body: "Sourcing has selected a vendor. Please review the recommendation below and approve or reject.",
   },
   buyer_approved: {
-    icon: CheckCircleIcon, color: "border-green-400 bg-green-50", textColor: "text-green-800",
+    icon: CheckCircleIcon, color: "border-slate-400 bg-slate-50", textColor: "text-slate-800",
     title: "Request Complete",
     body: "Your request has been approved and the vendor has been engaged.",
   },
@@ -415,8 +417,8 @@ function BuyerView({ request, approvedVendor, approvedQuote, approvedInvite, onA
                 <div key={step.key} className="relative flex flex-col items-center gap-1 flex-1">
                   <div className={[
                     "w-6 h-6 rounded-full flex items-center justify-center z-10 transition-all text-[11px] font-bold",
-                    done   ? "bg-[#0D9488] text-white shadow-sm" : "",
-                    active ? "bg-white border-2 border-[#0D9488] text-[#0D9488] shadow-sm" : "",
+                    done   ? "bg-[#2563EB] text-white shadow-sm" : "",
+                    active ? "bg-white border-2 border-[#2563EB] text-[#2563EB] shadow-sm" : "",
                     future ? "bg-white border-2 border-slate-200 text-slate-300" : "",
                   ].join(" ")}>
                     {done
@@ -426,7 +428,7 @@ function BuyerView({ request, approvedVendor, approvedQuote, approvedInvite, onA
                   </div>
                   <span className={[
                     "text-[11px] text-center leading-tight max-w-[72px] hidden sm:block",
-                    done   ? "text-[#0D9488] font-medium" : "",
+                    done   ? "text-[#2563EB] font-medium" : "",
                     active ? "text-slate-900 font-semibold" : "",
                     future ? "text-slate-400" : "",
                   ].join(" ")}>
@@ -455,15 +457,15 @@ function BuyerView({ request, approvedVendor, approvedQuote, approvedInvite, onA
 
       {/* Buyer approval card */}
       {request.status === "sourcing_approved" && (
-        <div className="bg-white border border-[#5EEAD4] rounded-xl p-4 shadow-sm space-y-4">
+        <div className="bg-white border border-[#93C5FD] rounded-xl p-4 shadow-sm space-y-4">
           <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-[#0D9488] animate-pulse" />
+            <div className="w-2 h-2 rounded-full bg-[#2563EB] animate-pulse" />
             <h2 className="text-sm font-bold text-slate-900">Sourcing Recommendation — Action Required</h2>
           </div>
           {approvedInvite && approvedVendor && approvedQuote ? (
             <>
               {/* Vendor identity */}
-              <div className="rounded-lg bg-[#CCFBF1] border border-[#5EEAD4] px-4 py-3 flex flex-wrap gap-x-6 gap-y-2">
+              <div className="rounded-lg bg-[#DBEAFE] border border-[#93C5FD] px-4 py-3 flex flex-wrap gap-x-6 gap-y-2">
                 <div>
                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Vendor</p>
                   <p className="text-sm font-bold text-slate-800">{approvedVendor.vendorName}</p>
@@ -497,9 +499,9 @@ function BuyerView({ request, approvedVendor, approvedQuote, approvedInvite, onA
                           <td className="px-4 py-2 text-right font-medium text-slate-800">{formatPrice(value)}</td>
                         </tr>
                       ) : null)}
-                      <tr className="bg-[#CCFBF1]">
+                      <tr className="bg-[#DBEAFE]">
                         <td className="px-4 py-2 font-bold text-slate-700">Total</td>
-                        <td className="px-4 py-2 text-right font-bold text-[#0D9488]">
+                        <td className="px-4 py-2 text-right font-bold text-[#2563EB]">
                           {formatPrice(approvedQuote.price + (approvedQuote.freight ?? 0) + (approvedQuote.packing ?? 0) + (approvedQuote.service ?? 0))}
                         </td>
                       </tr>
@@ -536,7 +538,7 @@ function BuyerView({ request, approvedVendor, approvedQuote, approvedInvite, onA
               <div className="flex gap-3 pt-1">
                 <button
                   onClick={onApprove}
-                  className="px-5 py-2.5 rounded-lg bg-[#0D9488] hover:bg-[#115E59] text-white text-sm font-semibold transition-colors shadow-sm"
+                  className="px-5 py-2.5 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-sm font-semibold transition-colors shadow-sm"
                 >
                   Approve & Engage Vendor
                 </button>
@@ -549,7 +551,7 @@ function BuyerView({ request, approvedVendor, approvedQuote, approvedInvite, onA
               </div>
             </>
           ) : (
-            <p className="text-sm text-[#0D9488]">No vendor has been finalised yet. Please check back shortly.</p>
+            <p className="text-sm text-[#2563EB]">No vendor has been finalised yet. Please check back shortly.</p>
           )}
         </div>
       )}
@@ -567,11 +569,9 @@ function StatusTimeline({ history }: { history: CapexRequest["statusHistory"] })
       <ol className="relative space-y-4 pl-5 before:absolute before:left-1.5 before:top-1 before:bottom-1 before:w-px before:bg-slate-200">
         {[...history].reverse().map((entry, idx) => (
           <li key={idx} className="relative">
-            <span className="absolute -left-[17px] top-1 w-2.5 h-2.5 rounded-full bg-white border-2 border-[#0D9488]" />
+            <span className="absolute -left-[17px] top-1 w-2.5 h-2.5 rounded-full bg-white border-2 border-[#2563EB]" />
             <div className="flex flex-wrap items-center gap-2">
-              <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${STATUS_COLORS[entry.status] ?? "bg-slate-100 text-slate-600"}`}>
-                {STATUS_LABELS[entry.status] ?? entry.status.replace(/_/g, " ")}
-              </span>
+              <StatusBadge status={entry.status} size="xs" />
               <span className="text-[12px] font-medium text-slate-700">{entry.actor}</span>
               <span className="text-[11px] text-slate-400">
                 {new Date(entry.at).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })}
@@ -612,19 +612,19 @@ function SourcingDecisionBanner({ request, vendors }: { request: CapexRequest; v
   const finalVendors = vendorIds.map(vid => vendors.find(v => v.id === vid)).filter(Boolean)
 
   return (
-    <div className="rounded-xl border border-green-300 overflow-hidden shadow-sm">
-      <div className="flex items-center justify-between px-4 py-3 bg-[#166534]">
+    <div className="rounded-xl border border-slate-300 overflow-hidden shadow-sm">
+      <div className="flex items-center justify-between px-4 py-3 bg-[#334155]">
         <div className="flex items-center gap-2">
-          <CheckCircleIcon className="w-4 h-4 text-green-300" />
+          <CheckCircleIcon className="w-4 h-4 text-slate-300" />
           <p className="text-sm font-bold text-white">Sourcing Decision Locked</p>
         </div>
         {sd?.savedAt && (
-          <p className="text-xs text-green-300">
+          <p className="text-xs text-slate-300">
             Locked {new Date(sd.savedAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
           </p>
         )}
       </div>
-      <div className="bg-green-50 px-4 py-4 grid grid-cols-2 sm:grid-cols-4 gap-4">
+      <div className="bg-slate-50 px-4 py-4 grid grid-cols-2 sm:grid-cols-4 gap-4">
         {finalTotal > 0 && (
           <div>
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Final Amount</p>
@@ -634,8 +634,8 @@ function SourcingDecisionBanner({ request, vendors }: { request: CapexRequest; v
         {savings > 0 ? (
           <div>
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Saved vs Budget</p>
-            <p className="text-xl font-bold text-green-700">{formatPrice(Math.round(savings))}</p>
-            {savingsPct && <p className="text-xs text-green-600 font-semibold mt-0.5">{savingsPct}% under budget</p>}
+            <p className="text-xl font-bold text-emerald-700">{formatPrice(Math.round(savings))}</p>
+            {savingsPct && <p className="text-xs text-emerald-600 font-semibold mt-0.5">{savingsPct}% under budget</p>}
           </div>
         ) : request.budget && finalTotal > request.budget ? (
           <div>
@@ -669,7 +669,7 @@ function SourcingDecisionBanner({ request, vendors }: { request: CapexRequest; v
         )}
         {!finalTotal && !finalVendors.length && (
           <div className="col-span-4">
-            <p className="text-sm text-green-800 font-medium">Decision approved — vendor has been engaged.</p>
+            <p className="text-sm text-slate-800 font-medium">Decision approved — vendor has been engaged.</p>
           </div>
         )}
       </div>
@@ -701,21 +701,21 @@ function DeliveryLocationRow({
           value={location.name}
           onChange={e => onChange({ name: e.target.value })}
           placeholder="Location name (e.g., Jhajjar)"
-          className="text-sm border border-slate-200 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-400"
+          className="text-sm border border-slate-200 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
         />
         <input
           type="text"
           value={location.state}
           onChange={e => onChange({ state: e.target.value })}
           placeholder="State (e.g., Haryana)"
-          className="text-sm border border-slate-200 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-400"
+          className="text-sm border border-slate-200 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
         />
         <input
           type="number"
           value={location.subLocationCount || ''}
           onChange={e => onChange({ subLocationCount: e.target.value ? parseInt(e.target.value) : undefined })}
           placeholder="Sub-locations (optional)"
-          className="text-sm border border-slate-200 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-400"
+          className="text-sm border border-slate-200 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
         />
       </div>
       {showRemove && (
@@ -1089,9 +1089,9 @@ function ReverseAuctionPanel({
   if (showDocumentPreview && document) {
     return (
       <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-        <div className="flex items-center justify-between px-4 py-3.5 bg-violet-50 border-b border-violet-100">
+        <div className="flex items-center justify-between px-4 py-3.5 bg-slate-50 border-b border-slate-100">
           <div className="flex items-center gap-2">
-            <FileText className="w-4 h-4 text-violet-600" />
+            <FileText className="w-4 h-4 text-slate-600" />
             <h2 className="text-sm font-bold text-slate-900">Business Rules for Reverse Auction - Preview</h2>
           </div>
           <div className="flex items-center gap-2">
@@ -1122,9 +1122,9 @@ function ReverseAuctionPanel({
       {/* Auction Document Setup Form */}
       {!hasDocument && !config && (
         <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-          <div className="flex items-center justify-between px-4 py-3.5 bg-violet-50 border-b border-violet-100">
+          <div className="flex items-center justify-between px-4 py-3.5 bg-slate-50 border-b border-slate-100">
             <div className="flex items-center gap-2">
-              <Gavel className="w-4 h-4 text-violet-600" />
+              <Gavel className="w-4 h-4 text-slate-600" />
               <h2 className="text-sm font-bold text-slate-900">Reverse Auction Setup</h2>
             </div>
           </div>
@@ -1135,7 +1135,7 @@ function ReverseAuctionPanel({
               <button
                 type="button"
                 onClick={() => setShowVendorSelect(v => !v)}
-                className="flex items-center gap-2 text-sm font-semibold text-violet-700 hover:text-violet-800"
+                className="flex items-center gap-2 text-sm font-semibold text-slate-700 hover:text-slate-800"
               >
                 <Users className="w-4 h-4" />
                 {showVendorSelect ? "Hide" : "Select"} Vendors ({selectedVendorIds.length} selected)
@@ -1156,8 +1156,8 @@ function ReverseAuctionPanel({
                             className={[
                               "flex items-center gap-3 px-3 py-2 rounded-lg border cursor-pointer transition-colors",
                               isSelected
-                                ? "bg-violet-50 border-violet-200"
-                                : "bg-white border-slate-200 hover:border-violet-200",
+                                ? "bg-slate-50 border-slate-200"
+                                : "bg-white border-slate-200 hover:border-slate-200",
                               isInvited && "opacity-75",
                             ].join(" ")}
                           >
@@ -1166,14 +1166,14 @@ function ReverseAuctionPanel({
                               checked={isSelected}
                               disabled={isInvited}
                               onChange={() => toggleVendor(vendor.id)}
-                              className="w-4 h-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
+                              className="w-4 h-4 rounded border-slate-300 text-slate-600 focus:ring-slate-500"
                             />
                             <div className="flex-1 min-w-0">
                               <p className="text-sm font-semibold text-slate-800 truncate">{vendor.vendorName}</p>
                               <p className="text-xs text-slate-500">{vendor.vendorCode}</p>
                             </div>
                             {isInvited && (
-                              <span className="text-[10px] font-medium text-violet-600 bg-violet-100 px-2 py-0.5 rounded-full">Already invited</span>
+                              <span className="text-[10px] font-medium text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full">Already invited</span>
                             )}
                           </label>
                         )
@@ -1189,7 +1189,7 @@ function ReverseAuctionPanel({
               <button
                 onClick={() => setShowDocumentForm(true)}
                 disabled={selectedVendorIds.length === 0}
-                className="w-full px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-sm font-semibold transition-colors"
+                className="w-full px-4 py-2 rounded-lg bg-slate-600 hover:bg-slate-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-sm font-semibold transition-colors"
               >
                 Configure Auction Document
               </button>
@@ -1203,7 +1203,7 @@ function ReverseAuctionPanel({
                       type="date"
                       value={auctionDate}
                       onChange={e => setAuctionDate(e.target.value)}
-                      className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-400"
+                      className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
                     />
                   </div>
                   <div className="grid grid-cols-2 gap-2">
@@ -1213,7 +1213,7 @@ function ReverseAuctionPanel({
                         type="time"
                         value={auctionOpeningTime}
                         onChange={e => setAuctionOpeningTime(e.target.value)}
-                        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-400"
+                        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
                       />
                     </div>
                     <div>
@@ -1222,7 +1222,7 @@ function ReverseAuctionPanel({
                         type="time"
                         value={auctionClosingTime}
                         onChange={e => setAuctionClosingTime(e.target.value)}
-                        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-400"
+                        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
                       />
                     </div>
                   </div>
@@ -1232,7 +1232,7 @@ function ReverseAuctionPanel({
                       type="date"
                       value={bidderAcceptanceDeadlineDate}
                       onChange={e => setBidderAcceptanceDeadlineDate(e.target.value)}
-                      className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-400"
+                      className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
                     />
                   </div>
                   <div>
@@ -1241,7 +1241,7 @@ function ReverseAuctionPanel({
                       type="time"
                       value={bidderAcceptanceDeadlineTime}
                       onChange={e => setBidderAcceptanceDeadlineTime(e.target.value)}
-                      className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-400"
+                      className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
                     />
                   </div>
                   <div className="sm:col-span-2">
@@ -1250,7 +1250,7 @@ function ReverseAuctionPanel({
                       type="datetime-local"
                       value={vendorRevertDeadlineAt}
                       onChange={e => setVendorRevertDeadlineAt(e.target.value)}
-                      className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-400"
+                      className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
                     />
                   </div>
                 </div>
@@ -1272,7 +1272,7 @@ function ReverseAuctionPanel({
                     </div>
                     <button
                       onClick={addDeliveryLocation}
-                      className="mt-2 flex items-center gap-1.5 text-sm font-semibold text-violet-700 hover:text-violet-800"
+                      className="mt-2 flex items-center gap-1.5 text-sm font-semibold text-slate-700 hover:text-slate-800"
                     >
                       <Plus className="w-4 h-4" />
                       Add Location
@@ -1290,7 +1290,7 @@ function ReverseAuctionPanel({
                         type="number"
                         value={bidValidityDays}
                         onChange={e => setBidValidityDays(Number(e.target.value))}
-                        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-400"
+                        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
                       />
                     </div>
                     <div>
@@ -1299,7 +1299,7 @@ function ReverseAuctionPanel({
                         type="number"
                         value={maxDecrements}
                         onChange={e => setMaxDecrements(Number(e.target.value))}
-                        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-400"
+                        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
                       />
                     </div>
                     <div>
@@ -1308,7 +1308,7 @@ function ReverseAuctionPanel({
                         type="number"
                         value={extensionDurationMins}
                         onChange={e => setExtensionDurationMins(Number(e.target.value))}
-                        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-400"
+                        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
                       />
                     </div>
                     <div>
@@ -1317,7 +1317,7 @@ function ReverseAuctionPanel({
                         type="number"
                         value={maxExtensionsPerBidder}
                         onChange={e => setMaxExtensionsPerBidder(Number(e.target.value))}
-                        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-400"
+                        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
                       />
                     </div>
                     <div>
@@ -1327,7 +1327,7 @@ function ReverseAuctionPanel({
                         value={currency}
                         onChange={e => setCurrency(e.target.value)}
                         placeholder="INR"
-                        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-400"
+                        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
                       />
                     </div>
                   </div>
@@ -1342,7 +1342,7 @@ function ReverseAuctionPanel({
                       <select
                         value={durationDays}
                         onChange={e => setDurationDays(Number(e.target.value))}
-                        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-400"
+                        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
                       >
                         {Array.from({ length: 30 }, (_, i) => i + 1).map(d => (
                           <option key={d} value={d}>{d} day{d > 1 ? "s" : ""}</option>
@@ -1356,7 +1356,7 @@ function ReverseAuctionPanel({
                         value={threshold}
                         onChange={e => setThreshold(e.target.value)}
                         placeholder="Buyer estimate"
-                        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-400"
+                        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
                       />
                       {rfqFloor != null && (
                         <p className="text-[10px] text-slate-400 mt-1">Pre-filled from lowest RFQ quote ({formatPrice(rfqFloor)}) — editable.</p>
@@ -1370,7 +1370,7 @@ function ReverseAuctionPanel({
                     type="button"
                     onClick={generateAndSendDocument}
                     disabled={selectedVendorIds.length === 0 || !auctionDate || !auctionOpeningTime || !auctionClosingTime}
-                    className="flex-1 px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-sm font-semibold transition-colors"
+                    className="flex-1 px-4 py-2 rounded-lg bg-slate-600 hover:bg-slate-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-sm font-semibold transition-colors"
                   >
                     Generate & Send to Vendors
                   </button>
@@ -1391,15 +1391,15 @@ function ReverseAuctionPanel({
       {/* Document Generated - Show Status & Approval Tracker */}
       {hasDocument && !config && (
         <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-          <div className="flex items-center justify-between px-4 py-3.5 bg-violet-50 border-b border-violet-100">
+          <div className="flex items-center justify-between px-4 py-3.5 bg-slate-50 border-b border-slate-100">
             <div className="flex items-center gap-2">
-              <FileText className="w-4 h-4 text-violet-600" />
+              <FileText className="w-4 h-4 text-slate-600" />
               <h2 className="text-sm font-bold text-slate-900">Auction Document & Vendor Approvals</h2>
             </div>
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setShowDocumentPreview(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-white border border-violet-200 text-violet-700 rounded-lg hover:bg-violet-50"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-white border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50"
               >
                 <FileText className="w-3.5 h-3.5" />
                 View Document
@@ -1410,21 +1410,21 @@ function ReverseAuctionPanel({
           <div className="p-4 space-y-4">
             {/* Approval Status Summary */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-center">
-                <p className="text-2xl font-bold text-green-700">{approvalStatus.approvedCount}</p>
-                <p className="text-xs font-semibold text-green-600 uppercase">Approved</p>
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-center">
+                <p className="text-2xl font-bold text-slate-700">{approvalStatus.approvedCount}</p>
+                <p className="text-xs font-semibold text-slate-600 uppercase">Approved</p>
               </div>
-              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-center">
-                <p className="text-2xl font-bold text-amber-700">{approvalStatus.pendingCount}</p>
-                <p className="text-xs font-semibold text-amber-600 uppercase">Pending</p>
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-center">
+                <p className="text-2xl font-bold text-slate-700">{approvalStatus.pendingCount}</p>
+                <p className="text-xs font-semibold text-slate-600 uppercase">Pending</p>
               </div>
               <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-center">
                 <p className="text-2xl font-bold text-red-700">{approvalStatus.rejectedCount}</p>
                 <p className="text-xs font-semibold text-red-600 uppercase">Rejected/Excluded</p>
               </div>
-              <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 text-center">
-                <p className="text-2xl font-bold text-orange-700">{approvalStatus.overdueCount}</p>
-                <p className="text-xs font-semibold text-orange-600 uppercase">Overdue</p>
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-center">
+                <p className="text-2xl font-bold text-slate-700">{approvalStatus.overdueCount}</p>
+                <p className="text-xs font-semibold text-slate-600 uppercase">Overdue</p>
               </div>
             </div>
 
@@ -1448,7 +1448,7 @@ function ReverseAuctionPanel({
                       return (
                         <div key={inv.id} className="flex items-center justify-between px-4 py-3 hover:bg-slate-50">
                           <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded-full bg-violet-100 flex items-center justify-center text-violet-700 font-bold text-xs">
+                            <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-700 font-bold text-xs">
                               {vendor?.vendorName?.charAt(0) ?? "V"}
                             </div>
                             <div>
@@ -1475,7 +1475,7 @@ function ReverseAuctionPanel({
                                 <>
                                   <button
                                     onClick={() => handleSendReminder(inv.id, vendor?.vendorName || 'Vendor')}
-                                    className="p-1.5 text-amber-600 hover:bg-amber-50 rounded-md"
+                                    className="p-1.5 text-slate-600 hover:bg-slate-50 rounded-md"
                                     title="Send reminder"
                                   >
                                     <Bell className="w-4 h-4" />
@@ -1513,7 +1513,7 @@ function ReverseAuctionPanel({
                   <select
                     value={durationDays}
                     onChange={e => setDurationDays(Number(e.target.value))}
-                    className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-400"
+                    className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
                   >
                     {Array.from({ length: 30 }, (_, i) => i + 1).map(d => (
                       <option key={d} value={d}>{d} day{d > 1 ? "s" : ""}</option>
@@ -1527,14 +1527,14 @@ function ReverseAuctionPanel({
                     value={threshold}
                     onChange={e => setThreshold(e.target.value)}
                     placeholder="Buyer estimate"
-                    className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-400"
+                    className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
                   />
                 </div>
                 <button
                   type="button"
                   onClick={startAuction}
                   disabled={!approvalStatus.canStart}
-                  className="px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-sm font-semibold transition-colors"
+                  className="px-4 py-2 rounded-lg bg-slate-600 hover:bg-slate-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-sm font-semibold transition-colors"
                 >
                   {approvalStatus.canStart
                     ? `Start Auction (${approvalStatus.approvedCount} approved)`
@@ -1542,7 +1542,7 @@ function ReverseAuctionPanel({
                 </button>
               </div>
               {!approvalStatus.canStart && (
-                <p className="mt-2 text-xs text-amber-600 flex items-center gap-1">
+                <p className="mt-2 text-xs text-slate-600 flex items-center gap-1">
                   <AlertCircle className="w-3.5 h-3.5" />
                   At least one vendor must approve the document before starting the auction.
                 </p>
@@ -1555,15 +1555,15 @@ function ReverseAuctionPanel({
       {/* Active Auction Panel */}
       {config && (
         <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-          <div className="flex items-center justify-between px-4 py-3.5 bg-violet-50 border-b border-violet-100">
+          <div className="flex items-center justify-between px-4 py-3.5 bg-slate-50 border-b border-slate-100">
             <div className="flex items-center gap-2">
-              <Gavel className="w-4 h-4 text-violet-600" />
+              <Gavel className="w-4 h-4 text-slate-600" />
               <h2 className="text-sm font-bold text-slate-900">Reverse Auction</h2>
             </div>
             {config?.endsAt && (
               <div className={[
                 "flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full",
-                expired ? "bg-red-100 text-red-700" : active ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-600",
+                expired ? "bg-red-100 text-red-700" : active ? "bg-slate-100 text-slate-700" : "bg-slate-100 text-slate-600",
               ].join(" ")}>
                 <Timer className="w-3.5 h-3.5" />
                 {expired ? "Auction closed" : formatAuctionCountdown(config.endsAt)}
@@ -1593,7 +1593,7 @@ function ReverseAuctionPanel({
                     key={d}
                     type="button"
                     onClick={() => extendAuction(d)}
-                    className="px-3 py-1.5 text-xs font-semibold bg-white border border-violet-200 text-violet-700 rounded-lg hover:bg-violet-50"
+                    className="px-3 py-1.5 text-xs font-semibold bg-white border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50"
                   >
                     +{d}d
                   </button>
@@ -1624,7 +1624,7 @@ function ReverseAuctionPanel({
                     return (
                       <div key={inv.id} className="flex items-center justify-between px-4 py-3 hover:bg-slate-50">
                         <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-full bg-violet-100 flex items-center justify-center text-violet-700 font-bold text-xs">
+                          <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-700 font-bold text-xs">
                             {vendor?.vendorName?.charAt(0) ?? "V"}
                           </div>
                           <div>
@@ -1634,9 +1634,9 @@ function ReverseAuctionPanel({
                           <span className={[
                             "ml-2 text-[10px] font-semibold px-2 py-0.5 rounded-full",
                             inv.status === "quote_received"
-                              ? "bg-green-100 text-green-700"
+                              ? "bg-slate-100 text-slate-700"
                               : inv.status === "approved"
-                              ? "bg-emerald-100 text-emerald-700"
+                              ? "bg-slate-100 text-slate-700"
                               : "bg-slate-100 text-slate-600",
                           ].join(" ")}>
                             {inv.status.replace("_", " ")}
@@ -1645,7 +1645,7 @@ function ReverseAuctionPanel({
                         <button
                           type="button"
                           onClick={() => copyLink(inv)}
-                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-white border border-slate-200 text-slate-600 rounded-lg hover:bg-violet-50 hover:border-violet-200 hover:text-violet-700 transition-colors"
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-white border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 hover:border-slate-200 hover:text-slate-700 transition-colors"
                         >
                           <Copy className="w-3.5 h-3.5" />
                           Copy Link
@@ -1660,7 +1660,7 @@ function ReverseAuctionPanel({
                     <select
                       value={newVendorId}
                       onChange={e => setNewVendorId(e.target.value)}
-                      className="flex-1 text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-400 bg-white"
+                      className="flex-1 text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400 bg-white"
                     >
                       <option value="">Add vendor to auction…</option>
                       {uninvitedVendors.map(v => (
@@ -1671,7 +1671,7 @@ function ReverseAuctionPanel({
                       type="button"
                       onClick={addVendorToAuction}
                       disabled={!newVendorId}
-                      className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors"
+                      className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-slate-600 text-white rounded-lg hover:bg-slate-700 disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors"
                     >
                       <Plus className="w-3.5 h-3.5" />
                       Add
@@ -1700,11 +1700,11 @@ function ReverseAuctionPanel({
                       const vendor = vendors.find(v => v.id === row.vendorId)
                       const gap = l1Price !== null && row.rank > 1 ? row.price - l1Price : 0
                       return (
-                        <tr key={row.inviteId} className={row.rank === 1 ? "bg-green-50/50" : ""}>
+                        <tr key={row.inviteId} className={row.rank === 1 ? "bg-slate-50/50" : ""}>
                           <td className="px-4 py-2">
                             <span className={[
                               "text-xs font-bold px-2 py-0.5 rounded-full",
-                              row.rank === 1 ? "bg-green-100 text-green-800" : "bg-slate-100 text-slate-600",
+                              row.rank === 1 ? "bg-slate-100 text-slate-800" : "bg-slate-100 text-slate-600",
                             ].join(" ")}>
                               {rankLabel(row.rank)}
                             </span>
@@ -1713,9 +1713,9 @@ function ReverseAuctionPanel({
                           <td className="px-4 py-2 text-right font-mono font-bold text-slate-800">{formatPrice(row.price)}</td>
                           <td className="px-4 py-2 text-right">
                             {row.rank === 1 ? (
-                              <span className="text-xs font-semibold text-green-700">Lowest</span>
+                              <span className="text-xs font-semibold text-slate-700">Lowest</span>
                             ) : (
-                              <span className="text-xs font-semibold text-amber-700">+{formatPrice(gap)}</span>
+                              <span className="text-xs font-semibold text-slate-700">+{formatPrice(gap)}</span>
                             )}
                           </td>
                         </tr>
@@ -1849,11 +1849,9 @@ export default function CapexDetailPage() {
       <div>
         <div className="flex items-center gap-2.5 flex-wrap">
           <h1 className="text-2xl font-bold tracking-tight text-slate-900">{request.subject}</h1>
-          <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${STATUS_COLORS[request.status] ?? "bg-slate-100 text-slate-600"}`}>
-            {STATUS_LABELS[request.status] ?? request.status.replace(/_/g, " ")}
-          </span>
+          <StatusBadge status={request.status} />
           {awardBased && (
-            <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-teal-50 text-teal-700">
+            <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-blue-50 text-blue-700">
               {awardSummary(reqInvites).completed} / {awardSummary(reqInvites).total} awards complete
             </span>
           )}
@@ -1865,20 +1863,20 @@ export default function CapexDetailPage() {
             <span className="text-sm text-slate-500 font-semibold">{formatPrice(request.budget)}</span>
           )}
           {assignedEngineer && (
-            <span className="text-xs font-semibold bg-violet-50 text-violet-700 px-2.5 py-1 rounded-full">
+            <span className="text-xs font-semibold bg-slate-50 text-slate-700 px-2.5 py-1 rounded-full">
               {assignedEngineer.name}
             </span>
           )}
           {request.requestNo && (
-            <span className="text-xs font-bold bg-[#EBF0FB] text-[#153f90] px-2 py-0.5 rounded-full">{request.requestNo}</span>
+            <span className="text-xs font-bold bg-slate-100 text-slate-900 px-2 py-0.5 rounded-full">{request.requestNo}</span>
           )}
           <span className={[
             "text-xs font-semibold px-2.5 py-1 rounded-full",
-            request.fieldType === "green_field" ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-600",
+            request.fieldType === "green_field" ? "bg-slate-100 text-slate-800" : "bg-slate-100 text-slate-600",
           ].join(" ")}>
             {request.fieldType === "green_field" ? "Green Field" : "Brown Field"}
           </span>
-          <span className="text-xs text-slate-400 font-mono">{request.id.slice(0, 8)}…</span>
+          <span className="text-xs text-slate-900 font-mono font-semibold">{request.id.slice(0, 8)}…</span>
         </div>
       </div>
 
@@ -1905,17 +1903,17 @@ export default function CapexDetailPage() {
         <>
           {/* Head / plant_head approval gate */}
           {(currentRole === "sourcing_head" || currentRole.startsWith("plant_head")) && request.status === "pending_head_approval" && (
-            <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 flex items-center justify-between gap-4">
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex items-center justify-between gap-4">
               <div>
-                <p className="font-semibold text-orange-900">This request requires your approval before sourcing can begin.</p>
-                <p className="text-sm text-orange-700 mt-0.5">
+                <p className="font-semibold text-slate-900">This request requires your approval before sourcing can begin.</p>
+                <p className="text-sm text-slate-700 mt-0.5">
                   Submitted by {request.createdBy}
                   {request.budget ? ` · Estimated budget ${formatPrice(request.budget)}` : ""}
                   {assignedEngineer ? ` · Assigned to ${assignedEngineer.name}` : ""}
                 </p>
               </div>
               <div className="flex gap-2 shrink-0">
-                <button onClick={handleHeadApprove} className="px-4 py-2 rounded-lg bg-orange-600 hover:bg-orange-700 text-white text-sm font-semibold transition-colors">
+                <button onClick={handleHeadApprove} className="px-4 py-2 rounded-lg bg-slate-600 hover:bg-slate-700 text-white text-sm font-semibold transition-colors">
                   Approve for Sourcing
                 </button>
                 <button onClick={handleHeadReject} className="px-4 py-2 rounded-lg bg-white hover:bg-red-50 text-red-600 text-sm font-semibold border border-red-200 transition-colors">
@@ -1976,7 +1974,7 @@ export default function CapexDetailPage() {
                         </div>
                         <div className="shrink-0">
                           {!prePi ? (
-                            <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700">
+                            <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-50 text-slate-700">
                               {AWARD_STATUS_LABEL[inv.awardStatus ?? "awarded"]}
                             </span>
                           ) : canFinalize ? (
@@ -2076,6 +2074,18 @@ export default function CapexDetailPage() {
                 auctionSelectedVendorIds={auctionSelectedVendorIds}
                 onAuctionSelectionChange={setAuctionSelectedVendorIds}
               />
+
+              {/* Unified Final-Decision approve + Request-PI (split award; bulk or per-vendor) */}
+              {canManageSourcing && (request.status === "sourcing" || awardBased) && (
+                <FinalDecisionActions
+                  request={request}
+                  invites={reqInvites}
+                  vendors={vendors}
+                  currentRole={currentRole}
+                  canAward={auctionEnded}
+                  blockedReason={!auctionEnded ? "Close the auction (or wait for it to end) before approving the Final Decision." : undefined}
+                />
+              )}
             </>
           )}
 

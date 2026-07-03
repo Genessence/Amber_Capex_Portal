@@ -82,7 +82,7 @@ export function SupplierQuoteCards({
               <span className="text-xs font-bold text-slate-300 w-5 shrink-0 mt-0.5">{idx + 1}</span>
               <div className="flex-1 min-w-0">
                 <p className="font-semibold text-slate-800 leading-snug">{item.description}</p>
-                {item.machineCapacity && <p className="text-[11px] text-sky-700 mt-0.5">Capacity: {item.machineCapacity}</p>}
+                {item.machineCapacity && <p className="text-[11px] text-slate-700 mt-0.5">Capacity: {item.machineCapacity}</p>}
                 {item.specs && <p className="text-[11px] text-slate-500 mt-0.5">{item.specs}</p>}
                 {item.remarks && <p className="text-[11px] text-slate-500 mt-0.5">{item.remarks}</p>}
                 {renderLineExtra?.(item)}
@@ -104,10 +104,10 @@ export function SupplierQuoteCards({
                     <option value="">Select HSN…</option>
                     {HSN_GST_OPTIONS.map(o => <option key={o.code} value={o.code}>{o.code} · {o.gst}%</option>)}
                   </select>
-                  {hsn && <p className="text-[10px] text-emerald-700 font-semibold mt-0.5 text-right">GST {gstRateForHsn(hsn)}%</p>}
+                  {hsn && <p className="text-[10px] text-slate-700 font-semibold mt-0.5 text-right">GST {gstRateForHsn(hsn)}%</p>}
                 </div>
               ) : hsn ? (
-                <span className="text-xs text-slate-700">{hsn} <span className="text-emerald-700 font-semibold">· {rfqLineGstRate(item)}%</span></span>
+                <span className="text-xs text-slate-700">{hsn} <span className="text-slate-700 font-semibold">· {rfqLineGstRate(item)}%</span></span>
               ) : (
                 <span className="text-xs text-slate-300">—</span>
               )}
@@ -154,7 +154,7 @@ export function SupplierQuoteCards({
               <span className="font-semibold tabular-nums text-slate-800">{attr.value(quote, gst)}</span>
             </div>
           ))}
-          <div className="flex items-center justify-between px-4 py-3 bg-[#F0F4FB]">
+          <div className="flex items-center justify-between px-4 py-3 bg-[#F4F4F5]">
             <div className="flex flex-col">
               <span className="text-sm font-bold text-slate-700">Grand Total <span className="font-normal text-slate-400">(incl. GST)</span></span>
               {total > 0 && gst > 0 && <span className="text-[10px] text-slate-400">incl. {fmtCurrency(gst)} GST</span>}

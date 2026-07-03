@@ -6,7 +6,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter } from "@/com
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import type { VendorInvite, Vendor } from "@/lib/types"
-import { INVITE_STATUS_COLORS } from "@/lib/constants"
+import { INVITE_STATUS_COLORS, INVITE_STATUS_ICONS } from "@/lib/constants"
 
 const SOURCING_ROLES = [
   "sourcing_member",
@@ -65,7 +65,8 @@ export function NegotiationDrawer({ open, onClose, invite, vendor, currentRole, 
         <SheetHeader>
           <div className="flex items-center justify-between pr-8">
             <SheetTitle>{vendor.vendorName}</SheetTitle>
-            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${INVITE_STATUS_COLORS[invite.status] ?? "bg-slate-100 text-slate-600"}`}>
+            <span className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2 py-0.5 rounded-full ${INVITE_STATUS_COLORS[invite.status] ?? "bg-slate-100 text-slate-600"}`}>
+              {(() => { const I = INVITE_STATUS_ICONS[invite.status]; return I ? <I className="w-3.5 h-3.5 shrink-0" strokeWidth={2.25} aria-hidden /> : null })()}
               {invite.status.replace("_", " ")}
             </span>
           </div>
@@ -135,9 +136,9 @@ export function NegotiationDrawer({ open, onClose, invite, vendor, currentRole, 
                 <p className="text-[10px] text-slate-400 px-1">
                   {isSourcing ? "Sourcing" : vendor.vendorName} · {formatTs(msg.at)}
                 </p>
-                <div className={`max-w-[320px] rounded-2xl px-4 py-2.5 text-sm ${isSourcing ? "bg-slate-100 text-slate-800" : "bg-[#CCFBF1] text-slate-800"}`}>
+                <div className={`max-w-[320px] rounded-2xl px-4 py-2.5 text-sm ${isSourcing ? "bg-slate-100 text-slate-800" : "bg-[#DBEAFE] text-slate-800"}`}>
                   {msg.counterPrice && (
-                    <span className="inline-flex items-center gap-1 mb-1.5 text-[11px] font-bold text-[#115E59] bg-[#CCFBF1] rounded-full px-2 py-0.5">
+                    <span className="inline-flex items-center gap-1 mb-1.5 text-[11px] font-bold text-[#1D4ED8] bg-[#DBEAFE] rounded-full px-2 py-0.5">
                       Counter: {formatPrice(msg.counterPrice)}
                     </span>
                   )}
@@ -156,7 +157,7 @@ export function NegotiationDrawer({ open, onClose, invite, vendor, currentRole, 
               onChange={e => setMessage(e.target.value)}
               placeholder="Type a message…"
               rows={3}
-              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0D9488]/50 resize-none"
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#2563EB]/50 resize-none"
             />
             <div className="flex items-center gap-2">
               <input
@@ -164,12 +165,12 @@ export function NegotiationDrawer({ open, onClose, invite, vendor, currentRole, 
                 value={counterPrice}
                 onChange={e => setCounterPrice(e.target.value)}
                 placeholder="Counter price (INR, optional)"
-                className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0D9488]/50"
+                className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#2563EB]/50"
               />
               <Button
                 onClick={handleSend}
                 disabled={!message.trim()}
-                className="bg-[#0D9488] hover:bg-[#115E59] text-white font-semibold"
+                className="bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-semibold"
               >
                 Send
               </Button>

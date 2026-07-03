@@ -156,7 +156,7 @@ export function VendorOnboardModal({ open, onClose, requestId, defaultTab = "exi
                       <p className="text-xs text-slate-400">{v.vendorCode} · {v.category}</p>
                     </div>
                     <Button size="sm" onClick={() => inviteVendor(v.id)}
-                      className="bg-[#0D9488] hover:bg-[#115E59] text-white text-xs font-semibold">
+                      className="bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-semibold">
                       Invite
                     </Button>
                   </div>
@@ -212,9 +212,9 @@ export function VendorOnboardModal({ open, onClose, requestId, defaultTab = "exi
                 <Input value={ifsc} onChange={e => setIfsc(e.target.value)} placeholder="HDFC0001234" />
               </Field>
 
-              <div className="col-span-2 flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5">
+              <div className="col-span-2 flex items-start gap-2.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
                 <Checkbox id="oneTime" checked={oneTime} onCheckedChange={v => setOneTime(!!v)} className="mt-0.5" />
-                <label htmlFor="oneTime" className="text-xs text-amber-900 leading-snug cursor-pointer">
+                <label htmlFor="oneTime" className="text-xs text-slate-900 leading-snug cursor-pointer">
                   <span className="font-semibold">One-time / not-yet-onboarded vendor</span> — payment terms are not fetched
                   from the onboarding portal, so they will be sent with the approval documents for the vendor to accept.
                 </label>
@@ -253,7 +253,7 @@ export function VendorOnboardModal({ open, onClose, requestId, defaultTab = "exi
               <Button
                 onClick={handleOnboardSubmit}
                 disabled={!newVendorValid}
-                className="bg-[#0D9488] hover:bg-[#115E59] text-white font-semibold"
+                className="bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-semibold"
               >
                 Onboard & Invite
               </Button>

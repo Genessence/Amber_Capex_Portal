@@ -217,12 +217,12 @@ export const AUCTION_APPROVAL_STATUS_LABELS: Record<AuctionApprovalStatus, strin
 };
 
 export const AUCTION_APPROVAL_STATUS_COLORS: Record<AuctionApprovalStatus, string> = {
-  not_sent: 'bg-slate-100 text-slate-600',
-  pending: 'bg-amber-100 text-amber-700',
-  approved: 'bg-green-100 text-green-700',
-  rejected: 'bg-red-100 text-red-700',
-  excluded: 'bg-gray-100 text-gray-600',
-  overdue: 'bg-red-100 text-red-800',
+  not_sent: 'bg-slate-100 text-slate-600 border border-slate-200',
+  pending: 'bg-amber-50 text-amber-700 border border-amber-200',
+  approved: 'bg-emerald-50 text-emerald-700 border border-emerald-200',
+  rejected: 'bg-red-50 text-red-700 border border-red-200',
+  excluded: 'bg-slate-100 text-slate-600 border border-slate-300',
+  overdue: 'bg-red-100 text-red-800 border border-red-300',
 };
 
 export function canStartAuction(

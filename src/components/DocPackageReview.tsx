@@ -34,7 +34,7 @@ export function DocPackageReview({
       </p>
 
       {pkg.revisionNote && (
-        <div className="text-xs bg-amber-50 border border-amber-200 text-amber-800 rounded-lg px-3 py-2">
+        <div className="text-xs bg-slate-50 border border-slate-200 text-slate-800 rounded-lg px-3 py-2">
           Revised: {pkg.revisionNote}
         </div>
       )}
@@ -45,7 +45,7 @@ export function DocPackageReview({
         </Section>
       )}
       {pkg.performanceBankGuaranteeText && (
-        <Section icon={<Shield className="w-4 h-4 text-emerald-600" />} title="Performance Bank Guarantee">
+        <Section icon={<Shield className="w-4 h-4 text-slate-600" />} title="Performance Bank Guarantee">
           {pkg.performanceBankGuaranteeText}
         </Section>
       )}
@@ -55,7 +55,7 @@ export function DocPackageReview({
         </Section>
       )}
       {pkg.paymentTermsText && (
-        <Section icon={<FileText className="w-4 h-4 text-violet-600" />} title="Payment Terms">
+        <Section icon={<FileText className="w-4 h-4 text-slate-600" />} title="Payment Terms">
           <p>{pkg.paymentTermsText}</p>
           {pkg.paymentSplits?.length ? (
             <ul className="mt-2 space-y-1">
@@ -69,12 +69,17 @@ export function DocPackageReview({
           ) : null}
         </Section>
       )}
+      {pkg.extraDocs?.map(d => (
+        <Section key={d.id} icon={<FileText className="w-4 h-4 text-slate-600" />} title={d.title}>
+          {d.text}
+        </Section>
+      ))}
 
       {!readOnly && (onApprove || onReject) && (
         <div className="flex flex-col sm:flex-row gap-3 pt-1">
           {onApprove && (
             <button onClick={onApprove}
-              className="flex-1 flex items-center justify-center gap-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2.5 min-h-[44px]">
+              className="flex-1 flex items-center justify-center gap-2 rounded-lg bg-slate-600 hover:bg-slate-700 text-white font-semibold py-2.5 min-h-[44px]">
               <ThumbsUp className="w-4 h-4" /> Accept Documents
             </button>
           )}

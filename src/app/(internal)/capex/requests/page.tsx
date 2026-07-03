@@ -4,7 +4,8 @@ import { useState, useEffect, Suspense } from "react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import { useCapex } from "@/lib/capexContext"
-import { ROLE_NAMES, STATUS_COLORS, STATUS_LABELS, PLANTS, getPlantForRole } from "@/lib/constants"
+import { ROLE_NAMES, STATUS_LABELS, PLANTS, getPlantForRole } from "@/lib/constants"
+import { StatusBadge } from "@/components/StatusBadge"
 import { CapexRequest, CapexStatus } from "@/lib/types"
 
 const SOURCING_ROLES = ["sourcing_member", "sourcing_head"]
@@ -122,7 +123,7 @@ function RequestsTable() {
             id="status-filter"
             value={statusFilter}
             onChange={e => setStatusFilter(e.target.value)}
-            className="rounded-lg border border-slate-200 bg-white px-3 py-2 min-h-[36px] text-[13px] text-slate-700 font-medium focus:outline-none focus:ring-2 focus:ring-[#0D9488]"
+            className="rounded-lg border border-slate-200 bg-white px-3 py-2 min-h-[36px] text-[13px] text-slate-700 font-medium focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
           >
             {STATUS_FILTER_OPTIONS.map(opt => (
               <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -142,7 +143,7 @@ function RequestsTable() {
         <div className="flex-1 min-h-0 overflow-auto rounded-xl border border-border bg-card shadow-sm">
           <table className="w-full text-sm">
             <thead>
-              <tr className="bg-[#F0F4FB] text-[#1E293B]">
+              <tr className="bg-[#F4F4F5] text-[#1E293B]">
                 <th className="px-5 py-2 text-left text-[11px] font-bold uppercase tracking-wider">Req. No.</th>
                 <th className="px-4 py-2 text-left text-[11px] font-bold uppercase tracking-wider">Subject</th>
                 <th className="px-4 py-2 text-left text-[11px] font-bold uppercase tracking-wider">Status</th>
@@ -161,7 +162,7 @@ function RequestsTable() {
                   {/* Request No. */}
                   <td className="px-5 py-2 whitespace-nowrap">
                     {req.requestNo
-                      ? <span className="text-sm font-bold text-[#153f90]">{req.requestNo}</span>
+                      ? <span className="text-sm font-bold text-slate-900">{req.requestNo}</span>
                       : <span className="text-sm font-mono text-slate-400">{req.id.slice(0, 8)}…</span>
                     }
                   </td>
@@ -171,7 +172,7 @@ function RequestsTable() {
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium text-slate-800 truncate">{req.subject}</span>
                       {req.lineItems && req.lineItems.length > 1 && (
-                        <span className="shrink-0 text-[10px] font-bold bg-[#EBF0FB] text-[#153f90] px-1.5 py-0.5 rounded-full">
+                        <span className="shrink-0 text-[10px] font-bold bg-[#EBF0FB] text-[#1D4ED8] px-1.5 py-0.5 rounded-full">
                           {req.lineItems.length} items
                         </span>
                       )}
@@ -180,15 +181,13 @@ function RequestsTable() {
 
                   {/* Status */}
                   <td className="px-4 py-2 whitespace-nowrap">
-                    <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full ${STATUS_COLORS[req.status] ?? "bg-slate-100 text-slate-600"}`}>
-                      {STATUS_LABELS[req.status] ?? req.status.replace(/_/g, " ")}
-                    </span>
+                    <StatusBadge status={req.status} />
                   </td>
 
                   {/* Plant */}
                   <td className="px-4 py-2 hidden sm:table-cell">
                     {plantLabel(req.plant)
-                      ? <span className="text-[12px] bg-[#EBF0FB] text-[#153f90] px-2 py-0.5 rounded-full font-medium">{plantLabel(req.plant)}</span>
+                      ? <span className="text-[12px] bg-[#EBF0FB] text-[#1D4ED8] px-2 py-0.5 rounded-full font-medium">{plantLabel(req.plant)}</span>
                       : <span className="text-slate-300">—</span>}
                   </td>
 
@@ -205,7 +204,7 @@ function RequestsTable() {
                         <div>
                           <p className="text-sm font-bold text-slate-800">{formatBudget(Math.round(finalTotal))}</p>
                           {savings > 0 ? (
-                            <p className="text-[11px] font-semibold text-green-600 mt-0.5">
+                            <p className="text-[11px] font-semibold text-slate-600 mt-0.5">
                               ↓ {formatBudget(Math.round(savings))} saved{savingsPct ? ` (${savingsPct}%)` : ""}
                             </p>
                           ) : savings < 0 ? (
@@ -232,7 +231,7 @@ function RequestsTable() {
                   <td className="px-4 py-2 text-right">
                     <Link
                       href={`/capex/${req.id}`}
-                      className="inline-flex items-center gap-1.5 px-3.5 py-2 min-h-[36px] rounded-lg bg-[#153f90] hover:bg-[#1a4da8] text-white text-[12px] font-semibold transition-colors"
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 min-h-[36px] rounded-lg bg-[#1D4ED8] hover:bg-[#1D4ED8] text-white text-[12px] font-semibold transition-colors"
                     >
                       View
                     </Link>

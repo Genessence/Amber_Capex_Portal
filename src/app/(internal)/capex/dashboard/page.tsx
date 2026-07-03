@@ -3,7 +3,8 @@
 import { useMemo, useState } from 'react';
 import { FileText, IndianRupee, Activity, TrendingDown } from 'lucide-react';
 import { useCapex } from '@/lib/capexContext';
-import { STATUS_COLORS, STATUS_LABELS, PLANTS } from '@/lib/constants';
+import { STATUS_LABELS, PLANTS } from '@/lib/constants';
+import { StatusBadge } from '@/components/StatusBadge';
 import { CARD, CARD_TIGHT } from '@/lib/uiTokens';
 import type { CapexStatus } from '@/lib/types';
 
@@ -91,7 +92,7 @@ function HBarChart({ data, emptyText = 'No data.' }: { data: HBarItem[]; emptyTe
               </p>
             </div>
             <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
-              <div className="h-full bg-[#0D9488] rounded-full transition-[width] duration-300"
+              <div className="h-full bg-[#2563EB] rounded-full transition-[width] duration-300"
                 style={{ width: `${barPct}%` }} />
             </div>
           </div>
@@ -115,8 +116,8 @@ function SavingsBreakdown({ entries }: { entries: SavingsEntry[] }) {
           <div key={e.id}>
             <div className="flex items-baseline justify-between gap-3 mb-2">
               <p className="text-sm font-semibold text-slate-800 truncate">{e.subject}</p>
-              <p className="text-sm font-black text-emerald-600 shrink-0">
-                -{savePct}% <span className="text-xs font-semibold text-emerald-500">({fmt(e.saving)} saved)</span>
+              <p className="text-sm font-black text-emerald-700 shrink-0">
+                -{savePct}% <span className="text-xs font-semibold text-emerald-600">({fmt(e.saving)} saved)</span>
               </p>
             </div>
             {/* proportional track */}
@@ -125,7 +126,7 @@ function SavingsBreakdown({ entries }: { entries: SavingsEntry[] }) {
               <div className="absolute inset-y-0 left-0 bg-slate-300 rounded-l-full"
                 style={{ width: `${costW}%` }} />
               {/* saved portion */}
-              <div className="absolute inset-y-0 right-0 bg-emerald-400 rounded-r-full"
+              <div className="absolute inset-y-0 right-0 bg-emerald-500 rounded-r-full"
                 style={{ width: `${100 - costW}%` }} />
             </div>
             <div className="flex gap-4 mt-1.5 text-xs text-slate-400">
@@ -134,7 +135,7 @@ function SavingsBreakdown({ entries }: { entries: SavingsEntry[] }) {
                 Paid {fmtFull(e.finalCost)}
               </span>
               <span className="flex items-center gap-1">
-                <span className="inline-block w-2.5 h-2.5 rounded-sm bg-emerald-400" />
+                <span className="inline-block w-2.5 h-2.5 rounded-sm bg-emerald-500" />
                 Saved {fmtFull(e.saving)}
               </span>
               <span className="ml-auto text-slate-300">Budget {fmtFull(e.budget)}</span>
@@ -147,15 +148,22 @@ function SavingsBreakdown({ entries }: { entries: SavingsEntry[] }) {
 }
 
 /* ── Status colours (hex for SVG) ───────────────────────── */
+// Distinct grayscale ramp so donut segments stay legible without colour;
+// blue marks the freshly-submitted slice, red the rejected one (danger).
 const STATUS_HEX: Record<string, string> = {
-  draft:                 '#94a3b8',
-  submitted:             '#60a5fa',
-  pending_head_approval: '#fb923c',
-  sourcing:              '#a78bfa',
-  negotiation:           '#fbbf24',
-  sourcing_approved:     '#f59e0b',
-  buyer_approved:        '#22c55e',
-  rejected:              '#f87171',
+  draft:                 '#CBD5E1',
+  submitted:             '#60A5FA',
+  pending_head_approval: '#94A3B8',
+  sourcing:              '#64748B',
+  negotiation:           '#475569',
+  sourcing_approved:     '#334155',
+  buyer_approved:        '#334155',
+  pi_requested:          '#475569',
+  pi_submitted:          '#334155',
+  accounts_processing:   '#1E293B',
+  payment_in_progress:   '#0F172A',
+  completed:             '#0F172A',
+  rejected:              '#F87171',
 };
 const ORDERED_STATUSES: CapexStatus[] = [
   'draft','submitted','pending_head_approval','sourcing',
@@ -226,8 +234,8 @@ export default function DashboardPage() {
               <button key={v} onClick={() => setPlantFilter(v)}
                 className={`px-3 py-2 rounded-lg border text-xs font-semibold transition-colors ${
                   active
-                    ? 'bg-[#153f90] text-white border-[#153f90]'
-                    : 'bg-white text-slate-600 border-slate-200 hover:border-[#5B82D4] hover:text-[#153f90]'
+                    ? 'bg-[#1D4ED8] text-white border-[#1D4ED8]'
+                    : 'bg-white text-slate-600 border-slate-200 hover:border-[#5B82D4] hover:text-[#1D4ED8]'
                 }`}
               >{label}</button>
             );
@@ -241,7 +249,7 @@ export default function DashboardPage() {
           {
             label: 'Total Requests', value: String(filtered.length),
             sub: `${stats.completed} completed`,
-            accent: '#6366f1', icon: FileText,
+            accent: '#64748B', icon: FileText,
           },
           {
             label: 'Total Budget', value: fmt(stats.totalBudget),
@@ -251,12 +259,12 @@ export default function DashboardPage() {
           {
             label: 'Active Requests', value: String(stats.activeRequests),
             sub: 'in progress now',
-            accent: '#8b5cf6', icon: Activity,
+            accent: '#64748B', icon: Activity,
           },
           {
             label: 'Negotiated Savings', value: fmt(stats.totalSavings),
             sub: stats.savingsEntries.length ? `across ${stats.savingsEntries.length} request${stats.savingsEntries.length > 1 ? 's' : ''}` : 'no savings recorded',
-            accent: '#10b981', icon: TrendingDown,
+            accent: '#059669', icon: TrendingDown,
           },
         ].map(({ label, value, sub, accent, icon: Icon }) => (
           <div key={label}
@@ -295,14 +303,14 @@ export default function DashboardPage() {
           <div className={CARD}>
             <div className="flex items-center justify-between mb-3">
               <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">CAPEX Master — FY {currentFy}</p>
-              <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${utilisationPct > 90 ? "bg-red-50 text-red-700" : utilisationPct > 70 ? "bg-orange-50 text-orange-700" : "bg-emerald-50 text-emerald-700"}`}>
+              <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${utilisationPct > 90 ? "bg-red-50 text-red-700" : utilisationPct > 70 ? "bg-slate-50 text-slate-700" : "bg-slate-50 text-slate-700"}`}>
                 {utilisationPct}% utilised
               </span>
             </div>
             <div className="grid grid-cols-3 gap-3">
               {[
                 { label: "Allocated Budget", value: `${totalAllocatedCr.toFixed(2)} Cr`, color: "text-slate-800" },
-                { label: "Committed",        value: `${committedCr.toFixed(2)} Cr`,      color: "text-[#0D9488]" },
+                { label: "Committed",        value: `${committedCr.toFixed(2)} Cr`,      color: "text-[#2563EB]" },
                 { label: "Remaining",        value: `${remainingCr.toFixed(2)} Cr`,      color: remainingCr >= 0 ? "text-emerald-700" : "text-red-700" },
               ].map(({ label, value, color }) => (
                 <div key={label} className="flex items-baseline gap-1.5 min-w-0">
@@ -314,7 +322,7 @@ export default function DashboardPage() {
             {/* utilisation bar */}
             <div className="mt-3 h-1.5 bg-slate-100 rounded-full overflow-hidden">
               <div
-                className={`h-full rounded-full transition-[width] duration-300 ${utilisationPct > 90 ? "bg-red-500" : utilisationPct > 70 ? "bg-[#0D9488]" : "bg-emerald-500"}`}
+                className={`h-full rounded-full transition-[width] duration-300 ${utilisationPct > 90 ? "bg-red-500" : utilisationPct > 70 ? "bg-[#2563EB]" : "bg-slate-500"}`}
                 style={{ width: `${Math.min(utilisationPct, 100)}%` }}
               />
             </div>
@@ -370,9 +378,7 @@ export default function DashboardPage() {
                   <td className="py-2 pr-4 text-slate-500">{req.plant ? (PLANTS.find(p => p.value === req.plant)?.label ?? req.plant) : '—'}</td>
                   <td className="py-2 pr-4 text-slate-500">{req.category}</td>
                   <td className="py-2">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${STATUS_COLORS[req.status] ?? 'bg-slate-100 text-slate-600'}`}>
-                      {STATUS_LABELS[req.status as CapexStatus] ?? req.status}
-                    </span>
+                    <StatusBadge status={req.status} />
                   </td>
                 </tr>
               ))}

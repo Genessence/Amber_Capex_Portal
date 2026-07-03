@@ -57,7 +57,7 @@ import { SupplierQuoteTable } from "@/components/supplier/SupplierQuoteTable"
 import { SupplierQuoteCards } from "@/components/supplier/SupplierQuoteCards"
 import { INPUT, INPUT_RIGHT, LABEL, LABEL_REQ } from "@/lib/auctionTheme"
 import { SUPPLIER_CARD } from "@/lib/uiTokens"
-import { DEFAULT_TERMS_TEXT, effectiveDocApprovalStatus } from "@/lib/docPackageUtils"
+import { DEFAULT_TERMS_TEXT, effectiveDocApprovalStatus, docPackageTitles } from "@/lib/docPackageUtils"
 import { isFulfillmentStatus, resolveFinalVendor } from "@/lib/paymentUtils"
 
 const MAX_FILE_BYTES = 500 * 1024
@@ -105,7 +105,7 @@ function AuctionShell({
   currency?: string
 }) {
   return (
-    <div className="min-h-screen bg-[#EEF2F7]">
+    <div className="min-h-screen bg-[#FAFAFA]">
       {/* Top bar */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-4">
@@ -125,7 +125,7 @@ function AuctionShell({
               "flex items-center gap-2 px-4 py-2 rounded-lg font-mono text-sm font-bold shrink-0",
               auctionExpired
                 ? "bg-red-600 text-white"
-                : "bg-[#1E3A5F] text-white",
+                : "bg-[#171717] text-white",
             ].join(" ")}>
               <Clock className="w-4 h-4" />
               {auctionExpired ? "Closed" : countdown}
@@ -223,9 +223,9 @@ function RankSummaryCard({
             <div className="flex items-center gap-3">
               <div className={[
                 "w-12 h-12 rounded-full flex items-center justify-center",
-                isLeading ? "bg-amber-100" : "bg-slate-100",
+                isLeading ? "bg-slate-100" : "bg-slate-100",
               ].join(" ")}>
-                <Medal className={["w-6 h-6", isLeading ? "text-amber-500" : "text-slate-400"].join(" ")} />
+                <Medal className={["w-6 h-6", isLeading ? "text-slate-500" : "text-slate-400"].join(" ")} />
               </div>
               <div>
                 <p className="text-3xl font-black text-slate-900 leading-none">{rankLabel(rank)}</p>
@@ -261,7 +261,7 @@ function RankSummaryCard({
           {threshold != null && (
             <p className={[
               "text-xs mt-2 font-medium",
-              aboveThreshold ? "text-red-600" : "text-emerald-600",
+              aboveThreshold ? "text-red-600" : "text-slate-600",
             ].join(" ")}>
               {aboveThreshold
                 ? `Above threshold of ${fmt(threshold)}`
@@ -367,7 +367,7 @@ function RequestScopeCard({ request }: { request: CapexRequest }) {
                 <div className="flex-1 min-w-0">
                   <p className="font-semibold text-slate-800 leading-snug">{item.description}</p>
                   {item.machineCapacity && (
-                    <p className="text-xs text-sky-700 mt-0.5">Capacity: {item.machineCapacity}</p>
+                    <p className="text-xs text-slate-700 mt-0.5">Capacity: {item.machineCapacity}</p>
                   )}
                   {item.specs && <p className="text-xs text-slate-500 mt-0.5">{item.specs}</p>}
                   {item.remarks && <p className="text-xs text-slate-500 mt-0.5">{item.remarks}</p>}
@@ -678,7 +678,7 @@ function QuotationEntryForm({
           </div>
           <div className="flex justify-between text-sm text-slate-600">
             <span>Total Additional</span>
-            <span className="font-semibold tabular-nums text-orange-600">{extrasTotal > 0 ? `+${fmt(Math.round(extrasTotal))}` : "—"}</span>
+            <span className="font-semibold tabular-nums text-slate-600">{extrasTotal > 0 ? `+${fmt(Math.round(extrasTotal))}` : "—"}</span>
           </div>
           <div className="flex justify-between text-sm text-slate-600">
             <span>GST <span className="text-slate-400">(as per HSN)</span></span>
@@ -793,7 +793,7 @@ function IncoTermsReview({ doc, revisionNote }: { doc?: IncoTermsDoc; revisionNo
   return (
     <div className="space-y-3">
       {revisionNote && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-800">
           <span className="font-bold">Note from Amber: </span>{revisionNote}
         </div>
       )}
@@ -892,7 +892,7 @@ function IncoTermsGate({
     body = (
       <div className="space-y-4 max-w-3xl mx-auto">
         <div className={`${card} text-center`}>
-          <Hourglass className="w-12 h-12 text-sky-400 mx-auto mb-3" />
+          <Hourglass className="w-12 h-12 text-slate-400 mx-auto mb-3" />
           <h2 className="text-lg font-bold text-slate-900">Under Review by Amber&apos;s Sourcing Team</h2>
           <p className="text-sm text-slate-600 mt-2">
             We&apos;ll update this page once Amber reviews your INCO Terms. You can start quoting once they&apos;re approved.
@@ -923,7 +923,7 @@ function IncoTermsGate({
             <button
               type="button"
               onClick={() => { respondToIncoTerms(invite.id, "approved", "vendor", vendorName); toast.success("INCO Terms accepted") }}
-              className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2.5 min-h-[44px]"
+              className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-slate-600 hover:bg-slate-700 text-white font-semibold py-2.5 min-h-[44px]"
             >
               <ThumbsUp className="w-4 h-4" /> Accept Terms
             </button>
@@ -1014,7 +1014,7 @@ function PurchaseOrderCard({ po }: { po?: PurchaseOrder }) {
       ) : (
         <p className="text-xs text-slate-400">PO document not attached. Contact your Amber buyer for a copy.</p>
       )}
-      <p className="flex items-center gap-1.5 text-xs text-emerald-700 font-medium mt-3">
+      <p className="flex items-center gap-1.5 text-xs text-slate-700 font-medium mt-3">
         <CheckCircle2 className="w-3.5 h-3.5" /> PO received from Amber
         <span className="text-slate-400 font-normal">· issued {formatTs(po.issuedAt)}</span>
       </p>
@@ -1183,7 +1183,7 @@ function RfqSupplierView({
             <XCircle className="w-12 h-12 text-red-400 mx-auto mb-3" />
             <h2 className="text-lg font-bold text-slate-900">Terms Declined</h2>
             <p className="text-sm text-slate-600 mt-2">
-              You declined the contract terms (Commercial Terms / PBG / Delay Liability Clause), so the
+              You declined the contract terms ({docPackageTitles(invite.docApprovalPackage).join(" / ") || "Commercial Terms / PBG / Delay Liability Clause"}), so the
               quotation form is locked. Please contact Amber&apos;s sourcing team to re-open the documents.
             </p>
           </div>
@@ -1233,7 +1233,7 @@ function RfqSupplierView({
     body = (
       <div className="space-y-4 max-w-2xl mx-auto">
         <div className={`${card} text-center`}>
-          <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto mb-3" />
+          <CheckCircle2 className="w-12 h-12 text-slate-500 mx-auto mb-3" />
           <h2 className="text-lg font-bold text-slate-900">Proforma Invoice Submitted</h2>
           <p className="text-sm text-slate-600 mt-2">
             Thank you. Your PI has been sent to Amber&apos;s buyer and accounts team for PO processing and payment.
@@ -1250,14 +1250,14 @@ function RfqSupplierView({
             <h3 className="font-bold text-slate-900 mb-3">Payment Status</h3>
             <div className="space-y-1.5">
               {milestones.map(m => (
-                <div key={m.id} className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2 ${m.status === "paid" ? "border-emerald-200 bg-emerald-50" : "border-slate-200"}`}>
+                <div key={m.id} className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2 ${m.status === "paid" ? "border-slate-200 bg-slate-50" : "border-slate-200"}`}>
                   <span className="text-sm text-slate-700 min-w-0">
                     {m.label} <span className="text-slate-400">({m.percent}%)</span>
                   </span>
                   <span className="flex items-center gap-2 text-sm shrink-0">
                     <span className="font-mono font-semibold break-words" title={fmt(m.amount)}>{fmt(m.amount)}</span>
                     {m.status === "paid"
-                      ? <span className="text-[11px] font-semibold text-emerald-700 flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> Paid</span>
+                      ? <span className="text-[11px] font-semibold text-slate-700 flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> Paid</span>
                       : <span className="text-[11px] font-semibold text-slate-400">Pending</span>}
                   </span>
                 </div>
@@ -1313,7 +1313,7 @@ function RfqSupplierView({
       <div className={`space-y-4 mx-auto ${hasLineItems ? "max-w-3xl" : "max-w-2xl"}`}>
         <RfqQuoteSummary quote={invite.rfqQuote} lineItems={lineItems} title="Quotation Under Review" />
         <div className={`${card} text-center`}>
-          <Hourglass className="w-12 h-12 text-sky-400 mx-auto mb-3" />
+          <Hourglass className="w-12 h-12 text-slate-400 mx-auto mb-3" />
           <h2 className="text-lg font-bold text-slate-900">Submitted to Amber</h2>
           <p className="text-sm text-slate-600 mt-2">
             Your quotation{quoteTotal ? ` of ${fmt(quoteTotal)} (grand total)` : ""} is with Amber&apos;s sourcing team for review.
@@ -1338,7 +1338,7 @@ function RfqSupplierView({
             <div className="flex flex-col sm:flex-row gap-3">
               <button
                 onClick={() => { respondToRfqQuote(invite.id, "approved", "supplier", vendorName); toast.success("Quotation approved") }}
-                className="flex-1 flex items-center justify-center gap-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2.5 min-h-[44px]">
+                className="flex-1 flex items-center justify-center gap-2 rounded-lg bg-slate-600 hover:bg-slate-700 text-white font-semibold py-2.5 min-h-[44px]">
                 <ThumbsUp className="w-4 h-4" /> Approve Quotation
               </button>
               <button
@@ -1403,7 +1403,7 @@ function RfqSupplierView({
     body = invite.docApprovalPackage ? (
       <div className="space-y-4 max-w-2xl mx-auto">
         <div className={`${card} text-center`}>
-          <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto mb-3" />
+          <CheckCircle2 className="w-12 h-12 text-slate-500 mx-auto mb-3" />
           <h2 className="text-lg font-bold text-slate-900">Price Agreed — Final Step: Approve the Terms</h2>
           <p className="text-sm text-slate-600 mt-2">
             Your quotation{quoteTotal ? ` of ${fmt(quoteTotal)} (grand total)` : ""} is agreed. Please review and accept the
@@ -1418,7 +1418,7 @@ function RfqSupplierView({
       </div>
     ) : (
       <div className={`${card} text-center`}>
-        <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto mb-3" />
+        <CheckCircle2 className="w-12 h-12 text-slate-500 mx-auto mb-3" />
         <h2 className="text-lg font-bold text-slate-900">Quotation Approved</h2>
         <p className="text-sm text-slate-600 mt-2">
           Your quotation{quoteTotal ? ` of ${fmt(quoteTotal)}` : ""} is approved. Awaiting Amber to request your Proforma Invoice.
@@ -1433,7 +1433,7 @@ function RfqSupplierView({
           <XCircle className="w-12 h-12 text-red-400 mx-auto mb-3" />
           <h2 className="text-lg font-bold text-slate-900">Terms Declined</h2>
           <p className="text-sm text-slate-600 mt-2">
-            The price is agreed, but you declined the contract terms (Commercial Terms / PBG / Delay Liability Clause).
+            The price is agreed, but you declined the contract terms ({docPackageTitles(invite.docApprovalPackage).join(" / ") || "Commercial Terms / PBG / Delay Liability Clause"}).
             Amber&apos;s sourcing team can re-send the documents for your review. Please contact them to proceed.
           </p>
         </div>
@@ -1445,7 +1445,7 @@ function RfqSupplierView({
     body = (
       <div className="space-y-4 max-w-2xl mx-auto">
         <div className={`${card} text-center`}>
-          <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto mb-3" />
+          <CheckCircle2 className="w-12 h-12 text-slate-500 mx-auto mb-3" />
           <h2 className="text-lg font-bold text-slate-900">All Set</h2>
           <p className="text-sm text-slate-600 mt-2">
             Your quotation{quoteTotal ? ` of ${fmt(quoteTotal)} (grand total)` : ""} and the contract terms are approved.
@@ -1519,7 +1519,7 @@ function AuctionWinnerTerms({
   if (docStatus === "approved") {
     body = (
       <div className={`${card} text-center`}>
-        <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto mb-3" />
+        <CheckCircle2 className="w-12 h-12 text-slate-500 mx-auto mb-3" />
         <h2 className="text-lg font-bold text-slate-900">All Set</h2>
         <p className="text-sm text-slate-600 mt-2">
           You won the auction and the contract terms are approved. Awaiting Amber to request your
@@ -1543,7 +1543,7 @@ function AuctionWinnerTerms({
     body = (
       <div className="space-y-4 max-w-2xl mx-auto">
         <div className={`${card} text-center`}>
-          <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto mb-3" />
+          <CheckCircle2 className="w-12 h-12 text-slate-500 mx-auto mb-3" />
           <h2 className="text-lg font-bold text-slate-900">You Won the Auction — Final Step: Approve the Terms</h2>
           <p className="text-sm text-slate-600 mt-2">
             Congratulations. Please review and accept the contract terms below to proceed to the
@@ -1562,7 +1562,7 @@ function AuctionWinnerTerms({
     // they simply wait for Amber to request the Proforma Invoice.
     body = (
       <div className={`${card} text-center`}>
-        <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto mb-3" />
+        <CheckCircle2 className="w-12 h-12 text-slate-500 mx-auto mb-3" />
         <h2 className="text-lg font-bold text-slate-900">You Won the Auction</h2>
         <p className="text-sm text-slate-600 mt-2">
           Congratulations. Awaiting Amber to request your Proforma Invoice to begin fulfillment.
@@ -1843,8 +1843,8 @@ export default function SupplierPortalPage() {
           <div className="max-w-2xl mx-auto space-y-5">
             <div className={SUPPLIER_CARD}>
               <div className="flex items-center gap-3 mb-6">
-                <div className="w-12 h-12 rounded-full bg-violet-100 flex items-center justify-center shrink-0">
-                  <FileText className="w-6 h-6 text-violet-600" />
+                <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center shrink-0">
+                  <FileText className="w-6 h-6 text-slate-600" />
                 </div>
                 <div className="min-w-0">
                   <h2 className="font-bold text-slate-800 text-lg">Business Rules for Reverse Auction</h2>
@@ -1852,13 +1852,13 @@ export default function SupplierPortalPage() {
                 </div>
               </div>
 
-              <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6">
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 mb-6">
                 <div className="flex items-start gap-3">
-                  <Hourglass className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                  <Hourglass className="w-5 h-5 text-slate-600 shrink-0 mt-0.5" />
                   <div>
-                    <p className="font-semibold text-amber-800">Response Required By</p>
-                    <p className="text-amber-700 text-sm">{revertDeadline}</p>
-                    <p className="text-amber-600 text-xs mt-1">
+                    <p className="font-semibold text-slate-800">Response Required By</p>
+                    <p className="text-slate-700 text-sm">{revertDeadline}</p>
+                    <p className="text-slate-600 text-xs mt-1">
                       Please respond before the deadline to confirm your participation in the auction.
                     </p>
                   </div>
@@ -1907,9 +1907,9 @@ export default function SupplierPortalPage() {
                   <p className="text-sm text-slate-600 leading-relaxed">{document.paymentTerms ? `${DEFAULT_TERMS_TEXT} Payment terms: ${document.paymentTerms}.` : DEFAULT_TERMS_TEXT}</p>
                 </div>
                 {document.performanceBankGuaranteeText && (
-                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
-                    <p className="flex items-center gap-1.5 text-sm font-bold text-emerald-800 mb-1"><Shield className="w-4 h-4" /> Performance Bank Guarantee</p>
-                    <p className="text-sm text-emerald-900/80 leading-relaxed">{document.performanceBankGuaranteeText}</p>
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                    <p className="flex items-center gap-1.5 text-sm font-bold text-slate-800 mb-1"><Shield className="w-4 h-4" /> Performance Bank Guarantee</p>
+                    <p className="text-sm text-slate-900/80 leading-relaxed">{document.performanceBankGuaranteeText}</p>
                   </div>
                 )}
                 {document.delayLiabilityClauseText && (
@@ -1919,13 +1919,13 @@ export default function SupplierPortalPage() {
                   </div>
                 )}
                 {vendor?.oneTime && (vendor.paymentTermsText || vendor.paymentSplits?.length) && (
-                  <div className="rounded-lg border border-violet-200 bg-violet-50 p-4">
-                    <p className="flex items-center gap-1.5 text-sm font-bold text-violet-800 mb-1"><FileText className="w-4 h-4" /> Payment Terms</p>
-                    {vendor.paymentTermsText && <p className="text-sm text-violet-900/80 leading-relaxed">{vendor.paymentTermsText}</p>}
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                    <p className="flex items-center gap-1.5 text-sm font-bold text-slate-800 mb-1"><FileText className="w-4 h-4" /> Payment Terms</p>
+                    {vendor.paymentTermsText && <p className="text-sm text-slate-900/80 leading-relaxed">{vendor.paymentTermsText}</p>}
                     {vendor.paymentSplits?.length ? (
                       <ul className="mt-2 space-y-1">
                         {vendor.paymentSplits.map(s => (
-                          <li key={s.id} className="flex justify-between text-xs text-violet-900/80">
+                          <li key={s.id} className="flex justify-between text-xs text-slate-900/80">
                             <span>{s.label}{s.trigger ? ` (${s.trigger})` : ''}</span>
                             <span className="font-semibold">{s.percent}%</span>
                           </li>
@@ -1948,7 +1948,7 @@ export default function SupplierPortalPage() {
                       respondToAuctionApproval(invite.id, 'approved')
                       toast.success('You have confirmed participation in the auction.')
                     }}
-                    className="flex-1 flex items-center justify-center gap-2 px-4 py-3 min-h-[44px] rounded-lg bg-green-600 hover:bg-green-700 text-white font-semibold transition-colors"
+                    className="flex-1 flex items-center justify-center gap-2 px-4 py-3 min-h-[44px] rounded-lg bg-slate-600 hover:bg-slate-700 text-white font-semibold transition-colors"
                   >
                     <ThumbsUp className="w-4 h-4" />
                     Approve &amp; Participate
@@ -1976,8 +1976,8 @@ export default function SupplierPortalPage() {
       return (
         <AuctionShell {...shellProps}>
           <div className={`${SUPPLIER_CARD} max-w-2xl mx-auto text-center`}>
-            <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-4">
-              <CheckCircle2 className="w-8 h-8 text-green-600" />
+            <div className="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center mx-auto mb-4">
+              <CheckCircle2 className="w-8 h-8 text-slate-600" />
             </div>
             <h2 className="font-bold text-slate-800 text-lg mb-2">Participation Confirmed</h2>
             <p className="text-slate-500 text-sm max-w-md mx-auto">
@@ -2157,7 +2157,7 @@ export default function SupplierPortalPage() {
                       <div className="flex-1 mr-4 min-w-0">
                         <p className="text-sm text-slate-700 leading-snug">{item.description}</p>
                         {item.machineCapacity && (
-                          <p className="text-xs text-sky-700 mt-0.5 font-medium">Machine capacity: {item.machineCapacity}</p>
+                          <p className="text-xs text-slate-700 mt-0.5 font-medium">Machine capacity: {item.machineCapacity}</p>
                         )}
                       </div>
                       <p className="text-sm font-bold text-slate-800 shrink-0 tabular-nums">{fmt(Number(itemPrices[item.id] ?? 0))}</p>
@@ -2198,8 +2198,8 @@ export default function SupplierPortalPage() {
 
       {/* Counter-offer */}
       {latestCounter && (
-        <div className="rounded-xl border-2 border-violet-300 bg-violet-50 overflow-hidden">
-          <div className="bg-violet-600 px-5 py-2.5 flex items-center gap-2">
+        <div className="rounded-xl border-2 border-slate-300 bg-slate-50 overflow-hidden">
+          <div className="bg-slate-600 px-5 py-2.5 flex items-center gap-2">
             <AlertCircle className="w-4 h-4 text-white shrink-0" />
             <p className="text-sm font-bold text-white">Counter-offer received — review and resubmit</p>
           </div>
@@ -2209,14 +2209,14 @@ export default function SupplierPortalPage() {
               { label: "Required Delivery", value: latestCounter.counterDelivery ? Math.round(latestCounter.counterDelivery / 7) + " wks" : "—" },
               { label: "Max Freight", value: latestCounter.counterFreight ? fmt(latestCounter.counterFreight) : "—" },
             ].map(({ label, value }) => (
-              <div key={label} className="bg-white rounded-lg border border-violet-100 px-3 py-2.5">
+              <div key={label} className="bg-white rounded-lg border border-slate-100 px-3 py-2.5">
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">{label}</p>
-                <p className="text-sm font-bold text-violet-900">{value}</p>
+                <p className="text-sm font-bold text-slate-900">{value}</p>
               </div>
             ))}
           </div>
           {latestCounter.counterRemarks && (
-            <p className="px-5 pb-4 text-sm text-violet-800 italic">&ldquo;{latestCounter.counterRemarks}&rdquo;</p>
+            <p className="px-5 pb-4 text-sm text-slate-800 italic">&ldquo;{latestCounter.counterRemarks}&rdquo;</p>
           )}
         </div>
       )}
@@ -2310,7 +2310,7 @@ export default function SupplierPortalPage() {
                       <div className="flex-1 min-w-0">
                         <p className="font-semibold text-slate-800">{item.description}</p>
                         {item.machineCapacity && (
-                          <p className="text-xs text-sky-700 mt-0.5">Machine capacity: {item.machineCapacity}</p>
+                          <p className="text-xs text-slate-700 mt-0.5">Machine capacity: {item.machineCapacity}</p>
                         )}
                         {item.remarks && <p className="text-xs text-slate-500 mt-0.5">{item.remarks}</p>}
                       </div>
@@ -2334,7 +2334,7 @@ export default function SupplierPortalPage() {
             aria-expanded={historyOpen}
           >
             <div className="flex items-center gap-2">
-              <Trophy className="w-4 h-4 text-amber-400" />
+              <Trophy className="w-4 h-4 text-slate-400" />
               <span className="text-sm font-semibold text-slate-700">Previous Bids</span>
               <span className="text-xs font-bold bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">{invite.quotes.length}</span>
             </div>
@@ -2455,7 +2455,7 @@ export default function SupplierPortalPage() {
                 </div>
                 <div className="flex justify-between text-sm text-slate-600">
                   <span>Total Additional</span>
-                  <span className="font-semibold tabular-nums text-orange-600">
+                  <span className="font-semibold tabular-nums text-slate-600">
                     {extrasTotal > 0 ? `+${fmt(Math.round(extrasTotal))}` : "—"}
                   </span>
                 </div>
@@ -2526,7 +2526,7 @@ export default function SupplierPortalPage() {
                     </p>
                   )}
                   {fileName && !fileError && (
-                    <p className="flex items-center gap-1 mt-1 text-xs text-green-700">
+                    <p className="flex items-center gap-1 mt-1 text-xs text-slate-700">
                       <Paperclip className="w-3 h-3" />{fileName}
                     </p>
                   )}
@@ -2543,7 +2543,7 @@ export default function SupplierPortalPage() {
                   <span className={[
                     "text-xs font-bold px-3 py-1.5 rounded-lg border shrink-0",
                     myRanking.rank === 1
-                      ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                      ? "bg-slate-50 text-slate-700 border-slate-200"
                       : "bg-blue-50 text-blue-700 border-blue-200",
                   ].join(" ")}>
                     Rank: {rankLabel(myRanking.rank)}

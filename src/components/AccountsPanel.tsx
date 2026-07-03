@@ -275,7 +275,7 @@ function AccountsTrack({
   return (
     <div className="rounded-xl border border-border bg-card p-5 space-y-4">
       <div className="flex items-center gap-2">
-        <Wallet className="w-5 h-5 text-teal-700" />
+        <Wallet className="w-5 h-5 text-blue-700" />
         <div>
           <h3 className="font-bold text-foreground">
             {inviteId ? `Award — ${vendor?.vendorName ?? 'Vendor'}` : 'Accounts — FA Codes, PO & Payments'}
@@ -351,7 +351,7 @@ function AccountsTrack({
               <button
                 onClick={submitFa}
                 disabled={lineItems.length > 0 && !faAssigned}
-                className="px-3 py-1.5 text-xs font-semibold bg-teal-700 hover:bg-teal-800 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-card inline-flex items-center gap-1.5"
+                className="px-3 py-1.5 text-xs font-semibold bg-blue-700 hover:bg-blue-800 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-card inline-flex items-center gap-1.5"
               >
                 <Send className="w-3.5 h-3.5" /> Submit FA codes
               </button>
@@ -437,7 +437,7 @@ function AccountsTrack({
               <div className="flex items-center justify-end">
                 <button
                   onClick={issuePo}
-                  className="px-3 py-1.5 text-xs font-semibold bg-teal-700 hover:bg-teal-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-card inline-flex items-center gap-1.5"
+                  className="px-3 py-1.5 text-xs font-semibold bg-blue-700 hover:bg-blue-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-card inline-flex items-center gap-1.5"
                 >
                   <Send className="w-3.5 h-3.5" /> Issue PO to vendor
                 </button>
@@ -484,7 +484,7 @@ function AccountsTrack({
                     return (
                       <label
                         key={m.id}
-                        className={`flex items-center gap-3 rounded-lg border px-3 py-2 ${paid ? 'border-emerald-200 bg-emerald-50' : 'border-border'} ${canPay && !paid ? 'cursor-pointer' : ''}`}
+                        className={`flex items-center gap-3 rounded-lg border px-3 py-2 ${paid ? 'border-slate-200 bg-slate-50' : 'border-border'} ${canPay && !paid ? 'cursor-pointer' : ''}`}
                       >
                         <input
                           type="checkbox"
@@ -494,7 +494,7 @@ function AccountsTrack({
                             markPaymentMade(request.id, m.id, actor, inviteId)
                             toast.success(`${m.label} marked paid — vendor notified`)
                           }}
-                          className="w-4 h-4 accent-emerald-600"
+                          className="w-4 h-4 accent-slate-600"
                         />
                         <span className="flex-1 text-sm text-foreground">
                           {m.label}{' '}
@@ -502,11 +502,11 @@ function AccountsTrack({
                             ({m.percent}%{m.trigger ? ` · ${m.trigger}` : ''})
                           </span>
                           {m.isFinal && (
-                            <span className="ml-1.5 text-[10px] font-bold text-amber-700">FINAL</span>
+                            <span className="ml-1.5 text-[10px] font-bold text-slate-700">FINAL</span>
                           )}
                         </span>
                         <span className="text-sm font-mono font-semibold">{fmt(m.amount)}</span>
-                        {paid && <CheckCircle2 className="w-4 h-4 text-emerald-600" />}
+                        {paid && <CheckCircle2 className="w-4 h-4 text-slate-600" />}
                       </label>
                     )
                   })}
@@ -514,7 +514,7 @@ function AccountsTrack({
                 <div className="flex justify-between text-xs text-muted-foreground mt-2">
                   <span>
                     Paid:{' '}
-                    <span className="font-semibold text-emerald-700">{fmt(totalPaid(milestones))}</span>
+                    <span className="font-semibold text-slate-700">{fmt(totalPaid(milestones))}</span>
                   </span>
                   <span>
                     Outstanding:{' '}
@@ -528,7 +528,7 @@ function AccountsTrack({
 
             {/* Completed summary */}
             {status === 'completed' && milestones.length > 0 && (
-              <div className="flex items-center gap-2 text-sm bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 text-emerald-800">
+              <div className="flex items-center gap-2 text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-800">
                 <CheckCircle2 className="w-4 h-4" /> All payments cleared · {fmt(totalPaid(milestones))}
               </div>
             )}

@@ -22,12 +22,12 @@ export const RFQ_STATUS_LABELS: Record<RfqPriceStatus, string> = {
 };
 
 export const RFQ_STATUS_COLORS: Record<RfqPriceStatus, string> = {
-  not_sent: 'bg-slate-100 text-slate-600',
-  awaiting_quote: 'bg-indigo-100 text-indigo-800',
-  pending_vendor: 'bg-amber-100 text-amber-800',
-  pending_sourcing: 'bg-sky-100 text-sky-800',
-  approved: 'bg-emerald-100 text-emerald-800',
-  rejected: 'bg-red-100 text-red-700',
+  not_sent: 'bg-slate-100 text-slate-600 border border-slate-200',
+  awaiting_quote: 'bg-amber-50 text-amber-700 border border-amber-200',
+  pending_vendor: 'bg-blue-50 text-blue-700 border border-blue-200',
+  pending_sourcing: 'bg-amber-50 text-amber-700 border border-amber-200',
+  approved: 'bg-emerald-50 text-emerald-700 border border-emerald-200',
+  rejected: 'bg-red-50 text-red-700 border border-red-200',
 };
 
 /**

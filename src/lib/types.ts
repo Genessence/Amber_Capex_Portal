@@ -537,9 +537,29 @@ export interface RfqPriceMessage {
   at: string;
 }
 
+/** A custom document (name + text) sourcing can add to a vendor's approval package. */
+export interface DocApprovalDoc {
+  id: string;
+  title: string;
+  text: string;
+}
+
 /**
- * Document-approval package sent to a vendor before PI/auction bidding.
- * Always carries PBG + DLC; carries payment terms only for one-time vendors.
+ * Per-vendor choice of WHICH documents to send for approval. Chosen by sourcing at invite time
+ * (a checkbox per document, per vendor). `extraDocs` are free-form custom documents.
+ */
+export interface DocSelection {
+  commercialTerms?: boolean;
+  pbg?: boolean;
+  dlc?: boolean;
+  paymentTerms?: boolean;
+  extraDocs?: DocApprovalDoc[];
+}
+
+/**
+ * Document-approval package sent to a vendor before PI/auction bidding. Which documents are
+ * present is decided per-vendor by sourcing (see `DocSelection`); each field is omitted when
+ * the vendor was not asked to approve that document.
  */
 export interface DocApprovalPackage {
   id: string;
@@ -549,9 +569,11 @@ export interface DocApprovalPackage {
   termsText?: string;
   performanceBankGuaranteeText?: string;
   delayLiabilityClauseText?: string;
-  /** Payment terms included only for one-time / non-onboarded vendors. */
+  /** Payment terms (one-time vendors by default, or whenever sourcing selects it). */
   paymentTermsText?: string;
   paymentSplits?: PaymentSplit[];
+  /** Custom documents sourcing added for this vendor. */
+  extraDocs?: DocApprovalDoc[];
   /** Note shown when the package is re-sent with corrections. */
   revisionNote?: string;
 }

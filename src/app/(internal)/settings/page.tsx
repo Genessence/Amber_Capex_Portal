@@ -90,7 +90,7 @@ export default function SettingsPage() {
             onClick={() => setActiveTab(tab.key)}
             className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${
               activeTab === tab.key
-                ? 'border-violet-600 text-violet-700'
+                ? 'border-slate-600 text-slate-700'
                 : 'border-transparent text-slate-500 hover:text-slate-700'
             }`}
           >
@@ -134,7 +134,7 @@ export default function SettingsPage() {
                 value={newPlantLabel}
                 onChange={(e) => setNewPlantLabel(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleAddPlant()}
-                className="flex-1 text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-500"
+                className="flex-1 text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-500"
               />
               <input
                 type="text"
@@ -142,12 +142,12 @@ export default function SettingsPage() {
                 value={newPlantState}
                 onChange={(e) => setNewPlantState(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleAddPlant()}
-                className="flex-1 text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-500"
+                className="flex-1 text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-500"
               />
               <button
                 onClick={handleAddPlant}
                 disabled={!newPlantLabel.trim()}
-                className="flex items-center gap-1.5 px-4 py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 text-white text-sm font-medium rounded-lg transition-colors"
+                className="flex items-center gap-1.5 px-4 py-2 bg-slate-600 hover:bg-slate-700 disabled:opacity-40 text-white text-sm font-medium rounded-lg transition-colors"
               >
                 <Plus className="w-4 h-4" />
                 Add
@@ -192,12 +192,12 @@ export default function SettingsPage() {
                 value={newCategory}
                 onChange={(e) => setNewCategory(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleAddCategory()}
-                className="flex-1 text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-500"
+                className="flex-1 text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-500"
               />
               <button
                 onClick={handleAddCategory}
                 disabled={!newCategory.trim()}
-                className="flex items-center gap-1.5 px-4 py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 text-white text-sm font-medium rounded-lg transition-colors"
+                className="flex items-center gap-1.5 px-4 py-2 bg-slate-600 hover:bg-slate-700 disabled:opacity-40 text-white text-sm font-medium rounded-lg transition-colors"
               >
                 <Plus className="w-4 h-4" />
                 Add

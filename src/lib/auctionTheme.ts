@@ -2,7 +2,7 @@
  * Shared field/style tokens for the auction-style surfaces (supplier portal bid screen, RFQ
  * supplier view, and the internal RfqPanel). Keeping these in one place means the two halves of
  * a negotiation render with the exact same visual language. Palette: primary blue #2563EB,
- * deep navy #1E3A5F, emerald for L1/success, table surface #F0F4FB.
+ * near-black #171717, emerald for L1/success, table surface #F4F4F5.
  */
 
 export const INPUT =

@@ -1,7 +1,7 @@
 /**
  * DESKTOP single-vendor quotation table for the tokenised supplier portal. Mirrors the internal
- * sourcing comparison grid (`RfqPanel.tsx` — navy `#1E3A5F` header, `text-[10px]` uppercase white
- * labels, alternating `bg-white`/`#F8FAFF` rows, `bg-[#F0F4FB]` grand-total row with an
+ * sourcing comparison grid (`RfqPanel.tsx` — navy `#171717` header, `text-[10px]` uppercase white
+ * labels, alternating `bg-white`/`#FAFAFA` rows, `bg-[#F4F4F5]` grand-total row with an
  * "incl. ₹X GST" subtitle), collapsed to a SINGLE vendor (the supplier viewing the page): line
  * items become rows, with the vendor's own Unit Price + Line Total columns.
  *
@@ -91,7 +91,7 @@ export function SupplierQuoteTable({
     <div className={TABLE_WRAP}>
       <table className="w-full text-sm border-collapse min-w-[640px]" aria-label="Your quotation">
         <thead>
-          <tr className="bg-[#1E3A5F] text-white">
+          <tr className="bg-[#171717] text-white">
             <th scope="col" className={`${TH} text-left w-10`}>#</th>
             <th scope="col" className={`${TH} text-left`}>Description</th>
             <th scope="col" className={`${TH} text-center w-16`}>Qty</th>
@@ -109,13 +109,13 @@ export function SupplierQuoteTable({
             const qty = parseFloat(item.quantity) || 1;
             const lineTotal = unit * qty;
             const hsn = onHsnChange ? hsnByItem?.[item.id] ?? "" : item.hsnCode ?? "";
-            const zebra = idx % 2 === 0 ? "bg-white" : "bg-[#F8FAFF]";
+            const zebra = idx % 2 === 0 ? "bg-white" : "bg-[#FAFAFA]";
             return (
               <tr key={item.id} className={zebra}>
                 <td className="px-3 py-3 text-xs font-bold text-slate-400 align-top">{idx + 1}</td>
                 <td className="px-3 py-3 align-top">
                   <p className="font-semibold text-slate-800 leading-snug">{item.description}</p>
-                  {item.machineCapacity && <p className="text-[11px] text-sky-700 mt-0.5">Capacity: {item.machineCapacity}</p>}
+                  {item.machineCapacity && <p className="text-[11px] text-slate-700 mt-0.5">Capacity: {item.machineCapacity}</p>}
                   {item.specs && <p className="text-[11px] text-slate-500 mt-0.5">{item.specs}</p>}
                   {item.remarks && <p className="text-[11px] text-slate-500 mt-0.5">{item.remarks}</p>}
                   {renderLineExtra?.(item)}
@@ -134,10 +134,10 @@ export function SupplierQuoteTable({
                         <option value="">Select HSN…</option>
                         {HSN_GST_OPTIONS.map(o => <option key={o.code} value={o.code}>{o.code} · {o.gst}%</option>)}
                       </select>
-                      {hsn && <p className="text-[10px] text-emerald-700 font-semibold mt-0.5">GST {gstRateForHsn(hsn)}%</p>}
+                      {hsn && <p className="text-[10px] text-slate-700 font-semibold mt-0.5">GST {gstRateForHsn(hsn)}%</p>}
                     </div>
                   ) : hsn ? (
-                    <span className="text-xs text-slate-700">{hsn} <span className="text-emerald-700 font-semibold">· {rfqLineGstRate(item)}%</span></span>
+                    <span className="text-xs text-slate-700">{hsn} <span className="text-slate-700 font-semibold">· {rfqLineGstRate(item)}%</span></span>
                   ) : (
                     <span className="text-xs text-slate-300">—</span>
                   )}
@@ -180,7 +180,7 @@ export function SupplierQuoteTable({
                   </td>
                 </tr>
               ))}
-              <tr className="border-t-2 border-slate-200 bg-[#F0F4FB]">
+              <tr className="border-t-2 border-slate-200 bg-[#F4F4F5]">
                 <th scope="row" colSpan={labelSpan} className="px-3 py-2.5 text-left font-bold text-slate-900 text-[12px]">
                   Grand Total <span className="font-normal text-slate-400">(incl. GST)</span>
                 </th>

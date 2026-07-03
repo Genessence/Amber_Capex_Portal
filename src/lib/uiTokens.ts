@@ -1,9 +1,9 @@
 /**
  * Canonical UI density + surface tokens for the internal portal. Single source of truth for the
  * "moderate compact" rhythm so pages stop drifting (page padding, section gaps, card/table styling).
- * Mirrors the string-export pattern in `auctionTheme.ts`. Brand literals kept: navy #1E3A5F header,
- * teal #0D9488 accent, soft table surface #F0F4FB. Prefer semantic tokens (bg-card/border-border)
- * where they read identically to the old white/slate surfaces.
+ * Mirrors the string-export pattern in `auctionTheme.ts`. Brand literals kept: near-black #171717
+ * header (rendered as a subtle charcoal→black gradient), blue #2563EB accent, soft table surface
+ * #F4F4F5. Prefer semantic tokens (bg-card/border-border) where they read identically.
  *
  * Moderate-density baseline (vs the previous loose values):
  *   page padding   p-6   -> p-5
@@ -37,12 +37,13 @@ export const CARD_HEAD = "px-4 py-3 border-b border-border";
 /** Scroll wrapper for wide tables (keeps columns from crushing). */
 export const TABLE_WRAP = "overflow-x-auto rounded-lg border border-border";
 
-/** Navy table header (matches the sourcing RfqPanel grid). */
-export const TABLE_HEAD = "bg-[#1E3A5F] text-white text-[10px] font-bold uppercase tracking-wider";
+/** Near-black table header — subtle charcoal→black gradient (matches the sourcing RfqPanel grid). */
+export const TABLE_HEAD =
+  "bg-gradient-to-b from-neutral-800 to-neutral-900 text-white text-[10px] font-bold uppercase tracking-wider";
 
 /** Soft table header (light surface, for read/entry summary tables). */
 export const TABLE_HEAD_SOFT =
-  "bg-[#F0F4FB] border-b border-slate-200 text-[10px] font-bold text-slate-500 uppercase tracking-wider";
+  "bg-[#F4F4F5] border-b border-neutral-200 text-[10px] font-bold text-neutral-500 uppercase tracking-wider";
 
 /** Header cell (~py-2 — aggressive read-only density). */
 export const TH_CELL = "px-3 py-2 text-left";
@@ -66,7 +67,10 @@ export const META_GRID = "grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3";
 /** Public-facing vendor "hero" card — kept a touch more generous than internal cards. */
 export const SUPPLIER_CARD = "bg-card border border-border rounded-2xl shadow-sm p-5 sm:p-7";
 
-/** Brand accent literals (no semantic token exists for these yet — keep as-is). */
-export const NAVY = "#1E3A5F";
-export const TEAL = "#0D9488";
-export const TABLE_SURFACE = "#F0F4FB";
+/**
+ * Brand accent literals (no semantic token exists for these yet — keep as-is).
+ * NAVY/TEAL names are retained for back-compat; values are now near-black + blue.
+ */
+export const NAVY = "#171717";
+export const TEAL = "#2563EB";
+export const TABLE_SURFACE = "#F4F4F5";

@@ -65,11 +65,11 @@ export default function LoginPage() {
 
       {/* Full-bleed backdrop */}
       <div
-        className="absolute inset-0 bg-cover bg-center"
+        className="absolute inset-0 bg-cover bg-center grayscale"
         style={{ backgroundImage: `url("https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&w=1920&q=80")` }}
       />
-      <div className="absolute inset-0 bg-gradient-to-r from-[#0a1f4e]/95 via-[#153f90]/60 to-slate-950/40" />
-      <div className="absolute inset-0 bg-gradient-to-t from-slate-950/50 via-transparent to-transparent" />
+      <div className="absolute inset-0 bg-gradient-to-r from-black/95 via-neutral-900/60 to-black/40" />
+      <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent" />
 
       {/* Left — hero branding (hidden below lg) */}
       <div className="relative z-10 hidden lg:flex flex-col justify-between flex-1 px-8 lg:px-16 py-10 lg:py-14 select-none">
@@ -81,12 +81,12 @@ export default function LoginPage() {
         </div>
 
         <div className="space-y-6 max-w-lg">
-          <p className="text-[11px] font-bold tracking-[0.2em] text-[#5EEAD4] uppercase">
+          <p className="text-[11px] font-bold tracking-[0.2em] text-[#93C5FD] uppercase">
             Capital Expenditure Management
           </p>
           <h1 className="text-[52px] leading-[1.05] font-black text-white tracking-tight">
             Full pipeline<br />
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-300 to-amber-500">
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-blue-600">
               visibility
             </span>
             , from<br />
@@ -125,7 +125,7 @@ export default function LoginPage() {
                 value={email}
                 onChange={e => setEmail(e.target.value)}
                 placeholder="yourname@amberenterprises.in"
-                className="w-full rounded-xl bg-white/10 border border-white/15 px-4 py-3 text-sm text-white placeholder:text-white/25 focus:outline-none focus:ring-2 focus:ring-[#0D9488]/60 focus:border-[#0D9488]/40 transition-all"
+                className="w-full rounded-xl bg-white/10 border border-white/15 px-4 py-3 text-sm text-white placeholder:text-white/25 focus:outline-none focus:ring-2 focus:ring-[#2563EB]/60 focus:border-[#2563EB]/40 transition-all"
               />
             </div>
 
@@ -141,7 +141,7 @@ export default function LoginPage() {
                   value={password}
                   onChange={e => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="w-full rounded-xl bg-white/10 border border-white/15 px-4 py-3 pr-11 text-sm text-white placeholder:text-white/25 focus:outline-none focus:ring-2 focus:ring-[#0D9488]/60 focus:border-[#0D9488]/40 transition-all"
+                  className="w-full rounded-xl bg-white/10 border border-white/15 px-4 py-3 pr-11 text-sm text-white placeholder:text-white/25 focus:outline-none focus:ring-2 focus:ring-[#2563EB]/60 focus:border-[#2563EB]/40 transition-all"
                 />
                 <button
                   type="button"
@@ -160,7 +160,7 @@ export default function LoginPage() {
                 Sign in as
               </label>
               <Select value={role} onValueChange={v => { if (v) setRole(v) }}>
-                <SelectTrigger className="w-full bg-white/10 border-white/15 text-white data-placeholder:text-white/25 focus:ring-[#0D9488]/60 h-11 rounded-xl">
+                <SelectTrigger className="w-full bg-white/10 border-white/15 text-white data-placeholder:text-white/25 focus:ring-[#2563EB]/60 h-11 rounded-xl">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -179,7 +179,7 @@ export default function LoginPage() {
                   "w-full flex items-center justify-center gap-2 py-3 rounded-xl font-semibold text-[14px] transition-all duration-200",
                   loading
                     ? "bg-white/10 text-white/30 cursor-not-allowed"
-                    : "bg-[#0D9488] hover:bg-[#115E59] text-white shadow-lg shadow-[#0D9488]/30 active:scale-[0.99]"
+                    : "bg-[#2563EB] hover:bg-[#1D4ED8] text-white shadow-lg shadow-[#2563EB]/30 active:scale-[0.99]"
                 )}
               >
                 {loading ? (

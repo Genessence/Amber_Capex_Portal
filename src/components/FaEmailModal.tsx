@@ -37,7 +37,7 @@ export function FaEmailModal({
       <DialogContent className="max-w-xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Mail className="w-4 h-4 text-teal-700" /> FA Codes — Email Preview
+            <Mail className="w-4 h-4 text-blue-700" /> FA Codes — Email Preview
           </DialogTitle>
         </DialogHeader>
 
@@ -72,7 +72,7 @@ export function FaEmailModal({
           <button
             onClick={() => { if (to.trim()) onSend(to.trim()) }}
             disabled={!to.trim()}
-            className="px-3 py-1.5 text-xs font-semibold bg-teal-700 hover:bg-teal-800 text-white rounded-lg inline-flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-card"
+            className="px-3 py-1.5 text-xs font-semibold bg-blue-700 hover:bg-blue-800 text-white rounded-lg inline-flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-card"
           >
             <Send className="w-3.5 h-3.5" /> Send email
           </button>

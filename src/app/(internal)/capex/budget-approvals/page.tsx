@@ -117,7 +117,7 @@ export default function BudgetApprovalsPage() {
                     <X className="w-3.5 h-3.5" /> Reject
                   </button>
                   <button onClick={() => approve(p)}
-                    className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg">
+                    className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-slate-600 hover:bg-slate-700 text-white rounded-lg">
                     <Check className="w-3.5 h-3.5" /> Approve & Publish
                   </button>
                 </div>
@@ -140,7 +140,7 @@ export default function BudgetApprovalsPage() {
                             <td className="py-1.5 text-right font-mono text-muted-foreground">{fmtCr(d.liveCr)}</td>
                             <td className="py-1.5 text-right font-mono">{fmtCr(d.proposedCr)}</td>
                             <td className={`py-1.5 text-right font-mono font-semibold ${
-                              d.deltaCr > 0 ? 'text-emerald-700' : d.deltaCr < 0 ? 'text-red-600' : 'text-muted-foreground'
+                              d.deltaCr > 0 ? 'text-slate-700' : d.deltaCr < 0 ? 'text-red-600' : 'text-muted-foreground'
                             }`}>
                               {d.deltaCr > 0 ? '+' : ''}{fmtCr(d.deltaCr)}
                             </td>
@@ -190,7 +190,7 @@ export default function BudgetApprovalsPage() {
                     <X className="w-3.5 h-3.5" /> Reject
                   </button>
                   <button onClick={() => { decideAdhocBudgetRequest(r.id, 'approved', role); toast.success('Reallocation approved') }}
-                    className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg">
+                    className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-slate-600 hover:bg-slate-700 text-white rounded-lg">
                     <Check className="w-3.5 h-3.5" /> Approve
                   </button>
                 </div>

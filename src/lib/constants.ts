@@ -1,3 +1,23 @@
+import type { LucideIcon } from "lucide-react"
+import {
+  FileText, Send, Clock, Search, MessagesSquare, BadgeCheck,
+  FileInput, FileCheck2, Calculator, CreditCard, CheckCheck, XCircle,
+  Mail,
+} from "lucide-react"
+
+/**
+ * Semantic badge tones. The portal chrome is black-and-white + blue, but STATUS badges
+ * carry colour for clear at-a-glance visibility (paired with a Lucide icon). The five
+ * tones map to workflow phases: idle → waiting → in-progress → done → danger.
+ */
+export const BADGE_TONE = {
+  soft:    "bg-slate-100 text-slate-600 border border-slate-200",      // idle / draft / not-sent
+  pending: "bg-amber-50 text-amber-700 border border-amber-200",       // awaiting / in-review
+  active:  "bg-blue-50 text-blue-700 border border-blue-200",          // in-progress / action taken
+  done:    "bg-emerald-50 text-emerald-700 border border-emerald-200", // approved / completed
+  danger:  "bg-red-50 text-red-700 border border-red-200",             // rejected / error / overdue
+} as const
+
 export const ROLE_NAMES: Record<string, string> = {
   buyer:                  "Arjun Mehta",
   buyer_jhajjar_p1:       "Arjun Mehta",
@@ -24,20 +44,38 @@ export const SOURCING_ENGINEERS = [
   { value: "sourcing_member", name: "Neha Kapoor", area: "Machinery" },
 ]
 
+// Distinct colour per status so the workflow stage is obvious at a glance (icon reinforces it).
 export const STATUS_COLORS: Record<string, string> = {
-  draft:                 "bg-slate-100 text-slate-600",
-  submitted:             "bg-blue-100 text-blue-800",
-  pending_head_approval: "bg-[#EDE9FE] text-[#5B21B6]",
-  sourcing:              "bg-[#DBEAFE] text-[#1E40AF]",
-  negotiation:           "bg-[#FEF9C3] text-[#854D0E]",
-  sourcing_approved:     "bg-emerald-100 text-emerald-800",
-  buyer_approved:        "bg-[#DCFCE7] text-[#166534]",
-  pi_requested:          "bg-[#FFEDD5] text-[#9A3412]",
-  pi_submitted:          "bg-[#FEF3C7] text-[#92400E]",
-  accounts_processing:   "bg-[#CFFAFE] text-[#155E75]",
-  payment_in_progress:   "bg-[#E0E7FF] text-[#3730A3]",
-  completed:             "bg-[#DCFCE7] text-[#14532D]",
-  rejected:              "bg-red-100 text-red-700",
+  draft:                 "bg-slate-100 text-slate-600 border border-slate-200",
+  submitted:             "bg-blue-50 text-blue-700 border border-blue-200",
+  pending_head_approval: "bg-amber-50 text-amber-700 border border-amber-200",
+  sourcing:              "bg-sky-50 text-sky-700 border border-sky-200",
+  negotiation:           "bg-violet-50 text-violet-700 border border-violet-200",
+  sourcing_approved:     "bg-emerald-50 text-emerald-700 border border-emerald-200",
+  buyer_approved:        "bg-emerald-50 text-emerald-700 border border-emerald-200",
+  pi_requested:          "bg-orange-50 text-orange-700 border border-orange-200",
+  pi_submitted:          "bg-amber-50 text-amber-700 border border-amber-200",
+  accounts_processing:   "bg-cyan-50 text-cyan-700 border border-cyan-200",
+  payment_in_progress:   "bg-indigo-50 text-indigo-700 border border-indigo-200",
+  completed:             "bg-green-100 text-green-800 border border-green-300",
+  rejected:              "bg-red-50 text-red-700 border border-red-200",
+}
+
+/** Lucide icon per request status — carries meaning now that colour does not. */
+export const STATUS_ICONS: Record<string, LucideIcon> = {
+  draft:                 FileText,
+  submitted:             Send,
+  pending_head_approval: Clock,
+  sourcing:              Search,
+  negotiation:           MessagesSquare,
+  sourcing_approved:     BadgeCheck,
+  buyer_approved:        BadgeCheck,
+  pi_requested:          FileInput,
+  pi_submitted:          FileCheck2,
+  accounts_processing:   Calculator,
+  payment_in_progress:   CreditCard,
+  completed:             CheckCheck,
+  rejected:              XCircle,
 }
 
 export const STATUS_LABELS: Record<string, string> = {
@@ -56,19 +94,29 @@ export const STATUS_LABELS: Record<string, string> = {
   rejected:              "Rejected",
 }
 
+// Priority climbs as a monochrome weight ramp; only the top tier borrows the danger red.
 export const PRIORITY_COLORS: Record<string, string> = {
-  low:      "bg-slate-300 text-slate-800",
-  medium:   "bg-blue-500 text-white",
-  high:     "bg-orange-500 text-white",
-  critical: "bg-red-600 text-white",
+  low:      "bg-slate-100 text-slate-600 border border-slate-200",
+  medium:   "bg-blue-50 text-blue-700 border border-blue-200",
+  high:     "bg-amber-50 text-amber-700 border border-amber-200",
+  critical: "bg-red-50 text-red-700 border border-red-200",
 }
 
 export const INVITE_STATUS_COLORS: Record<string, string> = {
-  invited:        "bg-slate-100 text-slate-600",
-  quote_received: "bg-[#DBEAFE] text-[#1E40AF]",
-  negotiating:    "bg-[#FEF9C3] text-[#854D0E]",
-  approved:       "bg-[#DCFCE7] text-[#166534]",
-  rejected:       "bg-red-100 text-red-700",
+  invited:        BADGE_TONE.soft,
+  quote_received: BADGE_TONE.pending,
+  negotiating:    BADGE_TONE.active,
+  approved:       BADGE_TONE.done,
+  rejected:       BADGE_TONE.danger,
+}
+
+/** Lucide icon per vendor-invite status (mirrors STATUS_ICONS approach). */
+export const INVITE_STATUS_ICONS: Record<string, LucideIcon> = {
+  invited:        Mail,
+  quote_received: FileText,
+  negotiating:    MessagesSquare,
+  approved:       BadgeCheck,
+  rejected:       XCircle,
 }
 
 export function getPlantForRole(role: string): string | null {

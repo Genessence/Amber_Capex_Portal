@@ -203,13 +203,14 @@ Three-step flow: **form → review → sent**
 - Quote attachment (max 500 KB, base64 inline)
 - Sticky bottom submit bar with rank hint, reset, submit
 - Cross-tab sync via `storage` event when supplier submits in another tab
-- **Two responsive UIs (US-068):** every state renders on desktop and mobile (~390px). Pricing screens (RFQ quote entry, quote review, auction bid) show a **desktop table mirroring the internal sourcing grid** (`SupplierQuoteTable`, navy header, line items as rows) and a **mobile card stack** (`SupplierQuoteCards`) — shared `read`/`entry`/`bid` variants, GST/totals via `rfqUtils` (no desktop/mobile drift). Non-pricing states use the shared `SUPPLIER_CARD` with mobile-stacking action rows.
+- **Two responsive UIs (US-068):** every state renders on desktop and mobile (~390px). Pricing screens (RFQ quote entry, quote review, auction bid) show a **desktop table mirroring the internal sourcing grid** (`SupplierQuoteTable`, near-black header, line items as rows) and a **mobile card stack** (`SupplierQuoteCards`) — shared `read`/`entry`/`bid` variants, GST/totals via `rfqUtils` (no desktop/mobile drift). Non-pricing states use the shared `SUPPLIER_CARD` with mobile-stacking action rows.
 
 ### 4.x UI / UX system (US-068)
 
 - **Compact density** applied portal-wide and centralized in `src/lib/uiTokens.ts` (page `p-5`, section `space-y-4`, cards `rounded-xl p-4` on semantic `bg-card`/`border-border`, **data rows `py-2`**, page titles `text-xl`); editable input grids intentionally roomier (`py-3`/`py-0.5`).
 - **Dense space utilization:** key-value metadata renders as inline `label: value` strips (not stacked cells); long text fields clamp to 2 lines with a measured "Show more/less" (`ClampText`); status stepper + dashboard KPIs tightened — request-detail line items sit near the top without scrolling.
-- Cream/teal/navy theme refined for consistency (semantic tokens, unified card + table styling) — not a re-theme.
+- **Black-and-white chrome + blue accent:** white surfaces, near-black (`#171717`) text/headers, **blue (`#2563EB`)** as the chrome accent, red for danger; grayscale + blue throughout the page chrome, tables, buttons and nav; subtle charcoal→black gradients (login hero, table headers). Driven by `globals.css` CSS-variable tokens; `uiTokens.ts`/`auctionTheme.ts` carry the literal palette.
+- **Coloured status badges (the one exception):** status/priority/invite badges carry **semantic colour + a Lucide icon** for at-a-glance workflow visibility — `STATUS_COLORS` gives a distinct colour per request status; `BADGE_TONE` is the shared 5-phase palette (slate/amber/blue/emerald/red) for invite + secondary maps. Rendered via the shared `StatusBadge` component (`STATUS_ICONS`/`INVITE_STATUS_ICONS`). The dashboard donut uses a distinct grayscale ramp (blue = submitted, red = rejected).
 - Login responsive (hero hidden below `lg`, card `w-full max-w-md`).
 - Touch targets kept ≥44px on interactive controls.
 

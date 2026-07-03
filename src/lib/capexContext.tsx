@@ -17,6 +17,7 @@ import {
   IncoTermsDoc,
   IncoTermsMessage,
   NegotiationMessage,
+  DocSelection,
   PaymentMilestone,
   PlantMeta,
   ProformaInvoice,
@@ -103,7 +104,7 @@ interface CapexContextValue {
   updateRequest: (id: string, updates: Partial<CapexRequest>, actor?: string) => void;
   addVendor: (vendor: Vendor) => void;
   addInvite: (invite: VendorInvite) => void;
-  inviteVendors: (requestId: string, vendorIds: string[]) => void;
+  inviteVendors: (requestId: string, vendorIds: string[], docSelections?: Record<string, DocSelection>) => void;
   updateInvite: (id: string, updates: Partial<VendorInvite>) => void;
   submitQuote: (inviteId: string, quote: Quote) => void;
   addNegotiationMessage: (inviteId: string, msg: NegotiationMessage) => void;
@@ -200,14 +201,15 @@ interface CapexContextValue {
   /** Seed reverse-auction opening bids from each vendor's RFQ quotation (lowest = L1). */
   seedAuctionFromRfq: (requestId: string) => void;
   /** Invite a new/one-time vendor by name/email/phone and send the INCO Terms (gates quoting). */
-  inviteNewVendor: (requestId: string, info: { name: string; email: string; phone: string }, senderName: string) => void;
+  inviteNewVendor: (requestId: string, info: { name: string; email: string; phone: string }, senderName: string, selection?: DocSelection) => void;
   /** INCO Terms negotiation: vendor fills/counters or sourcing edits & resends. */
   proposeIncoTerms: (inviteId: string, doc: IncoTermsDoc, by: 'sourcing' | 'vendor', senderName: string, message?: string) => void;
   respondToIncoTerms: (inviteId: string, response: 'approved' | 'rejected', by: 'sourcing' | 'vendor', senderName: string, message?: string) => void;
   requestProformaInvoice: (requestId: string, vendorId: string, actor: string) => void;
   submitProformaInvoice: (inviteId: string, pi: ProformaInvoice) => void;
   // ── Split award (reverse auction): finalize per-line vendor selections into per-vendor awards ──
-  finalizeSplitAward: (requestId: string, decision?: SourcingDecision) => void;
+  finalizeSplitAward: (requestId: string, decision?: SourcingDecision, onlyVendorId?: string) => void;
+  awardAndRequestPi: (requestId: string, decision: SourcingDecision | undefined, actor: string, onlyVendorId?: string) => void;
   // ── Document-approval package (PBG + DLC + one-time payment terms) ──
   sendDocApprovalPackage: (requestId: string, vendorIds: string[]) => void;
   resendDocApprovalPackage: (inviteId: string, note?: string) => void;
@@ -707,7 +709,11 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
     setInvites((prev) => dedupeById([...prev, invite]));
   }
 
-  function inviteVendors(requestId: string, vendorIds: string[]) {
+  function inviteVendors(
+    requestId: string,
+    vendorIds: string[],
+    docSelections?: Record<string, DocSelection>,
+  ) {
     // In the Brown Field RFQ flow the vendor quotes first, so inviting a vendor === sending the
     // quotation link: stamp `awaiting_quote`. Auction invites stay status-neutral (no rfqStatus).
     const req = requests.find((r) => r.id === requestId);
@@ -742,7 +748,10 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
                   ...(vendor
                     ? {
                         docApprovalStatus: 'pending' as const,
-                        docApprovalPackage: { ...buildDocApprovalPackage(vendor), sentAt: nowIso },
+                        docApprovalPackage: {
+                          ...buildDocApprovalPackage(vendor, { selection: docSelections?.[vendorId] }),
+                          sentAt: nowIso,
+                        },
                       }
                     : { docApprovalStatus: 'not_sent' as const }),
                 }
@@ -762,6 +771,7 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
     requestId: string,
     info: { name: string; email: string; phone: string },
     senderName: string,
+    selection?: DocSelection,
   ) {
     const now = new Date().toISOString();
     const nowMs = Date.now();
@@ -799,7 +809,7 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
       // Docs-before-price: the one-time vendor approves the doc-package (incl. payment terms) before
       // quoting, after the INCO-terms gate. Built here since we already have the vendor object.
       docApprovalStatus: 'pending',
-      docApprovalPackage: { ...buildDocApprovalPackage(vendor), sentAt: now },
+      docApprovalPackage: { ...buildDocApprovalPackage(vendor, { selection }), sentAt: now },
       incoTermsStatus: 'awaiting_vendor',
       incoTermsDoc: doc,
       incoTermsThread: [
@@ -1220,7 +1230,7 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
    * vendors already approved the pre-bid "Business Rules" doc (Commercial Terms + PBG + DLC) to
    * participate, so awarded vendors go straight to the PI request. Request status is untouched.
    */
-  function finalizeSplitAward(requestId: string, decision?: SourcingDecision) {
+  function finalizeSplitAward(requestId: string, decision?: SourcingDecision, onlyVendorId?: string) {
     const request = requests.find((r) => r.id === requestId);
     if (!request) {
       console.error(`[CapexContext] finalizeSplitAward: request "${requestId}" not found`);
@@ -1239,9 +1249,12 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
       console.error('[CapexContext] finalizeSplitAward: no vendors selected in the final decision');
       return;
     }
+    // When `onlyVendorId` is given, award just that vendor's group (additive — other vendors are
+    // left untouched so sourcing can award "each separately"); otherwise award every group at once.
     setInvites((prev) =>
       prev.map((inv) => {
         if (inv.requestId !== requestId) return inv;
+        if (onlyVendorId && inv.vendorId !== onlyVendorId) return inv;
         const group = groups.find((g) => g.vendorId === inv.vendorId);
         if (!group) return inv;
         return {
@@ -1283,6 +1296,56 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     updateRequest(requestId, { finalVendorId: vendorId, status: 'pi_requested' }, actor);
+  }
+
+  /**
+   * Unified Final-Decision action for BOTH RFQ and reverse auction: award the vendor(s) chosen in the
+   * per-line Final Decision AND request their Proforma Invoice(s) in ONE atomic state pass (so there's
+   * no stale-state race between awarding and requesting). Pass `onlyVendorId` to approve a single
+   * vendor's award ("each separately"); omit it to approve every chosen vendor at once ("all at once").
+   */
+  function awardAndRequestPi(
+    requestId: string,
+    decision: SourcingDecision | undefined,
+    actor: string,
+    onlyVendorId?: string,
+  ) {
+    const request = requests.find((r) => r.id === requestId);
+    if (!request) {
+      console.error(`[CapexContext] awardAndRequestPi: request "${requestId}" not found`);
+      return;
+    }
+    const dec = decision ?? request.sourcingDecision;
+    const lineItems = request.lineItems ?? [];
+    if (!dec?.finalVendorPerItem || lineItems.length === 0) {
+      console.error('[CapexContext] awardAndRequestPi: missing final decision or line items');
+      return;
+    }
+    const groups = buildAwardGroups(lineItems, dec.finalPrices ?? {}, dec.finalVendorPerItem);
+    if (groups.length === 0) {
+      console.error('[CapexContext] awardAndRequestPi: no vendors selected in the final decision');
+      return;
+    }
+    setInvites((prev) =>
+      prev.map((inv) => {
+        if (inv.requestId !== requestId) return inv;
+        if (onlyVendorId && inv.vendorId !== onlyVendorId) return inv;
+        const group = groups.find((g) => g.vendorId === inv.vendorId);
+        if (!group) return inv;
+        return {
+          ...inv,
+          status: 'approved' as const,
+          awarded: true,
+          awardedItemIds: group.itemIds,
+          awardAmount: group.amount,
+          awardStatus: 'pi_requested' as const,
+        };
+      }),
+    );
+    // Coarse request status follows the awards into fulfillment.
+    if (request.status === 'sourcing') {
+      updateRequest(requestId, { status: 'pi_requested' }, actor);
+    }
   }
 
   /**
@@ -1970,6 +2033,7 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
         requestProformaInvoice,
         submitProformaInvoice,
         finalizeSplitAward,
+        awardAndRequestPi,
         sendDocApprovalPackage,
         resendDocApprovalPackage,
         respondToDocApproval,

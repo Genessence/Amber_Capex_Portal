@@ -20,9 +20,9 @@ export const ADHOC_STATUS_LABELS: Record<AdhocBudgetStatus, string> = {
 };
 
 export const ADHOC_STATUS_COLORS: Record<AdhocBudgetStatus, string> = {
-  pending_admin: 'bg-amber-100 text-amber-800',
-  approved: 'bg-emerald-100 text-emerald-800',
-  rejected: 'bg-red-100 text-red-700',
+  pending_admin: 'bg-amber-50 text-amber-700 border border-amber-200',
+  approved: 'bg-emerald-50 text-emerald-700 border border-emerald-200',
+  rejected: 'bg-red-50 text-red-700 border border-red-200',
 };
 
 function brownFieldRows(
