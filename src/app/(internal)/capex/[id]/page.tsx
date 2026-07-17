@@ -10,6 +10,9 @@ import { RfqPanel } from "@/components/RfqPanel"
 import { AccountsPanel } from "@/components/AccountsPanel"
 import { TatBanner } from "@/components/TatBanner"
 import { ClampText } from "@/components/ClampText"
+import { TrialCard } from "@/components/TrialCard"
+import { EmailPreviewModal } from "@/components/EmailPreviewModal"
+import { VendorOnboardModal } from "@/components/VendorOnboardModal"
 import { isFulfillmentStatus, resolveFinalVendor, isAwardBased, awardedInvites, awardSummary } from "@/lib/paymentUtils"
 import { lowestRfqTotal } from "@/lib/rfqUtils"
 import { effectiveDocApprovalStatus } from "@/lib/docPackageUtils"
@@ -46,7 +49,9 @@ import {
   getEffectiveAuctionApprovalStatus,
   isVendorEligibleForAuction,
 } from "@/lib/auctionDocumentUtils"
-import { buildSupplierLink } from "@/lib/tokenUtils"
+import { buildSupplierLink, buildApprovalLink } from "@/lib/tokenUtils"
+import { PLANT_HEAD_EMAIL } from "@/lib/constants"
+import { effectiveTrialStatus } from "@/lib/trialUtils"
 
 function formatPrice(n: number) {
   return "₹" + n.toLocaleString("en-IN")
@@ -679,7 +684,7 @@ function SourcingDecisionBanner({ request, vendors }: { request: CapexRequest; v
 
 /* ── Reverse auction panel ───────────────────────────────────── */
 
-const SOURCING_ROLES = ["sourcing_member", "sourcing_member_2", "sourcing_member_3", "sourcing_member_4", "sourcing_head", "super_admin"]
+const SOURCING_ROLES = ["sourcing_member", "sourcing_member_2", "sourcing_member_3", "sourcing_member_4", "super_admin"]
 
 // Delivery location form component
 function DeliveryLocationRow({
@@ -1681,6 +1686,19 @@ function ReverseAuctionPanel({
               )}
             </div>
 
+            {request.auctionConfig?.openingBestPrice != null && (
+              <div className="mb-3 flex items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2.5 flex-wrap">
+                <div>
+                  <p className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider">Opening Price to Beat</p>
+                  <p className="text-lg font-bold text-emerald-800 tabular-nums">{formatPrice(request.auctionConfig.openingBestPrice)}</p>
+                </div>
+                <p className="text-xs text-emerald-700 max-w-[18rem]">Best RFQ price cut 5% at auction start. All ranks reset — vendors must submit a fresh bid to reveal their rank.</p>
+              </div>
+            )}
+            {rankings.length === 0 && (
+              <p className="text-sm text-slate-500 border border-slate-200 rounded-lg px-4 py-3">No bids yet — vendors bid to reveal their rank.</p>
+            )}
+
             {rankings.length > 0 && (
               <div className="border border-slate-200 rounded-lg overflow-hidden">
                 <div className="bg-slate-50 px-4 py-2 border-b border-slate-100">
@@ -1736,8 +1754,10 @@ function ReverseAuctionPanel({
 
 export default function CapexDetailPage() {
   const { id } = useParams<{ id: string }>()
-  const { requests, invites, vendors, updateRequest, setSourcingMode, requestProformaInvoice, sendDocApprovalPackage, resendDocApprovalPackage } = useCapex()
+  const { requests, invites, vendors, updateRequest, setSourcingMode, requestProformaInvoice, sendDocApprovalPackage, resendDocApprovalPackage, decideRequestPlantHead, respondToTrial, setTrialRequired } = useCapex()
   const [currentRole, setCurrentRole] = useState("buyer")
+  const [phEmailOpen, setPhEmailOpen] = useState(false)
+  const [vendorModalOpen, setVendorModalOpen] = useState(false)
 
   useEffect(() => {
     setCurrentRole(localStorage.getItem("capex_role") ?? "buyer")
@@ -1762,11 +1782,9 @@ export default function CapexDetailPage() {
 
   const currentUser  = ROLE_NAMES[currentRole] ?? currentRole
   const isBuyer      = currentRole.startsWith("buyer")
-  const isPlantHead  = currentRole.startsWith("plant_head")
   const canManageSourcing = SOURCING_ROLES.includes(currentRole)
-  // Finalizing the winner + requesting the PI is restricted to the sourcing head / admin on both
-  // the RFQ and auction paths (sourcing_member runs the negotiation/auction but does not finalize).
-  const canFinalize = currentRole === "sourcing_head" || currentRole === "super_admin"
+  // The sourcing team finalizes the winner + requests the PI directly — there is no sourcing-head gate.
+  const canFinalize = canManageSourcing
   // Auction winner's contract-terms approval status — gates the Request-PI card (mirror RFQ).
   const winnerDocStatus = approvedInvite ? effectiveDocApprovalStatus(approvedInvite.docApprovalStatus) : "not_sent"
   const isBrownField = (request.fieldType ?? "brown_field") === "brown_field"
@@ -1805,13 +1823,30 @@ export default function CapexDetailPage() {
   }, [reqInvites.map(inv => inv.vendorId).join(",")])
 
   const handleHeadApprove = () => {
-    updateRequest(id, { status: "sourcing" }, ROLE_NAMES[currentRole] ?? currentRole);
+    decideRequestPlantHead(id, "approved")
     toast.success("Request approved for sourcing")
   }
   const handleHeadReject = () => {
-    updateRequest(id, { status: "rejected" }, ROLE_NAMES[currentRole] ?? currentRole);
+    decideRequestPlantHead(id, "rejected")
     toast.error("Request rejected")
   }
+  const approvalLink = request.approvalToken ? buildApprovalLink(request.approvalToken) : ""
+  const phEmailSubject = `Approval Needed — ${request.requestNo ?? request.id.slice(0, 8)} · ${request.subject}`
+  const phEmailBody = [
+    "Dear Plant Head,",
+    "",
+    `A CAPEX request requires your approval before it can move to sourcing.`,
+    "",
+    `Request: ${request.requestNo ?? request.id.slice(0, 8)} — ${request.subject}`,
+    `Raised by: ${request.createdBy}`,
+    request.plant ? `Plant: ${request.plant}` : "",
+    "",
+    "Please review and Approve / Reject using the secure link below:",
+    approvalLink,
+    "",
+    "Regards,",
+    "Amber Enterprises CAPEX Portal",
+  ].filter(Boolean).join("\n")
   const handleSelectFinal = (inviteId: string) => {
     const inv = reqInvites.find(i => i.id === inviteId)
     if (ranAuction) {
@@ -1886,6 +1921,59 @@ export default function CapexDetailPage() {
 
       <div className="space-y-4">
 
+      {/* Plant-head approval — shown to EVERYONE (incl. the buyer who raised it) so they can send
+          the emailed public link to the plant head. No in-app plant-head role. */}
+      {request.status === "pending_head_approval" && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <p className="font-semibold text-slate-900">Awaiting Plant Head approval (sent via email).</p>
+            <p className="text-sm text-slate-700 mt-0.5">
+              Submitted by {request.createdBy}
+              {request.plant ? ` · ${request.plant}` : ""}
+              {assignedEngineer ? ` · Assigned to ${assignedEngineer.name}` : ""}
+            </p>
+            <p className="text-xs text-slate-500 mt-1">Share the secure link below with the plant head to approve or reject.</p>
+          </div>
+          <div className="flex gap-2 shrink-0 flex-wrap">
+            <button
+              onClick={() => { if (approvalLink) { navigator.clipboard?.writeText(approvalLink); toast.success("Approval link copied") } }}
+              className="px-3 py-2 rounded-lg bg-white border border-slate-300 hover:bg-slate-50 text-slate-800 text-sm font-semibold inline-flex items-center gap-1.5"
+            >
+              <Copy className="w-4 h-4" /> Copy link
+            </button>
+            <button
+              onClick={() => setPhEmailOpen(true)}
+              className="px-3 py-2 rounded-lg bg-blue-700 hover:bg-blue-800 text-white text-sm font-semibold inline-flex items-center gap-1.5"
+            >
+              <FileText className="w-4 h-4" /> Preview email
+            </button>
+            {currentRole === "super_admin" && (
+              <>
+                <button onClick={handleHeadApprove} className="px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold">
+                  Approve
+                </button>
+                <button onClick={handleHeadReject} className="px-3 py-2 rounded-lg bg-white hover:bg-red-50 text-red-600 text-sm font-semibold border border-red-200">
+                  Reject
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      <EmailPreviewModal
+        open={phEmailOpen}
+        onClose={() => setPhEmailOpen(false)}
+        title="Plant Head Approval — Email Preview"
+        defaultTo={PLANT_HEAD_EMAIL}
+        subject={phEmailSubject}
+        body={phEmailBody}
+        link={approvalLink}
+        linkLabel="Plant-head approval link"
+        sendLabel="Send to Plant Head"
+        onSend={(to) => { toast.success(`Approval email sent to ${to}`); setPhEmailOpen(false) }}
+      />
+
       {/* Buyer view */}
       {isBuyer && (
         <BuyerView
@@ -1901,30 +1989,43 @@ export default function CapexDetailPage() {
       {/* Sourcing view */}
       {!isBuyer && (
         <>
-          {/* Head / plant_head approval gate */}
-          {(currentRole === "sourcing_head" || currentRole.startsWith("plant_head")) && request.status === "pending_head_approval" && (
-            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex items-center justify-between gap-4">
-              <div>
-                <p className="font-semibold text-slate-900">This request requires your approval before sourcing can begin.</p>
-                <p className="text-sm text-slate-700 mt-0.5">
-                  Submitted by {request.createdBy}
-                  {request.budget ? ` · Estimated budget ${formatPrice(request.budget)}` : ""}
-                  {assignedEngineer ? ` · Assigned to ${assignedEngineer.name}` : ""}
-                </p>
-              </div>
-              <div className="flex gap-2 shrink-0">
-                <button onClick={handleHeadApprove} className="px-4 py-2 rounded-lg bg-slate-600 hover:bg-slate-700 text-white text-sm font-semibold transition-colors">
-                  Approve for Sourcing
-                </button>
-                <button onClick={handleHeadReject} className="px-4 py-2 rounded-lg bg-white hover:bg-red-50 text-red-600 text-sm font-semibold border border-red-200 transition-colors">
-                  Reject
+          {/* Sourcing setup — import/add vendors and (optionally) require an item trial. Available to
+              the sourcing team while the request is pre-award (sourcing / negotiation), for BOTH the
+              RFQ and reverse-auction paths. */}
+          {canManageSourcing && (request.status === "sourcing" || request.status === "negotiation") && (
+            <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div>
+                  <p className="text-sm font-bold text-slate-900">Sourcing setup</p>
+                  <p className="text-xs text-slate-500">Add / import vendors to this request, and optionally require an item trial before you approve a vendor.</p>
+                </div>
+                <button
+                  onClick={() => setVendorModalOpen(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-[#171717] hover:bg-black text-white rounded-lg"
+                >
+                  <Users className="w-4 h-4" /> Import / Add Vendor
                 </button>
               </div>
+              <label className="flex items-start gap-2.5 cursor-pointer border-t border-slate-100 pt-3">
+                <input
+                  type="checkbox"
+                  checked={!!request.trialRequired}
+                  onChange={e => { setTrialRequired(request.id, e.target.checked); toast.success(e.target.checked ? "Item trial required before final payment" : "Item trial turned off") }}
+                  className="mt-0.5 h-4 w-4 accent-[#2563EB]"
+                />
+                <span className="text-sm text-slate-700 leading-snug">
+                  <span className="font-semibold text-slate-900">Require an item trial before final payment</span> — after the advance
+                  is paid, the awarded vendor uploads a trial video / photo / report for your approval; the final payment stays
+                  blocked until you approve it. Set this <span className="font-semibold">before</span> approving the vendor.
+                </span>
+              </label>
             </div>
           )}
 
-          {/* RFQ path (Brown Field default) — hidden for plant_head roles (approval-only). */}
-          {isRfqMode && !isPlantHead && (
+          <VendorOnboardModal open={vendorModalOpen} onClose={() => setVendorModalOpen(false)} requestId={id} />
+
+          {/* RFQ path (Brown Field default) */}
+          {isRfqMode && (
             <RfqPanel
               request={request}
               invites={reqInvites}
@@ -2112,6 +2213,31 @@ export default function CapexDetailPage() {
                   tatStoppedAt={request.tatStoppedAt}
                   vendorAmount={resolveFinalVendor(request, reqInvites).amount}
                 />
+              )}
+              {/* Trials — sourcing reviews the vendor's uploaded trial (approve/reject loop). */}
+              {canManageSourcing && (
+                awardBased
+                  ? awardInvites.filter(i => i.trialRequired).map(i => (
+                      <TrialCard
+                        key={`trial-${i.id}`}
+                        mode="review"
+                        status={effectiveTrialStatus(i)}
+                        submission={i.trialSubmission}
+                        thread={i.trialThread}
+                        onApprove={() => { respondToTrial(request.id, "approved", i.id); toast.success("Trial approved") }}
+                        onReject={(m) => { respondToTrial(request.id, "rejected", i.id, m); toast("Trial rejected — vendor asked to re-upload") }}
+                      />
+                    ))
+                  : request.trialRequired && (
+                      <TrialCard
+                        mode="review"
+                        status={effectiveTrialStatus(request)}
+                        submission={request.trialSubmission}
+                        thread={request.trialThread}
+                        onApprove={() => { respondToTrial(request.id, "approved"); toast.success("Trial approved") }}
+                        onReject={(m) => { respondToTrial(request.id, "rejected", undefined, m); toast("Trial rejected — vendor asked to re-upload") }}
+                      />
+                    )
               )}
               <AccountsPanel
                 request={request}

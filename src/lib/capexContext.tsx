@@ -6,6 +6,7 @@ import {
   AuctionApprovalDocument,
   AuctionConfig,
   BudgetProposal,
+  BudgetProposalItem,
   BrownFieldHeadBudget,
   CapexMasterItem,
   CapexRequest,
@@ -28,13 +29,18 @@ import {
   RfqPriceMessage,
   RfqQuote,
   SourcingDecision,
+  TrialMessage,
+  TrialStatus,
+  TrialSubmission,
   Vendor,
   VendorInvite,
 } from './types';
 import { buildMasterItemsFromProposal } from './budgetProposalUtils';
+import { generateApprovalToken, generatePoToken } from './tokenUtils';
 import { buildDocApprovalPackage, effectiveDocApprovalStatus } from './docPackageUtils';
-import { buildAwardGroups, deriveRequestStatus, isAwardBased, awardedInvites } from './paymentUtils';
-import { effectiveRfqStatus, rfqTotal } from './rfqUtils';
+import { buildAwardGroups, deriveRequestStatus, isAwardBased, awardedInvites, finalPaymentBlockedByTrial } from './paymentUtils';
+import { effectiveRfqStatus, resolveSupplierItemHsn, rfqTotal } from './rfqUtils';
+import { toInr } from './currencyUtils';
 import { buildBlankIncoTermsDoc, effectiveIncoTermsStatus } from './incoTermsUtils';
 import { getAllFiles, putAllFiles, type FileMap } from './fileStore';
 import { effectiveHeadAllocationCr } from './adhocBudgetUtils';
@@ -152,12 +158,31 @@ interface CapexContextValue {
   createBudgetProposal: (proposal: BudgetProposal) => void;
   updateBudgetProposal: (id: string, updates: Partial<BudgetProposal>) => void;
   submitBudgetProposal: (id: string) => void;
+  /** Super-admin stage: approve (→ global accounts) / reject / send-back-for-correction (+ optional edits). */
   decideBudgetProposal: (
     id: string,
-    decision: 'approved' | 'rejected',
+    decision: 'approved' | 'rejected' | 'needs_correction',
     actor: string,
     note?: string,
+    editedItems?: BudgetProposalItem[],
   ) => void;
+  /** Plant-head budget decision via the public email link (approve / reject / send-back-for-correction + edits). */
+  decideBudgetPlantHead: (
+    id: string,
+    decision: 'approved' | 'rejected' | 'needs_correction',
+    note?: string,
+    editedItems?: BudgetProposalItem[],
+  ) => void;
+  /** Global-accounts budget decision — final gate; approve publishes to the live master. */
+  decideBudgetAccounts: (id: string, decision: 'approved' | 'rejected', actor: string, note?: string) => void;
+  /** Plant-head request decision via the public email link (approve → sourcing / reject). */
+  decideRequestPlantHead: (requestId: string, decision: 'approved' | 'rejected') => void;
+  // ── Trials (optional QA gate before final payment) ──
+  setTrialRequired: (requestId: string, required: boolean, inviteId?: string) => void;
+  submitTrial: (inviteId: string, submission: TrialSubmission) => void;
+  respondToTrial: (requestId: string, response: 'approved' | 'rejected', inviteId?: string, message?: string) => void;
+  /** Vendor re-uploads the PI after the PO is issued. */
+  resubmitProformaInvoice: (inviteId: string, pi: ProformaInvoice) => void;
   // ── Adhoc head→head budget reallocation (Brown Field, admin-approved) ──
   adhocBudgetRequests: AdhocBudgetRequest[];
   brownFieldHeadAllocations: BrownFieldHeadBudget[];
@@ -176,14 +201,15 @@ interface CapexContextValue {
   // ── Brown Field RFQ flow ──
   setSourcingMode: (requestId: string, mode: 'rfq' | 'auction') => void;
   clearSourcingMode: (requestId: string) => void;
-  /** Either side proposes/revises/counters the full quotation. */
+  /** Either side proposes/revises/counters the full quotation. Returns false when rejected (e.g. missing HSN). */
   proposeRfqQuote: (
     inviteId: string,
     quote: RfqQuote,
     by: 'sourcing' | 'supplier',
     senderName: string,
     message?: string,
-  ) => void;
+    itemHsn?: Record<string, string>,
+  ) => boolean;
   /** Either side accepts or rejects the quotation currently on the table. */
   respondToRfqQuote: (
     inviteId: string,
@@ -201,7 +227,7 @@ interface CapexContextValue {
   /** Seed reverse-auction opening bids from each vendor's RFQ quotation (lowest = L1). */
   seedAuctionFromRfq: (requestId: string) => void;
   /** Invite a new/one-time vendor by name/email/phone and send the INCO Terms (gates quoting). */
-  inviteNewVendor: (requestId: string, info: { name: string; email: string; phone: string }, senderName: string, selection?: DocSelection) => void;
+  inviteNewVendor: (requestId: string, info: { name: string; email: string; phone: string; foreign?: boolean }, senderName: string, selection?: DocSelection) => void;
   /** INCO Terms negotiation: vendor fills/counters or sourcing edits & resends. */
   proposeIncoTerms: (inviteId: string, doc: IncoTermsDoc, by: 'sourcing' | 'vendor', senderName: string, message?: string) => void;
   respondToIncoTerms: (inviteId: string, response: 'approved' | 'rejected', by: 'sourcing' | 'vendor', senderName: string, message?: string) => void;
@@ -229,11 +255,22 @@ const CapexContext = createContext<CapexContextValue | null>(null);
 function normalizeRequest(req: CapexRequest): CapexRequest {
   const fieldType = req.fieldType ?? 'brown_field';
   const projectType = resolveProjectType(req);
+  // Backfill the plant-head approval token for existing/in-flight requests awaiting head approval.
+  const approvalToken =
+    req.status === 'pending_head_approval'
+      ? req.approvalToken ?? generateApprovalToken('request', req.id)
+      : req.approvalToken;
+  // Backfill Sandeep's PO-issue token once Plant Accounts / Global Accounts are in the loop.
+  const needsPoToken =
+    req.status === 'pi_submitted' || req.status === 'accounts_processing';
+  const poToken = needsPoToken ? req.poToken ?? generatePoToken('request', req.id) : req.poToken;
   return {
     ...req,
     fieldType,
     projectType,
     greenFieldProjectType: projectType,
+    approvalToken,
+    poToken,
   };
 }
 
@@ -266,7 +303,10 @@ function applyMasterMigrations(
 }
 
 function normalizeInvite(inv: VendorInvite): VendorInvite {
-  return { ...inv, auctionApprovalStatus: inv.auctionApprovalStatus ?? 'not_sent' };
+  const needsPoToken =
+    inv.awarded && (inv.awardStatus === 'pi_submitted' || inv.awardStatus === 'accounts_processing');
+  const poToken = needsPoToken ? inv.poToken ?? generatePoToken('award', inv.id) : inv.poToken;
+  return { ...inv, auctionApprovalStatus: inv.auctionApprovalStatus ?? 'not_sent', poToken };
 }
 
 function dedupeById<T extends { id: string }>(items: T[]): T[] {
@@ -347,9 +387,27 @@ function stripRequestFiles(requests: CapexRequest[], files: FileMap): CapexReque
         }),
       };
     }
-    if (req.purchaseOrder?.poDocumentBase64) {
-      files[`po:${req.id}`] = req.purchaseOrder.poDocumentBase64;
-      r = { ...r, purchaseOrder: { ...req.purchaseOrder, poDocumentBase64: undefined } };
+    if (req.purchaseOrder) {
+      const po = req.purchaseOrder;
+      let nextPo = po;
+      if (po.poDocumentBase64) {
+        files[`po:${req.id}`] = po.poDocumentBase64;
+        nextPo = { ...nextPo, poDocumentBase64: undefined };
+      }
+      if (po.poDocuments?.some((d) => d.base64)) {
+        nextPo = {
+          ...nextPo,
+          poDocuments: po.poDocuments.map((d) => {
+            if (d.base64) { files[`podoc:${d.id}`] = d.base64; return { ...d, base64: '' }; }
+            return d;
+          }),
+        };
+      }
+      if (nextPo !== po) r = { ...r, purchaseOrder: nextPo };
+    }
+    if (req.trialSubmission?.base64) {
+      files[`trial-req:${req.id}`] = req.trialSubmission.base64;
+      r = { ...r, trialSubmission: { ...req.trialSubmission, base64: '' } };
     }
     return r;
   });
@@ -372,6 +430,28 @@ function stripInviteFiles(invites: VendorInvite[], files: FileMap): VendorInvite
           return q;
         }),
       };
+    }
+    if (inv.purchaseOrder) {
+      const po = inv.purchaseOrder;
+      let nextPo = po;
+      if (po.poDocumentBase64) {
+        files[`po-inv:${inv.id}`] = po.poDocumentBase64;
+        nextPo = { ...nextPo, poDocumentBase64: undefined };
+      }
+      if (po.poDocuments?.some((d) => d.base64)) {
+        nextPo = {
+          ...nextPo,
+          poDocuments: po.poDocuments.map((d) => {
+            if (d.base64) { files[`podoc:${d.id}`] = d.base64; return { ...d, base64: '' }; }
+            return d;
+          }),
+        };
+      }
+      if (nextPo !== po) v = { ...v, purchaseOrder: nextPo };
+    }
+    if (inv.trialSubmission?.base64) {
+      files[`trial:${inv.id}`] = inv.trialSubmission.base64;
+      v = { ...v, trialSubmission: { ...inv.trialSubmission, base64: '' } };
     }
     return v;
   });
@@ -401,8 +481,24 @@ function hydrateRequestFiles(requests: CapexRequest[], files: FileMap): CapexReq
       };
     }
     if (req.purchaseOrder) {
-      const f = files[`po:${req.id}`];
-      if (f) r = { ...r, purchaseOrder: { ...req.purchaseOrder, poDocumentBase64: f } };
+      const po = req.purchaseOrder;
+      let nextPo = po;
+      const single = files[`po:${req.id}`];
+      if (single) nextPo = { ...nextPo, poDocumentBase64: single };
+      if (po.poDocuments?.length) {
+        nextPo = {
+          ...nextPo,
+          poDocuments: po.poDocuments.map((d) => {
+            const f = files[`podoc:${d.id}`];
+            return f ? { ...d, base64: f } : d;
+          }),
+        };
+      }
+      if (nextPo !== po) r = { ...r, purchaseOrder: nextPo };
+    }
+    if (req.trialSubmission) {
+      const f = files[`trial-req:${req.id}`];
+      if (f) r = { ...r, trialSubmission: { ...req.trialSubmission, base64: f } };
     }
     return r;
   });
@@ -420,6 +516,26 @@ function hydrateInviteFiles(invites: VendorInvite[], files: FileMap): VendorInvi
           return f ? { ...q, attachmentBase64: f } : q;
         }),
       };
+    }
+    if (inv.purchaseOrder) {
+      const po = inv.purchaseOrder;
+      let nextPo = po;
+      const single = files[`po-inv:${inv.id}`];
+      if (single) nextPo = { ...nextPo, poDocumentBase64: single };
+      if (po.poDocuments?.length) {
+        nextPo = {
+          ...nextPo,
+          poDocuments: po.poDocuments.map((d) => {
+            const f = files[`podoc:${d.id}`];
+            return f ? { ...d, base64: f } : d;
+          }),
+        };
+      }
+      if (nextPo !== po) v = { ...v, purchaseOrder: nextPo };
+    }
+    if (inv.trialSubmission) {
+      const f = files[`trial:${inv.id}`];
+      if (f) v = { ...v, trialSubmission: { ...inv.trialSubmission, base64: f } };
     }
     return v;
   });
@@ -461,13 +577,9 @@ function mergeCapexMasterOnLoad(
 
 
 export function initialStatusForRequest(_budget?: number, fieldType: FieldType = 'brown_field'): CapexStatus {
-  if (
-    fieldType === 'green_field' ||
-    fieldType === 'digitisation' ||
-    fieldType === 'information_technology'
-  ) {
-    return 'sourcing';
-  }
+  // Only Green Field skips plant-head approval; Brown Field, Digitisation and IT all route to the
+  // plant head (who approves via the emailed public link).
+  if (fieldType === 'green_field') return 'sourcing';
   return 'pending_head_approval';
 }
 
@@ -637,21 +749,35 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
     };
   }, [loaded]);
 
-  // Re-sync invites when the supplier portal tab submits a quote in another window
+  // Re-sync requests + invites when the supplier portal tab submits a quote in another window.
+  // Request-level fields (e.g. line-item HSN) must sync too — invites alone are not enough for GST.
   useEffect(() => {
     function onStorage(e: StorageEvent) {
       if (e.key !== STORAGE_KEY || !e.newValue) return;
       try {
         const parsed = JSON.parse(e.newValue);
-        const fresh = dedupeById<VendorInvite>(parsed.invites ?? []);
-        if (fresh.length) {
+        const freshInvites = dedupeById<VendorInvite>(parsed.invites ?? []).map(normalizeInvite);
+        const freshRequests = dedupeById<CapexRequest>(parsed.requests ?? []).map(normalizeRequest);
+        // Budget proposals must sync too so a plant-head budget approval done in the public tab
+        // reflects internally (and vice-versa).
+        const freshBudgetProposals: BudgetProposal[] | null = Array.isArray(parsed.budgetProposals)
+          ? parsed.budgetProposals
+          : null;
+        if (freshInvites.length || freshRequests.length || freshBudgetProposals) {
           skipNextPersist.current = true; // data came FROM localStorage — don't write it back
-          setInvites(fresh);
+          if (freshRequests.length) setRequests(freshRequests);
+          if (freshInvites.length) setInvites(freshInvites);
+          if (freshBudgetProposals) setBudgetProposals(freshBudgetProposals);
           // The cross-tab payload is lean (no base64); re-attach file blobs from IndexedDB.
           getAllFiles().then((files) => {
             if (!files || !Object.keys(files).length) return;
             skipNextPersist.current = true;
-            setInvites((prev) => hydrateInviteFiles(prev, files));
+            if (freshRequests.length) {
+              setRequests((prev) => hydrateRequestFiles(prev, files));
+            }
+            if (freshInvites.length) {
+              setInvites((prev) => hydrateInviteFiles(prev, files));
+            }
           });
         }
       } catch {}
@@ -664,11 +790,17 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
     setRequests((prev) => {
       const seq = String(prev.length + 1).padStart(4, '0');
       const requestNo = req.requestNo ?? `CAP-${getCurrentFyCode()}-${seq}`;
+      // Mint the plant-head approval link token when the request needs head approval.
+      const approvalToken =
+        req.status === 'pending_head_approval'
+          ? req.approvalToken ?? generateApprovalToken('request', req.id)
+          : req.approvalToken;
       const withHistory: CapexRequest = req.statusHistory?.length
-        ? { ...req, requestNo }
+        ? { ...req, requestNo, approvalToken }
         : {
             ...req,
             requestNo,
+            approvalToken,
             statusHistory: [{ status: req.status, actor: req.createdBy, at: req.createdAt }],
           };
       return dedupeById([...prev, withHistory]);
@@ -728,10 +860,36 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
       const newInvites: VendorInvite[] = vendorIds
         .filter((vendorId) => !existingVendorIds.has(vendorId))
         .map((vendorId) => {
+          const vendor = vendors.find((v) => v.id === vendorId);
+          const isForeign = !!vendor?.foreign;
           // RFQ vendors must approve the contract documents (Commercial Terms / PBG / DLC / payment
           // terms) BEFORE they can quote, so send the doc-package up front (gated on the supplier
           // portal). Auction vendors approve the pre-bid Business Rules instead, so no package here.
-          const vendor = isRfq ? vendors.find((v) => v.id === vendorId) : undefined;
+          const rfqBits = isRfq
+            ? {
+                rfqStatus: 'awaiting_quote' as const,
+                ...(vendor
+                  ? {
+                      docApprovalStatus: 'pending' as const,
+                      docApprovalPackage: {
+                        ...buildDocApprovalPackage(vendor, { selection: docSelections?.[vendorId] }),
+                        sentAt: nowIso,
+                      },
+                    }
+                  : { docApprovalStatus: 'not_sent' as const }),
+              }
+            : {};
+          // Foreign vendors must accept the Incoterms agreement before quoting/bidding (gates the
+          // supplier form) — seed the blank doc up front regardless of RFQ/auction mode.
+          const incoBits = isForeign
+            ? {
+                incoTermsStatus: 'awaiting_vendor' as const,
+                incoTermsDoc: { ...buildBlankIncoTermsDoc(), sentAt: nowIso },
+                incoTermsThread: [
+                  { id: `inco-${now}-${vendorId}`, by: 'sourcing' as const, senderName: 'Sourcing', action: 'sent' as const, at: nowIso },
+                ],
+              }
+            : {};
           return {
             id: `inv-${now}-${vendorId}`,
             requestId,
@@ -742,20 +900,8 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
             quotes: [],
             negotiationThread: [],
             invitedAt: nowIso,
-            ...(isRfq
-              ? {
-                  rfqStatus: 'awaiting_quote' as const,
-                  ...(vendor
-                    ? {
-                        docApprovalStatus: 'pending' as const,
-                        docApprovalPackage: {
-                          ...buildDocApprovalPackage(vendor, { selection: docSelections?.[vendorId] }),
-                          sentAt: nowIso,
-                        },
-                      }
-                    : { docApprovalStatus: 'not_sent' as const }),
-                }
-              : {}),
+            ...rfqBits,
+            ...incoBits,
           };
         });
       return dedupeById([...prev, ...newInvites]);
@@ -769,13 +915,14 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
    */
   function inviteNewVendor(
     requestId: string,
-    info: { name: string; email: string; phone: string },
+    info: { name: string; email: string; phone: string; foreign?: boolean },
     senderName: string,
     selection?: DocSelection,
   ) {
     const now = new Date().toISOString();
     const nowMs = Date.now();
     const vendorId = `v-ot-${nowMs}`;
+    const isForeign = !!info.foreign;
     const vendor: Vendor = {
       id: vendorId,
       vendorCode: `OT-${String(nowMs).slice(-6)}`,
@@ -792,6 +939,7 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
       ifsc: '',
       onboardedAt: now,
       oneTime: true,
+      foreign: isForeign || undefined,
     };
     addVendor(vendor);
     const doc: IncoTermsDoc = { ...buildBlankIncoTermsDoc(), sentAt: now };
@@ -807,14 +955,18 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
       invitedAt: now,
       rfqStatus: 'awaiting_quote',
       // Docs-before-price: the one-time vendor approves the doc-package (incl. payment terms) before
-      // quoting, after the INCO-terms gate. Built here since we already have the vendor object.
+      // quoting. Incoterms only gate FOREIGN vendors (international shipping terms).
       docApprovalStatus: 'pending',
       docApprovalPackage: { ...buildDocApprovalPackage(vendor, { selection }), sentAt: now },
-      incoTermsStatus: 'awaiting_vendor',
-      incoTermsDoc: doc,
-      incoTermsThread: [
-        { id: `inco-${nowMs}`, by: 'sourcing', senderName, action: 'sent', at: now },
-      ],
+      ...(isForeign
+        ? {
+            incoTermsStatus: 'awaiting_vendor' as const,
+            incoTermsDoc: doc,
+            incoTermsThread: [
+              { id: `inco-${nowMs}`, by: 'sourcing' as const, senderName, action: 'sent' as const, at: now },
+            ],
+          }
+        : {}),
     };
     addInvite(invite);
   }
@@ -1052,13 +1204,40 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
     by: 'sourcing' | 'supplier',
     senderName: string,
     message?: string,
-  ) {
+    itemHsn?: Record<string, string>,
+  ): boolean {
     const clean = sanitizeRfqQuote(quote);
     if (!clean) {
       console.error('proposeRfqQuote: invalid quotation rejected', quote);
-      return;
+      return false;
+    }
+    const targetInvite = invites.find((i) => i.id === inviteId);
+    const targetRequest = targetInvite
+      ? requests.find((r) => r.id === targetInvite.requestId)
+      : undefined;
+    let hsnPatch: Record<string, string> | null = null;
+    if (by === 'supplier' && targetRequest?.lineItems?.length) {
+      hsnPatch = resolveSupplierItemHsn(targetRequest.lineItems, clean, itemHsn);
+      if (!hsnPatch) {
+        console.error('proposeRfqQuote: missing HSN for one or more line items');
+        return false;
+      }
     }
     const now = new Date().toISOString();
+    if (hsnPatch && targetRequest) {
+      setRequests((prev) =>
+        prev.map((req) => {
+          if (req.id !== targetRequest.id || !req.lineItems) return req;
+          return {
+            ...req,
+            lineItems: req.lineItems.map((li) => {
+              const nextHsn = hsnPatch![li.id];
+              return nextHsn ? { ...li, hsnCode: nextHsn } : li;
+            }),
+          };
+        }),
+      );
+    }
     setInvites((prev) =>
       prev.map((inv) => {
         if (inv.id !== inviteId) return inv;
@@ -1087,6 +1266,7 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
         };
       }),
     );
+    return true;
   }
 
   /**
@@ -1196,18 +1376,20 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
   function seedAuctionFromRfq(requestId: string) {
     const now = new Date().toISOString();
     const validUntil = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-    const seedItems = requests.find((r) => r.id === requestId)?.lineItems;
     setInvites((prev) =>
       prev.map((inv) => {
         if (inv.requestId !== requestId) return inv;
         if (!inv.rfqQuote) return inv;
-        if (inv.quotes.length > 0) return inv; // vendor already has an auction bid — don't overwrite
+        if (inv.openingQuote || inv.quotes.length > 0) return inv; // already seeded / has a bid
         const rq = inv.rfqQuote;
         const seeded: Quote = {
           id: `q-seed-${inv.vendorId}-${Date.now()}`,
-          price: rfqTotal(rq, seedItems),
+          // Match the auction-bid convention: `price` is the BASE subtotal (excl. freight/packing/
+          // service); charges stay separate so consumers (resolveFinalVendor, setAuctionConfig) that
+          // add `price + charges` don't double-count.
+          price: rq.price,
           itemPrices: rq.linePrices,
-          deliveryDays: rq.deliveryWeeks != null ? Math.round(rq.deliveryWeeks * 7) : 0,
+          deliveryDays: rq.deliveryDays ?? (rq.deliveryWeeks != null ? Math.round(rq.deliveryWeeks * 7) : 0),
           validUntil,
           submittedAt: now,
           freight: rq.freight,
@@ -1217,7 +1399,9 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
           currency: rq.currency,
           seededByBuyer: true,
         };
-        return { ...inv, quotes: [seeded] };
+        // Seed the opening bid on `openingQuote`, NOT `quotes` — ranks stay empty (reset) until the
+        // vendor submits a fresh bid to reveal their rank. `openingQuote` is the award-price fallback.
+        return { ...inv, openingQuote: seeded };
       }),
     );
   }
@@ -1264,6 +1448,8 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
           awardedItemIds: group.itemIds,
           awardAmount: group.amount,
           awardStatus: 'awarded' as const,
+          // Carry the request's trial requirement onto each award track.
+          ...(request.trialRequired ? { trialRequired: true, trialStatus: 'pending_upload' as const } : {}),
         };
       }),
     );
@@ -1339,6 +1525,8 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
           awardedItemIds: group.itemIds,
           awardAmount: group.amount,
           awardStatus: 'pi_requested' as const,
+          // Carry the request's trial requirement onto each award track.
+          ...(request.trialRequired ? { trialRequired: true, trialStatus: 'pending_upload' as const } : {}),
         };
       }),
     );
@@ -1364,13 +1552,30 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
           ? {
               ...inv,
               proformaInvoice: { ...pi, uploadedAt: pi.uploadedAt || now, submittedByVendor: true },
-              ...(inv.awarded ? { awardStatus: 'pi_submitted' as const, piSubmittedAt: now } : {}),
+              ...(inv.awarded
+                ? {
+                    awardStatus: 'pi_submitted' as const,
+                    piSubmittedAt: now,
+                    // Mint Sandeep's public PO-issue token once the award reaches Plant Accounts.
+                    poToken: inv.poToken ?? generatePoToken('award', inv.id),
+                  }
+                : {}),
             }
           : inv,
       ),
     );
     if (invite && !awardBased) {
-      updateRequest(invite.requestId, { status: 'pi_submitted', piSubmittedAt: now }, 'Vendor');
+      // Mint the request-level PO token for the eventual Sandeep handoff.
+      const req = requests.find((r) => r.id === invite.requestId);
+      updateRequest(
+        invite.requestId,
+        {
+          status: 'pi_submitted',
+          piSubmittedAt: now,
+          poToken: req?.poToken ?? generatePoToken('request', invite.requestId),
+        },
+        'Vendor',
+      );
     }
   }
 
@@ -1469,13 +1674,26 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
       setInvites((prev) =>
         prev.map((inv) =>
           inv.id === inviteId && inv.awarded
-            ? { ...inv, awardStatus: 'accounts_processing' as const }
+            ? {
+                ...inv,
+                awardStatus: 'accounts_processing' as const,
+                // Ensure Sandeep has a public PO link (mint if PI path somehow skipped it).
+                poToken: inv.poToken ?? generatePoToken('award', inv.id),
+              }
             : inv,
         ),
       );
       return;
     }
-    updateRequest(requestId, { status: 'accounts_processing' }, actor);
+    const req = requests.find((r) => r.id === requestId);
+    updateRequest(
+      requestId,
+      {
+        status: 'accounts_processing',
+        poToken: req?.poToken ?? generatePoToken('request', requestId),
+      },
+      actor,
+    );
   }
 
   /**
@@ -1500,6 +1718,8 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
                 purchaseOrder: { ...po, issuedAt: now, issuedBy: actor, submittedAt: po.submittedAt ?? now },
                 paymentMilestones: milestones,
                 awardStatus: 'payment_in_progress' as const,
+                // Vendor can re-upload the PI against the issued PO.
+                piReuploadAllowed: true,
               }
             : inv,
         ),
@@ -1512,6 +1732,8 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
         purchaseOrder: { ...po, issuedAt: now, issuedBy: actor, submittedAt: po.submittedAt ?? now },
         paymentMilestones: milestones,
         status: 'payment_in_progress',
+        // Vendor can re-upload the PI against the issued PO.
+        piReuploadAllowed: true,
       },
       actor,
     );
@@ -1524,6 +1746,14 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
       // stop). When every award is completed, the whole request completes.
       const inv = invites.find((i) => i.id === inviteId);
       if (!inv?.paymentMilestones) return;
+      const target = inv.paymentMilestones.find((m) => m.id === milestoneId);
+      // Block the FINAL payment while a required trial has not been approved.
+      if (target?.isFinal && finalPaymentBlockedByTrial(inv)) {
+        console.error('[CapexContext] Final payment blocked: trial not yet approved');
+        return;
+      }
+      // The advance is the first NON-final milestone; ticking it starts the delivery-lead clock.
+      const isAdvance = inv.paymentMilestones.find((m) => !m.isFinal)?.id === milestoneId;
       const updated = inv.paymentMilestones.map((m) =>
         m.id === milestoneId ? { ...m, status: 'paid' as const, paidAt: now, paidBy: actor } : m,
       );
@@ -1534,6 +1764,7 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
           ? {
               ...i,
               paymentMilestones: updated,
+              ...(isAdvance && !i.advancePaidAt ? { advancePaidAt: now } : {}),
               ...(finalDone && i.awardStatus === 'payment_in_progress'
                 ? { awardStatus: 'completed' as const, tatStoppedAt: now }
                 : {}),
@@ -1551,6 +1782,13 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
     }
     const req = requests.find((r) => r.id === requestId);
     if (!req?.paymentMilestones) return;
+    const target = req.paymentMilestones.find((m) => m.id === milestoneId);
+    // Block the FINAL payment while a required trial has not been approved.
+    if (target?.isFinal && finalPaymentBlockedByTrial(req)) {
+      console.error('[CapexContext] Final payment blocked: trial not yet approved');
+      return;
+    }
+    const isAdvance = req.paymentMilestones.find((m) => !m.isFinal)?.id === milestoneId;
     const updated = req.paymentMilestones.map((m) =>
       m.id === milestoneId ? { ...m, status: 'paid' as const, paidAt: now, paidBy: actor } : m,
     );
@@ -1561,6 +1799,7 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
       requestId,
       {
         paymentMilestones: updated,
+        ...(isAdvance && !req.advancePaidAt ? { advancePaidAt: now } : {}),
         ...(finalDone && req.status === 'payment_in_progress'
           ? { status: 'completed', tatStoppedAt: now }
           : {}),
@@ -1682,7 +1921,24 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
 
   function setAuctionConfig(requestId: string, config: AuctionConfig) {
     setRequests((prev) =>
-      prev.map((req) => (req.id === requestId ? { ...req, auctionConfig: config } : req)),
+      prev.map((req) => {
+        if (req.id !== requestId) return req;
+        // Seed the opening "price to beat" = current best price × 0.95 (rounded), unless the caller
+        // already supplied one. The current best comes from the seeded opening bids / RFQ quotes.
+        let openingBestPrice = config.openingBestPrice;
+        if (openingBestPrice == null) {
+          const reqInvites = invites.filter((i) => i.requestId === requestId);
+          // Compare on an INR basis so a foreign-currency quote isn't mistaken for the lowest.
+          const prices: number[] = [];
+          for (const inv of reqInvites) {
+            const oq = inv.quotes[inv.quotes.length - 1] ?? inv.openingQuote;
+            if (oq) prices.push(toInr(oq.price + (oq.freight ?? 0) + (oq.packing ?? 0) + (oq.service ?? 0), oq.currency));
+            else if (inv.rfqQuote) prices.push(toInr(rfqTotal(inv.rfqQuote, req.lineItems), inv.rfqQuote.currency));
+          }
+          if (prices.length) openingBestPrice = Math.round(Math.min(...prices) * 0.95);
+        }
+        return { ...req, auctionConfig: { ...config, openingBestPrice } };
+      }),
     );
   }
 
@@ -1859,42 +2115,255 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
   }
 
   function submitBudgetProposal(id: string) {
+    const now = new Date().toISOString();
     setBudgetProposals((prev) =>
-      prev.map((p) =>
-        p.id === id && (p.status === 'draft' || p.status === 'rejected')
-          ? { ...p, status: 'pending_admin', submittedAt: new Date().toISOString() }
-          : p,
-      ),
+      prev.map((p) => {
+        if (p.id !== id) return p;
+        if (p.status !== 'draft' && p.status !== 'needs_correction' && p.status !== 'rejected') return p;
+        const wasRework = p.status === 'needs_correction' || p.status === 'rejected';
+        return {
+          ...p,
+          // Every (re)submit RESTARTS from the plant head — mint/rotate the approval link token.
+          status: 'pending_plant_head',
+          submittedAt: now,
+          approvalToken: generateApprovalToken('budget', p.id),
+          resubmitCount: (p.resubmitCount ?? 0) + (wasRework ? 1 : 0),
+          // Clear ALL prior-stage decisions/notes on (re)submit so a fresh cycle starts clean.
+          correctionNote: undefined,
+          plantHeadDecidedAt: undefined,
+          plantHeadDecidedBy: undefined,
+          adminDecidedAt: undefined,
+          adminDecidedBy: undefined,
+          accountsDecidedAt: undefined,
+          accountsDecidedBy: undefined,
+          decidedAt: undefined,
+          decidedBy: undefined,
+          decisionNote: undefined,
+          publishedAt: undefined,
+        };
+      }),
     );
   }
 
+  /**
+   * Plant-head budget decision (public email link, no role): approve → admin; reject → rejected;
+   * needs_correction → back to the author with a remark (and optional edited line items).
+   */
+  function decideBudgetPlantHead(
+    id: string,
+    decision: 'approved' | 'rejected' | 'needs_correction',
+    note?: string,
+    editedItems?: BudgetProposalItem[],
+  ) {
+    const now = new Date().toISOString();
+    setBudgetProposals((prev) =>
+      prev.map((p) => {
+        if (p.id !== id || p.status !== 'pending_plant_head') return p;
+        if (decision === 'approved') {
+          return { ...p, status: 'pending_admin', plantHeadDecidedAt: now, plantHeadDecidedBy: 'Plant Head' };
+        }
+        if (decision === 'needs_correction') {
+          return {
+            ...p,
+            status: 'needs_correction',
+            plantHeadDecidedAt: now,
+            plantHeadDecidedBy: 'Plant Head',
+            correctionNote: note,
+            ...(editedItems ? { items: editedItems } : {}),
+          };
+        }
+        return {
+          ...p,
+          status: 'rejected',
+          plantHeadDecidedAt: now,
+          plantHeadDecidedBy: 'Plant Head',
+          decisionNote: note ?? 'Rejected by plant head',
+        };
+      }),
+    );
+  }
+
+  /**
+   * Super-admin budget decision. approve → forwards to Global Accounts (NO publish yet);
+   * needs_correction → back to the author with a remark (and optional edited line items); reject → rejected.
+   */
   function decideBudgetProposal(
+    id: string,
+    decision: 'approved' | 'rejected' | 'needs_correction',
+    actor: string,
+    note?: string,
+    editedItems?: BudgetProposalItem[],
+  ) {
+    const now = new Date().toISOString();
+    setBudgetProposals((prev) =>
+      prev.map((p) => {
+        // Guard: only an admin-pending proposal can be decided at this stage.
+        if (p.id !== id || p.status !== 'pending_admin') return p;
+        if (decision === 'approved') {
+          return { ...p, status: 'pending_accounts', adminDecidedAt: now, adminDecidedBy: actor };
+        }
+        if (decision === 'needs_correction') {
+          return {
+            ...p,
+            status: 'needs_correction',
+            adminDecidedAt: now,
+            adminDecidedBy: actor,
+            correctionNote: note,
+            ...(editedItems ? { items: editedItems } : {}),
+          };
+        }
+        return { ...p, status: 'rejected', adminDecidedAt: now, adminDecidedBy: actor, decisionNote: note };
+      }),
+    );
+  }
+
+  /**
+   * Global-accounts budget decision (final gate). approve → publishes the proposal's rows as a new
+   * live FY in the master (double-publish guarded by the pending_accounts precondition); reject → rejected.
+   */
+  function decideBudgetAccounts(
     id: string,
     decision: 'approved' | 'rejected',
     actor: string,
     note?: string,
   ) {
     const now = new Date().toISOString();
-    let toPublish: BudgetProposal | null = null;
+    // Resolve + guard from CURRENT state before mutating, so publishing to master never depends on the
+    // setState updater having run first (avoids a silently-missed publish under React batching).
+    const target = budgetProposals.find((p) => p.id === id);
+    if (!target || target.status !== 'pending_accounts') return;
     setBudgetProposals((prev) =>
-      prev.map((p) => {
-        // Guard: only a pending proposal can be decided (prevents double-publish).
-        if (p.id !== id || p.status !== 'pending_admin') return p;
-        if (decision === 'approved') toPublish = p;
-        return {
-          ...p,
-          status: decision,
-          decidedAt: now,
-          decidedBy: actor,
-          decisionNote: note,
-          publishedAt: decision === 'approved' ? now : undefined,
-        };
-      }),
+      prev.map((p) =>
+        p.id === id && p.status === 'pending_accounts'
+          ? {
+              ...p,
+              status: decision === 'approved' ? 'approved' : 'rejected',
+              accountsDecidedAt: now,
+              accountsDecidedBy: actor,
+              decidedAt: now,
+              decidedBy: actor,
+              decisionNote: note ?? p.decisionNote,
+              publishedAt: decision === 'approved' ? now : p.publishedAt,
+            }
+          : p,
+      ),
     );
-    // Publish the approved proposal's rows as a new live FY in the master.
-    if (toPublish) {
-      const newRows = buildMasterItemsFromProposal(toPublish);
+    if (decision === 'approved') {
+      const newRows = buildMasterItemsFromProposal(target);
       setCapexMaster((prev) => [...prev, ...newRows]);
+    }
+  }
+
+  /** Plant-head request approval (public email link, no role): approve → sourcing; reject → rejected. */
+  function decideRequestPlantHead(requestId: string, decision: 'approved' | 'rejected') {
+    const req = requests.find((r) => r.id === requestId);
+    if (!req || req.status !== 'pending_head_approval') return;
+    const now = new Date().toISOString();
+    if (decision === 'approved') {
+      updateRequest(requestId, { status: 'sourcing', plantHeadDecidedAt: now }, 'Plant Head (email)');
+    } else {
+      updateRequest(
+        requestId,
+        { status: 'rejected', plantHeadDecidedAt: now, rejectionReason: 'Rejected by plant head' },
+        'Plant Head (email)',
+      );
+    }
+  }
+
+  // ── Trials (optional QA gate before final payment) ──
+  function setTrialRequired(requestId: string, required: boolean, inviteId?: string) {
+    const nextStatus = (cur?: TrialStatus): TrialStatus =>
+      required ? (cur && cur !== 'not_required' ? cur : 'pending_upload') : 'not_required';
+    if (inviteId) {
+      setInvites((prev) =>
+        prev.map((i) => (i.id === inviteId ? { ...i, trialRequired: required, trialStatus: nextStatus(i.trialStatus) } : i)),
+      );
+      return;
+    }
+    setRequests((prev) =>
+      prev.map((r) => (r.id === requestId ? { ...r, trialRequired: required, trialStatus: nextStatus(r.trialStatus) } : r)),
+    );
+  }
+
+  /** Vendor uploads a trial asset (video/photo/report) → sourcing review. */
+  function submitTrial(inviteId: string, submission: TrialSubmission) {
+    const now = new Date().toISOString();
+    const invite = invites.find((i) => i.id === inviteId);
+    if (!invite) return;
+    // Precondition: a trial must be required and awaiting the vendor's upload (or previously rejected).
+    const entity = invite.awarded ? invite : requests.find((r) => r.id === invite.requestId);
+    const curStatus = entity?.trialStatus;
+    if (!entity?.trialRequired || (curStatus !== 'pending_upload' && curStatus !== 'rejected')) return;
+    const sub: TrialSubmission = { ...submission, uploadedAt: submission.uploadedAt || now, submittedByVendor: true };
+    const threadEntry: TrialMessage = {
+      id: `trial-${Date.now()}`,
+      by: 'vendor',
+      senderName: 'Vendor',
+      action: 'submitted',
+      submission: { ...sub, base64: '' }, // metadata-only in the thread (base64 lives on trialSubmission)
+      message: sub.note,
+      at: now,
+    };
+    // Award tracks own their trial on the invite; single-vendor/RFQ trials live on the request.
+    if (invite.awarded) {
+      setInvites((prev) =>
+        prev.map((i) =>
+          i.id === inviteId
+            ? { ...i, trialSubmission: sub, trialStatus: 'pending_review', trialThread: [...(i.trialThread ?? []), threadEntry] }
+            : i,
+        ),
+      );
+    } else {
+      setRequests((prev) =>
+        prev.map((r) =>
+          r.id === invite.requestId
+            ? { ...r, trialSubmission: sub, trialStatus: 'pending_review', trialThread: [...(r.trialThread ?? []), threadEntry] }
+            : r,
+        ),
+      );
+    }
+  }
+
+  /** Sourcing approves/rejects a trial (only when in review). reject → 'rejected' (vendor re-uploads). */
+  function respondToTrial(requestId: string, response: 'approved' | 'rejected', inviteId?: string, message?: string) {
+    const now = new Date().toISOString();
+    // Precondition: only act on a trial that is currently under review.
+    const entity = inviteId ? invites.find((i) => i.id === inviteId) : requests.find((r) => r.id === requestId);
+    if (entity?.trialStatus !== 'pending_review') return;
+    const threadEntry: TrialMessage = {
+      id: `trial-${Date.now()}`,
+      by: 'sourcing',
+      senderName: 'Sourcing',
+      action: response,
+      message,
+      at: now,
+    };
+    const nextStatus: TrialStatus = response === 'approved' ? 'approved' : 'rejected';
+    if (inviteId) {
+      setInvites((prev) =>
+        prev.map((i) => (i.id === inviteId ? { ...i, trialStatus: nextStatus, trialThread: [...(i.trialThread ?? []), threadEntry] } : i)),
+      );
+      return;
+    }
+    setRequests((prev) =>
+      prev.map((r) => (r.id === requestId ? { ...r, trialStatus: nextStatus, trialThread: [...(r.trialThread ?? []), threadEntry] } : r)),
+    );
+  }
+
+  /** Vendor re-uploads the PI after the PO is issued (keeps payments in progress). */
+  function resubmitProformaInvoice(inviteId: string, pi: ProformaInvoice) {
+    const now = new Date().toISOString();
+    const invite = invites.find((i) => i.id === inviteId);
+    if (!invite) return;
+    setInvites((prev) =>
+      prev.map((i) =>
+        i.id === inviteId
+          ? { ...i, proformaInvoice: { ...pi, uploadedAt: pi.uploadedAt || now, submittedByVendor: true }, piReuploadAllowed: false }
+          : i,
+      ),
+    );
+    if (!invite.awarded) {
+      setRequests((prev) => prev.map((r) => (r.id === invite.requestId ? { ...r, piReuploadAllowed: false } : r)));
     }
   }
 
@@ -2010,6 +2479,13 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
         updateBudgetProposal,
         submitBudgetProposal,
         decideBudgetProposal,
+        decideBudgetPlantHead,
+        decideBudgetAccounts,
+        decideRequestPlantHead,
+        setTrialRequired,
+        submitTrial,
+        respondToTrial,
+        resubmitProformaInvoice,
         adhocBudgetRequests,
         brownFieldHeadAllocations,
         createAdhocBudgetRequest,

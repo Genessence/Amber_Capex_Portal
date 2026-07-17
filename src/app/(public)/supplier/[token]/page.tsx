@@ -27,8 +27,8 @@ import {
 } from "lucide-react"
 import { useCapex } from "@/lib/capexContext"
 import { resolveInviteByToken, isSubmissionAllowed } from "@/lib/tokenUtils"
-import type { CapexLineItem, CapexRequest, PurchaseOrder, Quote, NegotiationMessage, ProformaInvoice, RfqQuote, Vendor, VendorInvite, IncoTermsDoc } from "@/lib/types"
-import { rfqTotal, effectiveRfqStatus, rfqLineSubtotal, rfqGstAmount, RFQ_STATUS_LABELS, RFQ_STATUS_COLORS } from "@/lib/rfqUtils"
+import type { CapexLineItem, CapexRequest, PurchaseOrder, Quote, NegotiationMessage, ProformaInvoice, RfqQuote, TrialSubmission, Vendor, VendorInvite, IncoTermsDoc } from "@/lib/types"
+import { rfqTotal, effectiveRfqStatus, rfqLineSubtotal, rfqGstAmount, isCompleteItemHsnMap, RFQ_STATUS_LABELS, RFQ_STATUS_COLORS } from "@/lib/rfqUtils"
 import {
   INCO_TERMS_QUESTIONS,
   INCO_TERMS_STATUS_LABELS,
@@ -53,9 +53,10 @@ import {
 } from "@/lib/auctionDocumentUtils"
 import { DocPackageReview } from "@/components/DocPackageReview"
 import { TatBanner } from "@/components/TatBanner"
+import { TrialCard } from "@/components/TrialCard"
 import { SupplierQuoteTable } from "@/components/supplier/SupplierQuoteTable"
 import { SupplierQuoteCards } from "@/components/supplier/SupplierQuoteCards"
-import { INPUT, INPUT_RIGHT, LABEL, LABEL_REQ } from "@/lib/auctionTheme"
+import { INPUT, INPUT_RIGHT, LABEL, LABEL_REQ, fmtCurrency } from "@/lib/auctionTheme"
 import { SUPPLIER_CARD } from "@/lib/uiTokens"
 import { DEFAULT_TERMS_TEXT, effectiveDocApprovalStatus, docPackageTitles } from "@/lib/docPackageUtils"
 import { isFulfillmentStatus, resolveFinalVendor } from "@/lib/paymentUtils"
@@ -385,12 +386,14 @@ function RequestScopeCard({ request }: { request: CapexRequest }) {
 /* ── Read-only quotation summary (vendor's own figures only) ─────── */
 function QuoteSummaryCard({ quote, title }: { quote?: RfqQuote; title: string }) {
   const total = rfqTotal(quote)
+  // Delivery is captured in DAYS now; tolerate legacy weeks by converting to days for display.
+  const deliveryDaysVal = quote?.deliveryDays ?? (quote?.deliveryWeeks != null ? quote.deliveryWeeks * 7 : undefined)
   const rows: [string, string][] = [
     ["Price", quote ? fmt(quote.price) : "—"],
     ["Transportation / Freight", quote?.freight != null ? fmt(quote.freight) : "—"],
     ["Packing / Forwarding", quote?.packing != null ? fmt(quote.packing) : "—"],
     ["Service / Installation", quote?.service != null ? fmt(quote.service) : "—"],
-    ["Delivery Lead Time", quote?.deliveryWeeks != null ? `${quote.deliveryWeeks} week${quote.deliveryWeeks !== 1 ? "s" : ""}` : "—"],
+    ["Delivery Lead Time", deliveryDaysVal != null ? `${deliveryDaysVal} day${deliveryDaysVal !== 1 ? "s" : ""}` : "—"],
     ["Warranty", quote?.warranty != null ? `${quote.warranty} year${quote.warranty !== 1 ? "s" : ""}` : "—"],
     ["GST", rfqGstAmount(quote) > 0 ? fmt(Math.round(rfqGstAmount(quote))) : "—"],
     ["Currency", quote?.currency ?? "INR"],
@@ -464,7 +467,7 @@ function QuotationEntryForm({
   request: CapexRequest
   vendorName: string
 }) {
-  const { proposeRfqQuote, setLineHsn } = useCapex()
+  const { proposeRfqQuote } = useCapex()
   const existing = invite.rfqQuote
   const lineItems = request.lineItems ?? []
   const hasLineItems = lineItems.length > 0
@@ -487,7 +490,11 @@ function QuotationEntryForm({
   const [freight, setFreight] = useState(existing?.freight != null ? String(existing.freight) : "")
   const [packing, setPacking] = useState(existing?.packing != null ? String(existing.packing) : "")
   const [service, setService] = useState(existing?.service != null ? String(existing.service) : "")
-  const [deliveryWeeks, setDeliveryWeeks] = useState(existing?.deliveryWeeks != null ? String(existing.deliveryWeeks) : "")
+  const [deliveryDays, setDeliveryDays] = useState(
+    existing?.deliveryDays != null
+      ? String(existing.deliveryDays)
+      : existing?.deliveryWeeks != null ? String(existing.deliveryWeeks) : "",
+  )
   const [warranty, setWarranty] = useState(existing?.warranty != null ? String(existing.warranty) : "")
   const [currency, setCurrency] = useState(existing?.currency ?? "INR")
 
@@ -515,23 +522,24 @@ function QuotationEntryForm({
   const allLinesPriced = hasLineItems
     ? lineItems.every(it => (Number(linePrices[it.id]) || 0) > 0)
     : (Number(price) || 0) > 0
-  const valid = allLinesPriced && deliveryWeeks.trim() !== "" && Number(deliveryWeeks) > 0
+  const allLinesHaveHsn = !hasLineItems || isCompleteItemHsnMap(lineItems.map(it => it.id), hsnByItem)
+  const valid = allLinesPriced && allLinesHaveHsn && deliveryDays.trim() !== "" && Number(deliveryDays) > 0
 
   function reset() {
     setLinePrices({})
     setHsnByItem(seedHsn())
     setPrice(""); setFreight(""); setPacking(""); setService("")
-    setDeliveryWeeks(""); setWarranty(""); setCurrency("INR")
+    setDeliveryDays(""); setWarranty(""); setCurrency("INR")
   }
 
   function submit() {
     if (!valid) {
+      if (hasLineItems && !allLinesHaveHsn) {
+        toast.error("Select an HSN code for every line item")
+        return
+      }
       toast.error(hasLineItems ? "Enter a unit price for every line item and a delivery lead time" : "Enter a valid price and delivery lead time")
       return
-    }
-    // Persist the vendor's per-item HSN onto the line items (item-wise; drives GST for everyone).
-    if (hasLineItems) {
-      for (const it of lineItems) setLineHsn(request.id, it.id, hsnByItem[it.id] ?? "")
     }
     const num = (s: string) => (s.trim() === "" ? undefined : Number(s))
     const quote: RfqQuote = {
@@ -540,11 +548,22 @@ function QuotationEntryForm({
       freight: num(freight),
       packing: num(packing),
       service: num(service),
-      deliveryWeeks: num(deliveryWeeks),
+      deliveryDays: num(deliveryDays),
       warranty: num(warranty),
       currency,
     }
-    proposeRfqQuote(invite.id, quote, "supplier", vendorName)
+    const ok = proposeRfqQuote(
+      invite.id,
+      quote,
+      "supplier",
+      vendorName,
+      undefined,
+      hasLineItems ? hsnByItem : undefined,
+    )
+    if (!ok) {
+      toast.error("Could not submit quotation — select an HSN code for every line item")
+      return
+    }
     toast.success("Quotation sent to Amber.")
   }
 
@@ -629,15 +648,15 @@ function QuotationEntryForm({
         <h2 className="text-base font-bold text-slate-900 mb-4">Delivery &amp; Validity</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label htmlFor="rfq-delivery" className={LABEL_REQ}>Delivery Lead Time (weeks)</label>
+            <label htmlFor="rfq-delivery" className={LABEL_REQ}>Delivery Lead Time (days)</label>
             <input
               id="rfq-delivery"
               type="number"
               inputMode="decimal"
               min="1"
-              value={deliveryWeeks}
-              onChange={e => setDeliveryWeeks(e.target.value)}
-              placeholder="e.g. 12"
+              value={deliveryDays}
+              onChange={e => setDeliveryDays(e.target.value)}
+              placeholder="e.g. 90"
               className={`${INPUT} min-h-[44px]`}
             />
           </div>
@@ -674,20 +693,20 @@ function QuotationEntryForm({
         <div className="space-y-3">
           <div className="flex justify-between text-sm text-slate-600">
             <span>{hasLineItems ? "Subtotal (line items)" : "Subtotal (price)"}</span>
-            <span className="font-semibold tabular-nums" aria-live="polite">{subtotal > 0 ? fmt(Math.round(subtotal)) : "—"}</span>
+            <span className="font-semibold tabular-nums" aria-live="polite">{subtotal > 0 ? fmtCurrency(Math.round(subtotal), currency) : "—"}</span>
           </div>
           <div className="flex justify-between text-sm text-slate-600">
             <span>Total Additional</span>
-            <span className="font-semibold tabular-nums text-slate-600">{extrasTotal > 0 ? `+${fmt(Math.round(extrasTotal))}` : "—"}</span>
+            <span className="font-semibold tabular-nums text-slate-600">{extrasTotal > 0 ? `+${fmtCurrency(Math.round(extrasTotal), currency)}` : "—"}</span>
           </div>
           <div className="flex justify-between text-sm text-slate-600">
             <span>GST <span className="text-slate-400">(as per HSN)</span></span>
-            <span className="font-semibold tabular-nums text-slate-700" aria-live="polite">{gstValue > 0 ? `+${fmt(Math.round(gstValue))}` : "—"}</span>
+            <span className="font-semibold tabular-nums text-slate-700" aria-live="polite">{gstValue > 0 ? `+${fmtCurrency(Math.round(gstValue), currency)}` : "—"}</span>
           </div>
           <div className="border-t border-slate-200 pt-3 flex justify-between items-end">
             <span className="text-sm font-bold text-slate-700">Grand Total <span className="font-normal text-slate-400">(incl. GST)</span></span>
             <span className="text-2xl font-black text-[#2563EB] tabular-nums" aria-live="polite">
-              {grandTotal > 0 ? fmt(Math.round(grandTotal)) : "—"}
+              {grandTotal > 0 ? fmtCurrency(Math.round(grandTotal), currency) : "—"}
             </span>
           </div>
         </div>
@@ -698,7 +717,7 @@ function QuotationEntryForm({
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-3">
           <span className="text-xs text-slate-500 truncate min-w-0">
             {grandTotal > 0
-              ? <>Grand total <span className="font-bold text-slate-700">{fmt(Math.round(grandTotal))}</span></>
+              ? <>Grand total <span className="font-bold text-slate-700">{fmtCurrency(Math.round(grandTotal), currency)}</span></>
               : hasLineItems ? "Enter a unit price for each line to continue" : "Enter your price to continue"}
           </span>
           <div className="flex items-center gap-2 shrink-0">
@@ -986,7 +1005,19 @@ function IncoTermsGate({
 /* ── Vendor Purchase Order card (post-PI fulfillment) ────────────────────── */
 function PurchaseOrderCard({ po }: { po?: PurchaseOrder }) {
   if (!po?.issuedAt) return null
-  const hasDoc = !!po.poDocumentBase64
+  // Global Accounts can attach several PO documents; fall back to the legacy single-doc fields.
+  const docs = po.poDocuments && po.poDocuments.length > 0
+    ? po.poDocuments
+    : po.poDocumentBase64
+      ? [{
+          id: "legacy",
+          base64: po.poDocumentBase64,
+          name: po.poDocumentName || `PO-${po.poNumber}`,
+          mimeType: po.poDocumentMimeType || "application/octet-stream",
+          uploadedAt: po.poDocumentUploadedAt || po.issuedAt || "",
+        }]
+      : []
+  const hasDoc = docs.length > 0
   return (
     <div className={SUPPLIER_CARD}>
       <div className="flex items-center gap-2 mb-4">
@@ -1004,13 +1035,19 @@ function PurchaseOrderCard({ po }: { po?: PurchaseOrder }) {
         </div>
       </div>
       {hasDoc ? (
-        <a
-          href={`data:${po.poDocumentMimeType || "application/octet-stream"};base64,${po.poDocumentBase64}`}
-          download={po.poDocumentName || `PO-${po.poNumber}`}
-          className="inline-flex items-center justify-center gap-2 min-h-[44px] px-4 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-semibold text-sm transition-colors w-full sm:w-auto"
-        >
-          <Download className="w-4 h-4" /> Download PO Document
-        </a>
+        <div className="flex flex-col gap-2">
+          {docs.map((doc, idx) => (
+            <a
+              key={doc.id || idx}
+              href={`data:${doc.mimeType || "application/octet-stream"};base64,${doc.base64}`}
+              download={doc.name || `PO-${po.poNumber}`}
+              className="inline-flex items-center justify-center gap-2 min-h-[44px] px-4 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-semibold text-sm transition-colors w-full sm:w-auto"
+            >
+              <Download className="w-4 h-4 shrink-0" />
+              <span className="truncate">{docs.length > 1 ? (doc.name || `PO Document ${idx + 1}`) : "Download PO Document"}</span>
+            </a>
+          ))}
+        </div>
       ) : (
         <p className="text-xs text-slate-400">PO document not attached. Contact your Amber buyer for a copy.</p>
       )}
@@ -1032,7 +1069,7 @@ function RfqSupplierView({
   request: CapexRequest
   vendor: Vendor | null
 }) {
-  const { respondToRfqQuote, proposeRfqQuote, submitProformaInvoice, respondToDocApproval, invites } = useCapex()
+  const { respondToRfqQuote, proposeRfqQuote, submitProformaInvoice, resubmitProformaInvoice, submitTrial, respondToDocApproval, invites } = useCapex()
   // Split-award: this invite is a self-contained fulfillment track. Scope the line items to the
   // ones this vendor was awarded, and drive the total / PO / payments from the invite's own fields.
   const isAward = !!invite.awarded
@@ -1071,7 +1108,9 @@ function RfqSupplierView({
     freight: cq?.freight != null ? String(cq.freight) : "",
     packing: cq?.packing != null ? String(cq.packing) : "",
     service: cq?.service != null ? String(cq.service) : "",
-    deliveryWeeks: cq?.deliveryWeeks != null ? String(cq.deliveryWeeks) : "",
+    deliveryDays: cq?.deliveryDays != null
+      ? String(cq.deliveryDays)
+      : cq?.deliveryWeeks != null ? String(cq.deliveryWeeks) : "",
     warranty: cq?.warranty != null ? String(cq.warranty) : "",
     currency: cq?.currency ?? "INR",
   })
@@ -1125,10 +1164,17 @@ function RfqSupplierView({
       price: cSubtotal,
       ...(hasLineItems ? { linePrices: cNumericLinePrices } : {}),
       freight: num(cForm.freight), packing: num(cForm.packing), service: num(cForm.service),
-      deliveryWeeks: num(cForm.deliveryWeeks), warranty: num(cForm.warranty),
+      deliveryDays: num(cForm.deliveryDays), warranty: num(cForm.warranty),
       currency: cForm.currency,
     }
-    proposeRfqQuote(invite.id, quote, "supplier", vendorName)
+    const hsnFromItems = hasLineItems
+      ? Object.fromEntries(lineItems.filter(it => it.hsnCode).map(it => [it.id, it.hsnCode!]))
+      : undefined
+    const ok = proposeRfqQuote(invite.id, quote, "supplier", vendorName, undefined, hsnFromItems)
+    if (!ok) {
+      toast.error("Could not send counter — HSN is missing for one or more line items")
+      return
+    }
     setCounterOpen(false)
     toast.success("Counter-quotation sent to Amber")
   }
@@ -1160,6 +1206,21 @@ function RfqSupplierView({
       note: piNote || undefined,
     })
     toast.success("Proforma Invoice submitted")
+  }
+
+  // Re-upload a revised PI against an issued PO (allowed only when Amber flags piReuploadAllowed).
+  function resubmitPi() {
+    if (!piBase64) { toast.error("Attach the revised Proforma Invoice file"); return }
+    resubmitProformaInvoice(invite.id, {
+      id: `pi-${Date.now()}`,
+      name: piName,
+      base64: piBase64,
+      mimeType: piMime,
+      uploadedAt: new Date().toISOString(),
+      amount: piAmount ? Number(piAmount) : undefined,
+      note: piNote || undefined,
+    })
+    toast.success("Revised Proforma Invoice submitted")
   }
 
   // One-time vendors agree to INCO Terms before the quote flow renders.
@@ -1230,6 +1291,17 @@ function RfqSupplierView({
     // Award tracks carry their own PO + milestones + TAT anchors on the invite.
     const milestones = (isAward ? invite.paymentMilestones : request.paymentMilestones) ?? []
     const po = isAward ? invite.purchaseOrder : request.purchaseOrder
+    // PI re-upload against the issued PO — enabled per-award (invite) or single-vendor (request).
+    const piReupload = isAward ? invite.piReuploadAllowed : request.piReuploadAllowed
+    // Trial (QA) gate — unlocks after the advance (first) milestone is paid, until it's approved.
+    const trialRequired = isAward ? invite.trialRequired : request.trialRequired
+    const trialStatus = (isAward ? invite.trialStatus : request.trialStatus) ?? "not_required"
+    const trialSubmission = isAward ? invite.trialSubmission : request.trialSubmission
+    const trialThread = isAward ? invite.trialThread : request.trialThread
+    // The advance is the first NON-final milestone; if there is none (e.g. a 100% single split), the
+    // trial can be uploaded once the PO is issued (avoids a trial-vs-final-payment deadlock).
+    const advanceMs = milestones.find(m => !m.isFinal)
+    const advancePaid = advanceMs ? advanceMs.status === "paid" : !!po?.issuedAt
     body = (
       <div className="space-y-4 max-w-2xl mx-auto">
         <div className={`${card} text-center`}>
@@ -1245,6 +1317,40 @@ function RfqSupplierView({
           vendorAmount={quoteTotal || po?.amount || request.budget || 0}
         />
         <PurchaseOrderCard po={po} />
+        {piReupload && (
+          <div className={card}>
+            <div className="flex items-center gap-2 mb-3">
+              <FileText className="w-5 h-5 text-[#2563EB]" />
+              <h3 className="font-bold text-slate-900">Re-upload Proforma Invoice against the PO</h3>
+            </div>
+            <p className="text-sm text-slate-600 mb-4">
+              Amber has requested a revised Proforma Invoice against the issued PO. Upload the updated document below.
+            </p>
+            <div className="space-y-4">
+              <div>
+                <label htmlFor="pi-reupload-amount" className={LABEL}>PI Amount (₹)</label>
+                <input id="pi-reupload-amount" type="number" inputMode="decimal" value={piAmount} onChange={e => setPiAmount(e.target.value)} className={`${INPUT_RIGHT} min-h-[44px]`} />
+              </div>
+              <div>
+                <label className={LABEL_REQ}>Proforma Invoice File</label>
+                <label className="flex items-center gap-2 cursor-pointer rounded-lg border border-dashed border-slate-300 px-3 py-3 text-sm text-slate-600 hover:bg-slate-50 min-h-[44px]">
+                  <Paperclip className="w-4 h-4" />
+                  {piName || "Attach PDF / image (max 500 KB)"}
+                  <input type="file" accept=".pdf,.png,.jpg,.jpeg,.xlsx,.doc,.docx" onChange={handlePiFile} className="hidden" />
+                </label>
+                {fileError && <p className="text-xs text-red-600 mt-1">{fileError}</p>}
+              </div>
+              <div>
+                <label htmlFor="pi-reupload-note" className={LABEL}>Note (optional)</label>
+                <input id="pi-reupload-note" value={piNote} onChange={e => setPiNote(e.target.value)} className={`${INPUT} min-h-[44px]`} placeholder="Any remarks for the buyer…" />
+              </div>
+              <button onClick={resubmitPi}
+                className="w-full flex items-center justify-center gap-2 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-semibold py-2.5 min-h-[44px] transition-colors">
+                <Send className="w-4 h-4" /> Submit Revised Proforma Invoice
+              </button>
+            </div>
+          </div>
+        )}
         {milestones.length > 0 && (
           <div className={card}>
             <h3 className="font-bold text-slate-900 mb-3">Payment Status</h3>
@@ -1264,6 +1370,21 @@ function RfqSupplierView({
               ))}
             </div>
           </div>
+        )}
+        {trialRequired && trialStatus === "approved" && (
+          <p className="flex items-center justify-center gap-1.5 text-xs font-semibold text-slate-700">
+            <CheckCircle2 className="w-3.5 h-3.5" /> Trial approved by Amber
+          </p>
+        )}
+        {trialRequired && advancePaid && trialStatus !== "approved" && (
+          <TrialCard
+            mode="upload"
+            status={trialStatus}
+            submission={trialSubmission}
+            thread={trialThread}
+            onUpload={(s) => submitTrial(invite.id, s)}
+            className="mt-3"
+          />
         )}
       </div>
     )
@@ -1360,7 +1481,7 @@ function RfqSupplierView({
                 <CounterField label="Freight (₹)" value={cForm.freight} onChange={v => setCForm(f => ({ ...f, freight: v }))} />
                 <CounterField label="Packing (₹)" value={cForm.packing} onChange={v => setCForm(f => ({ ...f, packing: v }))} />
                 <CounterField label="Service (₹)" value={cForm.service} onChange={v => setCForm(f => ({ ...f, service: v }))} />
-                <CounterField label="Delivery (wks)" value={cForm.deliveryWeeks} onChange={v => setCForm(f => ({ ...f, deliveryWeeks: v }))} />
+                <CounterField label="Delivery (days)" value={cForm.deliveryDays} onChange={v => setCForm(f => ({ ...f, deliveryDays: v }))} />
                 <CounterField label="Warranty (yrs)" value={cForm.warranty} onChange={v => setCForm(f => ({ ...f, warranty: v }))} />
                 <div>
                   <label htmlFor="counter-currency" className={LABEL}>Currency</label>
@@ -1603,7 +1724,7 @@ export default function SupplierPortalPage() {
   const [ready, setReady] = useState(false)
   const [itemPrices, setItemPrices] = useState<Record<string, string>>({})
   const [price, setPrice] = useState("")
-  const [deliveryWeeks, setDeliveryWeeks] = useState("")
+  const [deliveryDays, setDeliveryDays] = useState("")
   const [freight, setFreight] = useState("")
   const [packing, setPacking] = useState("")
   const [service, setService] = useState("")
@@ -1636,7 +1757,7 @@ export default function SupplierPortalPage() {
     } else {
       setPrice(String(q.price))
     }
-    setDeliveryWeeks(String(Math.round(q.deliveryDays / 7)))
+    setDeliveryDays(String(q.deliveryDays))
     setFreight(q.freight != null ? String(q.freight) : "")
     setPacking(q.packing != null ? String(q.packing) : "")
     setService(q.service != null ? String(q.service) : "")
@@ -1706,7 +1827,7 @@ export default function SupplierPortalPage() {
   const resetForm = useCallback(() => {
     setItemPrices({})
     setPrice("")
-    setDeliveryWeeks("")
+    setDeliveryDays("")
     setFreight("")
     setPacking("")
     setService("")
@@ -2070,8 +2191,8 @@ export default function SupplierPortalPage() {
   }
 
   const formValid = hasLineItems
-    ? lineItems.every(item => !!itemPrices[item.id]?.trim()) && !!deliveryWeeks && !!validUntil
-    : !!price && !!deliveryWeeks && !!validUntil
+    ? lineItems.every(item => !!itemPrices[item.id]?.trim()) && !!deliveryDays && !!validUntil
+    : !!price && !!deliveryDays && !!validUntil
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -2096,7 +2217,7 @@ export default function SupplierPortalPage() {
       id: `q-${Date.now()}`,
       price: totalPrice,
       itemPrices: resolvedItemPrices,
-      deliveryDays: Math.round(Number(deliveryWeeks) * 7),
+      deliveryDays: Number(deliveryDays),
       freight: freight ? Number(freight) : undefined,
       packing: packing ? Number(packing) : undefined,
       service: service ? Number(service) : undefined,
@@ -2115,7 +2236,7 @@ export default function SupplierPortalPage() {
       id: `nm-${Date.now()}`,
       by: "supplier",
       senderName: vendor?.vendorName ?? "Supplier",
-      message: `Quote submitted: ${priceDisplay}, ${deliveryWeeks} week${Number(deliveryWeeks) !== 1 ? "s" : ""} delivery.${note ? " Note: " + note : ""}`,
+      message: `Quote submitted: ${priceDisplay}, ${deliveryDays} day${Number(deliveryDays) !== 1 ? "s" : ""} delivery.${note ? " Note: " + note : ""}`,
       at: new Date().toISOString(),
     }
     addNegotiationMessage(invite.id, msg)
@@ -2135,8 +2256,8 @@ export default function SupplierPortalPage() {
           <div className="px-6 py-6 space-y-4">
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {[
-                { label: "Grand Total", value: fmt(Math.round(grandTotal)) },
-                { label: "Delivery", value: `${deliveryWeeks} week${Number(deliveryWeeks) !== 1 ? "s" : ""}` },
+                { label: "Grand Total", value: fmtCurrency(Math.round(grandTotal), currency) },
+                { label: "Delivery", value: `${deliveryDays} day${Number(deliveryDays) !== 1 ? "s" : ""}` },
                 { label: "Valid Until", value: new Date(validUntil).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) },
                 { label: "Currency", value: currency },
               ].map(({ label, value }) => (
@@ -2160,7 +2281,7 @@ export default function SupplierPortalPage() {
                           <p className="text-xs text-slate-700 mt-0.5 font-medium">Machine capacity: {item.machineCapacity}</p>
                         )}
                       </div>
-                      <p className="text-sm font-bold text-slate-800 shrink-0 tabular-nums">{fmt(Number(itemPrices[item.id] ?? 0))}</p>
+                      <p className="text-sm font-bold text-slate-800 shrink-0 tabular-nums">{fmtCurrency(Number(itemPrices[item.id] ?? 0), currency)}</p>
                     </div>
                   ))}
                 </div>
@@ -2349,7 +2470,7 @@ export default function SupplierPortalPage() {
                     <span className="text-xs text-slate-400">{formatTs(q.submittedAt)}</span>
                   </div>
                   <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
-                    <span>{Math.round(q.deliveryDays / 7)} wk delivery</span>
+                    <span>{q.deliveryDays} day{q.deliveryDays !== 1 ? "s" : ""} delivery</span>
                     <span>Valid {new Date(q.validUntil).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</span>
                     {q.currency && q.currency !== "INR" && <span>{q.currency}</span>}
                     {q.attachmentName && (
@@ -2451,18 +2572,18 @@ export default function SupplierPortalPage() {
                 <h3 className="text-sm font-bold text-slate-800">Grand Total Summary</h3>
                 <div className="flex justify-between text-sm text-slate-600">
                   <span>Subtotal Base</span>
-                  <span className="font-semibold tabular-nums">{itemSubtotal > 0 ? fmt(Math.round(itemSubtotal)) : "—"}</span>
+                  <span className="font-semibold tabular-nums">{itemSubtotal > 0 ? fmtCurrency(Math.round(itemSubtotal), currency) : "—"}</span>
                 </div>
                 <div className="flex justify-between text-sm text-slate-600">
                   <span>Total Additional</span>
                   <span className="font-semibold tabular-nums text-slate-600">
-                    {extrasTotal > 0 ? `+${fmt(Math.round(extrasTotal))}` : "—"}
+                    {extrasTotal > 0 ? `+${fmtCurrency(Math.round(extrasTotal), currency)}` : "—"}
                   </span>
                 </div>
                 <div className="border-t border-slate-200 pt-3 flex justify-between items-end">
                   <span className="text-sm font-bold text-slate-700">Grand Total</span>
                   <span className="text-2xl font-black text-[#2563EB] tabular-nums">
-                    {grandTotal > 0 ? fmt(Math.round(grandTotal)) : "—"}
+                    {grandTotal > 0 ? fmtCurrency(Math.round(grandTotal), currency) : "—"}
                   </span>
                 </div>
               </div>
@@ -2475,9 +2596,9 @@ export default function SupplierPortalPage() {
               <h3 className="text-sm font-bold text-slate-800 mb-3">Delivery & Quote Validity</h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className={LABEL_REQ}>Delivery Lead Time (weeks)</label>
-                  <input type="number" value={deliveryWeeks} onChange={e => setDeliveryWeeks(e.target.value)}
-                    placeholder="e.g. 12" required min="1" className={`${INPUT} min-h-[44px]`} />
+                  <label className={LABEL_REQ}>Delivery Lead Time (days)</label>
+                  <input type="number" value={deliveryDays} onChange={e => setDeliveryDays(e.target.value)}
+                    placeholder="e.g. 90" required min="1" className={`${INPUT} min-h-[44px]`} />
                 </div>
                 <div>
                   <label className={LABEL}>Warranty <span className="font-normal text-slate-400">(years)</span></label>

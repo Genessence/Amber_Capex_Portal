@@ -1,14 +1,15 @@
 "use client"
 
-import { useState, useEffect, Suspense } from "react"
+import { useState, useEffect, useMemo, Fragment, Suspense } from "react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
+import { ClipboardList, ArrowRight } from "lucide-react"
 import { useCapex } from "@/lib/capexContext"
-import { ROLE_NAMES, STATUS_LABELS, PLANTS, getPlantForRole } from "@/lib/constants"
+import { ROLE_NAMES, STATUS_LABELS, PLANTS } from "@/lib/constants"
 import { StatusBadge } from "@/components/StatusBadge"
 import { CapexRequest, CapexStatus } from "@/lib/types"
-
-const SOURCING_ROLES = ["sourcing_member", "sourcing_head"]
+import { PROJECT_TYPE_LABELS } from "@/lib/greenFieldConstants"
+import { BUDGET_PROPOSAL_STATUS_COLORS, BUDGET_PROPOSAL_STATUS_LABELS, proposalTotalCr } from "@/lib/budgetProposalUtils"
 
 function formatBudget(n?: number) {
   if (n == null) return "—"
@@ -59,13 +60,9 @@ function RequestsTable() {
   useEffect(() => {
     const role = localStorage.getItem("capex_role") ?? "buyer_jhajjar_p1"
     setCurrentRole(role)
-    if (role.startsWith("plant_head") && !searchParams.get("filter")) {
-      setStatusFilter("pending_head_approval")
-    }
     const onRoleChange = (e: CustomEvent) => {
       setCurrentRole(e.detail)
-      if (e.detail.startsWith("plant_head")) setStatusFilter(s => s || "pending_head_approval")
-      else setStatusFilter("")
+      setStatusFilter("")
     }
     window.addEventListener("capex_rolechange", onRoleChange as EventListener)
     return () => window.removeEventListener("capex_rolechange", onRoleChange as EventListener)
@@ -78,16 +75,14 @@ function RequestsTable() {
 
   const currentUser = ROLE_NAMES[currentRole] ?? ""
 
+  // The budget-upload user (maintenance) sees BUDGET approval requests here, not item requests.
+  if (currentRole === "maintenance") return <BudgetApprovalRequests />
+
   const isBuyerRole      = currentRole.startsWith("buyer")
-  const isPlantHeadRole  = currentRole.startsWith("plant_head")
 
   const roleFiltered = (() => {
     if (isBuyerRole) return requests.filter(r => r.createdBy === currentUser)
     if (currentRole === "sourcing_member") return requests.filter(r => r.assignedTo === currentRole)
-    if (isPlantHeadRole) {
-      const plant = getPlantForRole(currentRole)
-      return plant ? requests.filter(r => r.plant === plant) : requests
-    }
     return requests
   })()
 
@@ -95,12 +90,11 @@ function RequestsTable() {
     ? roleFiltered.filter(r => r.status === statusFilter as CapexStatus)
     : roleFiltered
 
-  const showAssignedTo = ["sourcing_head", "super_admin"].includes(currentRole) || isPlantHeadRole
+  const showAssignedTo = ["super_admin"].includes(currentRole)
 
   const summaryLabel =
     isBuyerRole          ? "Your submitted requests" :
     currentRole === "sourcing_member" ? "Requests assigned to you" :
-    isPlantHeadRole      ? "Plant requests" :
     "All requests"
 
   return (
@@ -242,6 +236,86 @@ function RequestsTable() {
           </table>
         </div>
       )}
+    </div>
+  )
+}
+
+/** The budget-upload user's (maintenance) Requests screen — lists BUDGET approval requests, not item requests. */
+function BudgetApprovalRequests() {
+  const { budgetProposals } = useCapex()
+  const proposals = useMemo(
+    () => [...budgetProposals].sort((a, b) => (b.submittedAt ?? b.createdAt).localeCompare(a.submittedAt ?? a.createdAt)),
+    [budgetProposals],
+  )
+  const editable = (s: string) => s === "draft" || s === "needs_correction" || s === "rejected"
+
+  return (
+    <div className="p-5 h-full flex flex-col">
+      <div className="mb-4 flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="text-xl font-bold tracking-tight text-slate-900 flex items-center gap-2">
+            <ClipboardList className="w-5 h-5 text-slate-600" /> Budget Approval Requests
+          </h1>
+          <p className="text-sm text-slate-500 mt-0.5">Your next-FY budget proposals and where each one is in the approval flow.</p>
+        </div>
+        <Link href="/capex/budget-proposals" className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-slate-600 hover:bg-slate-700 text-white rounded-lg">
+          Budget Planning <ArrowRight className="w-3.5 h-3.5" />
+        </Link>
+      </div>
+
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        {proposals.length === 0 ? (
+          <div className="flex flex-col items-center justify-center gap-2 text-center py-20">
+            <ClipboardList className="w-10 h-10 text-slate-200" />
+            <p className="text-sm text-slate-500">No budget proposals yet.</p>
+            <Link href="/capex/budget-proposals" className="text-xs font-semibold text-primary hover:underline">Create one in Budget Planning →</Link>
+          </div>
+        ) : (
+          <div className="rounded-xl border border-slate-200 overflow-hidden bg-white">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 text-slate-500 text-[12px] uppercase tracking-wide">
+                <tr>
+                  <th className="text-left px-4 py-2.5 font-semibold">Target FY</th>
+                  <th className="text-left px-4 py-2.5 font-semibold">Plant</th>
+                  <th className="text-left px-4 py-2.5 font-semibold">Category</th>
+                  <th className="text-right px-4 py-2.5 font-semibold">Total</th>
+                  <th className="text-left px-4 py-2.5 font-semibold">Status</th>
+                  <th className="px-4 py-2.5"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {proposals.map(p => (
+                  <Fragment key={p.id}>
+                    <tr className="border-t border-slate-100">
+                      <td className="px-4 py-2.5 font-semibold text-slate-900">{p.targetFy || "—"}</td>
+                      <td className="px-4 py-2.5 text-slate-600">{plantLabel(p.plant)}</td>
+                      <td className="px-4 py-2.5 text-slate-600">{PROJECT_TYPE_LABELS[p.projectType]}</td>
+                      <td className="px-4 py-2.5 text-right font-mono font-semibold">₹{proposalTotalCr(p).toFixed(2)} Cr</td>
+                      <td className="px-4 py-2.5">
+                        <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${BUDGET_PROPOSAL_STATUS_COLORS[p.status]}`}>
+                          {BUDGET_PROPOSAL_STATUS_LABELS[p.status]}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2.5 text-right">
+                        <Link href="/capex/budget-proposals" className={`text-xs font-semibold hover:underline ${editable(p.status) ? "text-primary" : "text-slate-400"}`}>
+                          {editable(p.status) ? "Edit & Resubmit" : "View"}
+                        </Link>
+                      </td>
+                    </tr>
+                    {p.status === "needs_correction" && p.correctionNote && (
+                      <tr className="bg-orange-50/40">
+                        <td colSpan={6} className="px-4 py-2 text-xs text-orange-800">
+                          <span className="font-semibold">Correction requested:</span> {p.correctionNote}
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

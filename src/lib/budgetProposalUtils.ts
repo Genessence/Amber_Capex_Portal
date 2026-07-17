@@ -15,14 +15,20 @@ import type { ParsedMasterRow } from './bulkMasterImport';
 
 export const BUDGET_PROPOSAL_STATUS_LABELS: Record<BudgetProposalStatus, string> = {
   draft: 'Draft',
-  pending_admin: 'Pending Admin Approval',
+  pending_plant_head: 'With Plant Head',
+  pending_admin: 'With Admin',
+  needs_correction: 'Sent Back for Correction',
+  pending_accounts: 'With Global Accounts',
   approved: 'Approved & Published',
   rejected: 'Rejected',
 };
 
 export const BUDGET_PROPOSAL_STATUS_COLORS: Record<BudgetProposalStatus, string> = {
   draft: 'bg-slate-100 text-slate-600 border border-slate-200',
-  pending_admin: 'bg-amber-50 text-amber-700 border border-amber-200',
+  pending_plant_head: 'bg-amber-50 text-amber-700 border border-amber-200',
+  pending_admin: 'bg-blue-50 text-blue-700 border border-blue-200',
+  needs_correction: 'bg-orange-50 text-orange-700 border border-orange-200',
+  pending_accounts: 'bg-cyan-50 text-cyan-700 border border-cyan-200',
   approved: 'bg-emerald-50 text-emerald-700 border border-emerald-200',
   rejected: 'bg-red-50 text-red-700 border border-red-200',
 };

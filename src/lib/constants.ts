@@ -23,10 +23,6 @@ export const ROLE_NAMES: Record<string, string> = {
   buyer_jhajjar_p1:       "Arjun Mehta",
   buyer_jhajjar_p2:       "Ravi Kumar",
   sourcing_member:        "Neha Kapoor",
-  plant_head:             "Karan Mehta",
-  plant_head_jhajjar_p1:  "Karan Mehta",
-  plant_head_jhajjar_p2:  "Ajay Gupta",
-  sourcing_head:          "Rajiv Sinha",
   maintenance:            "Sunil Verma",
   plant_accounts:         "Meera Iyer",
   accounts:               "Priya Nair",
@@ -36,8 +32,6 @@ export const ROLE_NAMES: Record<string, string> = {
 export const ROLE_PLANT: Record<string, string> = {
   buyer_jhajjar_p1:      "jhajjar_p1",
   buyer_jhajjar_p2:      "jhajjar_p2",
-  plant_head_jhajjar_p1: "jhajjar_p1",
-  plant_head_jhajjar_p2: "jhajjar_p2",
 }
 
 export const SOURCING_ENGINEERS = [
@@ -122,7 +116,6 @@ export const INVITE_STATUS_ICONS: Record<string, LucideIcon> = {
 export function getPlantForRole(role: string): string | null {
   if (role in ROLE_PLANT) return ROLE_PLANT[role]
   if (role.startsWith('buyer_')) return role.slice(6)
-  if (role.startsWith('plant_head_')) return role.slice(11)
   return null
 }
 
@@ -132,6 +125,20 @@ export function getPlantForRole(role: string): string | null {
  * placeholder address; the recipient is editable in the modal before sending.
  */
 export const FA_CODE_RECIPIENT_EMAIL = "asset.register@amber-enterprises.in"
+
+/**
+ * Recipient for the PO handoff email — "Sandeep" on the Global Accounts team. After Plant Accounts
+ * submit FA codes, this notifies Global Accounts via a **public** `/po/[token]` link (no login) to
+ * raise the PO. Simulated send (preview + toast).
+ */
+export const GLOBAL_ACCOUNTS_EMAIL = "sandeep.accounts@amber-enterprises.in"
+
+/**
+ * Default recipient for plant-head approval emails (budget + request). The plant head has no portal
+ * login — the emailed public link is the real payload; the address is a placeholder, editable in
+ * the preview modal before "sending".
+ */
+export const PLANT_HEAD_EMAIL = "plant.head@amber-enterprises.in"
 
 export const PLANTS = [
   { value: "jhajjar_p1", label: "Jhajjar Plant 1", state: "Haryana" },

@@ -248,8 +248,8 @@ export default function CapexMasterPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roleKey])
 
-  const canAddPlant = ['super_admin', 'sourcing_head'].includes(currentRole)
-  const canManageGreenField = ['sourcing_member', 'sourcing_head', 'super_admin'].includes(currentRole)
+  const canAddPlant = ['super_admin', 'sourcing_member'].includes(currentRole)
+  const canManageGreenField = ['sourcing_member', 'super_admin'].includes(currentRole)
   // Brown Field live-FY budgets are read-only: changes flow through next-FY proposals
   // (Budget Planning) or Adhoc reallocation — never direct master edits.
   const brownFieldLocked = fieldTab === 'brown_field'

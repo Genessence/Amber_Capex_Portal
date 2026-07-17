@@ -13,7 +13,6 @@ const SOURCING_ROLES = [
   "sourcing_member_2",
   "sourcing_member_3",
   "sourcing_member_4",
-  "sourcing_head",
   "super_admin",
 ]
 

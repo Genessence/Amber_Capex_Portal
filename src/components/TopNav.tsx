@@ -13,17 +13,9 @@ const ROLE_GROUPS = [
     ],
   },
   {
-    label: "Plant Management",
-    roles: [
-      { value: "plant_head_jhajjar_p1", name: "Karan Mehta", area: "Jhajjar Plant 1" },
-      { value: "plant_head_jhajjar_p2", name: "Ajay Gupta",  area: "Jhajjar Plant 2" },
-    ],
-  },
-  {
     label: "Sourcing",
     roles: [
       { value: "sourcing_member", name: "Neha Kapoor",  area: "Machinery" },
-      { value: "sourcing_head",   name: "Rajiv Sinha",  area: "All Requests" },
     ],
   },
   {
@@ -47,9 +39,7 @@ function getInitials(name: string) {
 
 function getRoleBg(value: string): string {
   if (value.startsWith("buyer"))        return "bg-blue-600"
-  if (value.startsWith("plant_head"))   return "bg-[#2563EB]"
   if (value === "sourcing_member") return "bg-slate-600"
-  if (value === "sourcing_head")   return "bg-slate-800"
   if (value === "maintenance")     return "bg-slate-600"
   if (value === "accounts")        return "bg-neutral-800"
   if (value === "plant_accounts")  return "bg-neutral-600"
@@ -96,13 +86,11 @@ export function TopNav() {
   const { chatMessages, sendChatMessage, customPlants } = useCapex()
 
   const allRoleGroups = useMemo(() => {
-    const dynamicBuyers     = customPlants.map(p => ({ value: `buyer_${p.value}`,      name: p.assignedUser ?? "Buyer",      area: p.label }))
-    const dynamicPlantHeads = customPlants.map(p => ({ value: `plant_head_${p.value}`, name: p.assignedUser ?? "Plant Head", area: p.label }))
-    return [
-      { label: "Buyers",            roles: [...ROLE_GROUPS[0].roles, ...dynamicBuyers] },
-      { label: "Plant Management",  roles: [...ROLE_GROUPS[1].roles, ...dynamicPlantHeads] },
-      ...ROLE_GROUPS.slice(2),
-    ]
+    // Custom plants add per-plant Buyer roles (plant heads act via email links, not portal roles).
+    const dynamicBuyers = customPlants.map(p => ({ value: `buyer_${p.value}`, name: p.assignedUser ?? "Buyer", area: p.label }))
+    return ROLE_GROUPS.map(g =>
+      g.label === "Buyers" ? { ...g, roles: [...g.roles, ...dynamicBuyers] } : g,
+    )
   }, [customPlants])
 
   const ALL_ROLES = useMemo(() => allRoleGroups.flatMap(g => g.roles), [allRoleGroups])

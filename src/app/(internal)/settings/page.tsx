@@ -265,8 +265,6 @@ export default function SettingsPage() {
                 <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">
                   {role === 'super_admin'
                     ? 'Super Admin'
-                    : role === 'sourcing_head'
-                    ? 'Sourcing Head'
                     : role === 'buyer'
                     ? 'Buyer'
                     : 'Sourcing Member'}

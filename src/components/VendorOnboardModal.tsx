@@ -14,6 +14,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox"
 import { useCapex } from "@/lib/capexContext"
 import { generateToken } from "@/lib/tokenUtils"
+import { buildBlankIncoTermsDoc } from "@/lib/incoTermsUtils"
 import type { PaymentSplit, Vendor, VendorInvite } from "@/lib/types"
 
 const CATEGORIES = ["Machinery", "Infrastructure", "IT", "Tooling"]
@@ -31,7 +32,7 @@ function genId() {
 }
 
 export function VendorOnboardModal({ open, onClose, requestId, defaultTab = "existing" }: Props) {
-  const { vendors, invites, addVendor, addInvite } = useCapex()
+  const { vendors, invites, addVendor, addInvite, inviteVendors } = useCapex()
 
   const [search, setSearch] = useState("")
 
@@ -48,6 +49,7 @@ export function VendorOnboardModal({ open, onClose, requestId, defaultTab = "exi
   const [accountNumber,setAccountNumber]= useState("")
   const [ifsc,         setIfsc]         = useState("")
   const [oneTime,      setOneTime]      = useState(false)
+  const [foreign,      setForeign]      = useState(false)
   const [paymentTermsText, setPaymentTermsText] = useState("")
   const [advancePct,   setAdvancePct]   = useState("30")
   const [dispatchPct,  setDispatchPct]  = useState("60")
@@ -63,19 +65,10 @@ export function VendorOnboardModal({ open, onClose, requestId, defaultTab = "exi
      v.category.toLowerCase().includes(search.toLowerCase()))
   )
 
+  // Route existing-vendor invites through the context helper so the RFQ doc-package and (for foreign
+  // vendors) the Incoterms gate are seeded consistently.
   const inviteVendor = (vendorId: string) => {
-    const invite: VendorInvite = {
-      id: `inv-${Date.now()}`,
-      requestId,
-      vendorId,
-      token: generateToken(vendorId, requestId),
-      status: "invited",
-      auctionApprovalStatus: "not_sent",
-      quotes: [],
-      negotiationThread: [],
-      invitedAt: new Date().toISOString(),
-    }
-    addInvite(invite)
+    inviteVendors(requestId, [vendorId])
     onClose()
   }
 
@@ -98,6 +91,7 @@ export function VendorOnboardModal({ open, onClose, requestId, defaultTab = "exi
       ifsc,
       onboardedAt: new Date().toISOString(),
       oneTime,
+      foreign: foreign || undefined,
       paymentTermsText: paymentTermsText.trim() || undefined,
       paymentSplits: ([
         { id: "adv", label: "Advance", percent: Number(advancePct) || 0, trigger: "On PO" },
@@ -107,6 +101,17 @@ export function VendorOnboardModal({ open, onClose, requestId, defaultTab = "exi
     }
     addVendor(vendor)
     if (requestId) {
+      const nowIso = new Date().toISOString()
+      // Foreign vendors must accept the Incoterms agreement before quoting — seed it up front.
+      const incoBits = foreign
+        ? {
+            incoTermsStatus: "awaiting_vendor" as const,
+            incoTermsDoc: { ...buildBlankIncoTermsDoc(), sentAt: nowIso },
+            incoTermsThread: [
+              { id: `inco-${Date.now()}`, by: "sourcing" as const, senderName: "Sourcing", action: "sent" as const, at: nowIso },
+            ],
+          }
+        : {}
       const invite: VendorInvite = {
         id: `inv-${Date.now()}`,
         requestId,
@@ -116,7 +121,8 @@ export function VendorOnboardModal({ open, onClose, requestId, defaultTab = "exi
         auctionApprovalStatus: "not_sent",
         quotes: [],
         negotiationThread: [],
-        invitedAt: new Date().toISOString(),
+        invitedAt: nowIso,
+        ...incoBits,
       }
       addInvite(invite)
     }
@@ -217,6 +223,14 @@ export function VendorOnboardModal({ open, onClose, requestId, defaultTab = "exi
                 <label htmlFor="oneTime" className="text-xs text-slate-900 leading-snug cursor-pointer">
                   <span className="font-semibold">One-time / not-yet-onboarded vendor</span> — payment terms are not fetched
                   from the onboarding portal, so they will be sent with the approval documents for the vendor to accept.
+                </label>
+              </div>
+
+              <div className="col-span-2 flex items-start gap-2.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+                <Checkbox id="foreign" checked={foreign} onCheckedChange={v => setForeign(!!v)} className="mt-0.5" />
+                <label htmlFor="foreign" className="text-xs text-slate-900 leading-snug cursor-pointer">
+                  <span className="font-semibold">Foreign / international vendor</span> — the Incoterms (2020) agreement
+                  will be sent for the vendor to accept before they can submit a quote or bid.
                 </label>
               </div>
 

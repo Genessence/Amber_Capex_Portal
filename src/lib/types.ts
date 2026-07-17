@@ -40,8 +40,20 @@ export type RfqPriceStatus =
 /** Vendor response to the document-approval package (PBG + DLC + one-time terms). */
 export type DocApprovalStatus = 'not_sent' | 'pending' | 'approved' | 'rejected';
 
-/** Lifecycle of a next-FY Brown Field budget proposal. */
-export type BudgetProposalStatus = 'draft' | 'pending_admin' | 'approved' | 'rejected';
+/**
+ * Lifecycle of a next-FY Brown Field budget proposal (multi-stage approval).
+ * author submits → plant head (public email link) → super admin (approve / reject /
+ * send-back-for-correction) → global accounts (approve / reject) → published live to master.
+ * A correction (`needs_correction`) restarts the flow from the plant head on resubmit.
+ */
+export type BudgetProposalStatus =
+  | 'draft'
+  | 'pending_plant_head'
+  | 'pending_admin'
+  | 'needs_correction'
+  | 'pending_accounts'
+  | 'approved'
+  | 'rejected';
 
 /** Lifecycle of an Adhoc head-to-head budget transfer request. */
 export type AdhocBudgetStatus = 'pending_admin' | 'approved' | 'rejected';
@@ -150,6 +162,12 @@ export interface AuctionConfig {
   durationDays: number;
   endsAt: string;
   threshold?: number;
+  /**
+   * Opening "price to beat" seeded at auction start = current best price × 0.95 (rounded).
+   * When an auction starts, ranks reset (the seeded RFQ bids move to VendorInvite.openingQuote and
+   * out of quotes[]), so this is the displayed best price until a vendor submits a fresh bid.
+   */
+  openingBestPrice?: number;
 }
 
 export interface DeliveryLocation {
@@ -199,7 +217,7 @@ export interface TechSpecs {
 
 export interface RequestComment {
   id: string;
-  by: 'buyer' | 'sourcing' | 'sourcing_head';
+  by: 'buyer' | 'sourcing';
   senderName: string;
   message: string;
   at: string;
@@ -305,6 +323,23 @@ export interface CapexRequest {
   piSubmittedAt?: string;
   /** When the final payment was made — stops the TAT clock. */
   tatStoppedAt?: string;
+  // ── Plant-head approval via public email link ──
+  /** Public plant-head approval link token (minted when created at pending_head_approval). */
+  approvalToken?: string;
+  /** When the plant head approved via the public email link. */
+  plantHeadDecidedAt?: string;
+  // ── Global Accounts (Sandeep) PO handoff via public email link ──
+  /** Public PO-issue link token (minted when the vendor submits the PI; used at /po/[token]). */
+  poToken?: string;
+  // ── Trials (optional QA loop gated before final payment) ──
+  trialRequired?: boolean;
+  trialStatus?: TrialStatus;
+  trialSubmission?: TrialSubmission;
+  trialThread?: TrialMessage[];
+  /** When the advance milestone was ticked — anchors delivery-lead-time → final-payment date. */
+  advancePaidAt?: string;
+  /** Set when accounts re-open PI upload after PO issue (vendor re-uploads PI). */
+  piReuploadAllowed?: boolean;
 }
 
 export interface PurchaseOrder {
@@ -321,6 +356,8 @@ export interface PurchaseOrder {
   poDocumentName?: string;
   poDocumentMimeType?: string;
   poDocumentUploadedAt?: string;
+  /** Multiple uploaded PO documents (Global Accounts can attach several). Base64 offloaded to IndexedDB. */
+  poDocuments?: { id: string; base64: string; name: string; mimeType: string; uploadedAt: string }[];
   /** When the PO was issued to the vendor (vendor notified + sees it on the portal). */
   issuedAt?: string;
   issuedBy?: string;
@@ -376,6 +413,19 @@ export interface BudgetProposal {
   decidedBy?: string;
   decisionNote?: string;
   publishedAt?: string;
+  // ── Multi-stage approval (plant head → super admin → global accounts) ──
+  /** Public plant-head approval link token (minted/rotated on each submit). */
+  approvalToken?: string;
+  plantHeadDecidedAt?: string;
+  plantHeadDecidedBy?: string;
+  adminDecidedAt?: string;
+  adminDecidedBy?: string;
+  accountsDecidedAt?: string;
+  accountsDecidedBy?: string;
+  /** Super-admin's send-back-for-correction remark, shown to the author on resubmit. */
+  correctionNote?: string;
+  /** How many times it was sent back for correction and resubmitted. */
+  resubmitCount?: number;
 }
 
 /** A request to move budget between two heads in the same plant + FY (admin-approved). */
@@ -425,6 +475,8 @@ export interface Vendor {
   onboardedAt: string;
   /** True for one-time / not-yet-onboarded vendors whose terms aren't fetched from the onboarding portal. */
   oneTime?: boolean;
+  /** True for a foreign / international vendor — triggers the Incoterms agreement before quoting. */
+  foreign?: boolean;
   /** Human-readable payment terms (mock: fetched from the external onboarding portal for onboarded vendors). */
   paymentTermsText?: string;
   /** Structured payment-terms split (e.g. 30/60/10) used to build payment milestones. */
@@ -516,7 +568,10 @@ export interface RfqQuote {
   freight?: number;
   packing?: number;
   service?: number;
+  /** @deprecated Delivery lead time is now captured in DAYS on `deliveryDays`. Kept for legacy reads. */
   deliveryWeeks?: number;
+  /** Delivery lead time in DAYS — days after the advance payment that the vendor delivers. */
+  deliveryDays?: number;
   warranty?: number;
   currency?: string;
   /** @deprecated HSN now lives per line item on CapexLineItem.hsnCode. Kept only as a legacy fallback for old lump-sum quotes. */
@@ -629,6 +684,37 @@ export interface IncoTermsMessage {
   at: string;
 }
 
+/**
+ * Trials (optional QA gate). Sourcing toggles `trialRequired` before awarding a vendor. After the
+ * advance payment is ticked, the vendor uploads a video / photo / report; sourcing approves or
+ * rejects (reject → vendor re-uploads, loop). The final payment is blocked until the trial is
+ * approved. `not_required` = trials off for this request/award.
+ */
+export type TrialStatus =
+  | 'not_required'
+  | 'pending_upload'
+  | 'pending_review'
+  | 'approved'
+  | 'rejected';
+
+/** A trial asset (video / photo / report) uploaded by the vendor for sourcing review. */
+export interface TrialSubmission extends LandDocument {
+  kind?: 'video' | 'photo' | 'report';
+  note?: string;
+  submittedByVendor?: boolean;
+}
+
+/** One entry in the trial review thread (vendor submits → sourcing approves/rejects, looping). */
+export interface TrialMessage {
+  id: string;
+  by: 'sourcing' | 'vendor';
+  senderName: string;
+  action: 'requested' | 'submitted' | 'approved' | 'rejected';
+  submission?: TrialSubmission;
+  message?: string;
+  at: string;
+}
+
 export interface VendorInvite {
   id: string;
   requestId: string;
@@ -672,12 +758,26 @@ export interface VendorInvite {
   awardStatus?: AwardStatus;
   /** FA codes for this award's items, keyed by line-item id. */
   faCodes?: Record<string, string>;
+  /** Public PO-issue link token for this award (Sandeep handoff at /po/[token]). */
+  poToken?: string;
   /** This award's own Purchase Order + payment milestones (per-vendor). */
   purchaseOrder?: PurchaseOrder;
   paymentMilestones?: PaymentMilestone[];
   /** Per-award TAT anchors. */
   piSubmittedAt?: string;
   tatStoppedAt?: string;
+  // ── Reverse auction: seeded opening bid kept OUT of quotes[] so ranks reset until a fresh bid ──
+  /** The seeded RFQ→auction opening bid, used as an award-price fallback but NOT ranked. */
+  openingQuote?: Quote;
+  // ── Per-award trials (mirrors the request-level trial fields) ──
+  trialRequired?: boolean;
+  trialStatus?: TrialStatus;
+  trialSubmission?: TrialSubmission;
+  trialThread?: TrialMessage[];
+  /** When this award's advance milestone was ticked (delivery-lead → final-payment anchor). */
+  advancePaidAt?: string;
+  /** Set when accounts re-open PI upload after PO issue (vendor re-uploads PI). */
+  piReuploadAllowed?: boolean;
 }
 
 /**

@@ -3,10 +3,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { ClipboardCheck, Check, X, ChevronDown, ChevronRight } from 'lucide-react'
+import { ClipboardCheck, Check, X, ChevronDown, ChevronRight, RotateCcw, Landmark } from 'lucide-react'
 import { useCapex } from '@/lib/capexContext'
+import { BudgetCorrectionPanel } from '@/components/BudgetCorrectionPanel'
 import { PLANTS, ROLE_NAMES } from '@/lib/constants'
-import type { BudgetProposal } from '@/lib/types'
+import type { BudgetProposal, BudgetProposalItem } from '@/lib/types'
 import { PROJECT_TYPE_LABELS } from '@/lib/greenFieldConstants'
 import {
   BUDGET_PROPOSAL_STATUS_COLORS,
@@ -26,27 +27,39 @@ function plantLabel(v: string, custom: { value: string; label: string }[]) {
 export default function BudgetApprovalsPage() {
   const router = useRouter()
   const {
-    capexMaster, customPlants, budgetProposals, decideBudgetProposal,
+    capexMaster, customPlants, budgetProposals, decideBudgetProposal, decideBudgetAccounts,
     adhocBudgetRequests, brownFieldHeadAllocations, usedAmountByMasterItemId, decideAdhocBudgetRequest,
   } = useCapex()
   const [role, setRole] = useState('')
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [correcting, setCorrecting] = useState<string | null>(null)
+
+  const isAllowed = (r: string) => r === 'super_admin' || r === 'accounts'
 
   useEffect(() => {
     const r = localStorage.getItem('capex_role') ?? ''
-    if (r !== 'super_admin') { router.replace('/capex/requests'); return }
+    if (!isAllowed(r)) { router.replace('/capex/requests'); return }
     setRole(r)
     const handler = (e: Event) => {
       const next = (e as CustomEvent).detail as string
       setRole(next)
-      if (next !== 'super_admin') router.replace('/capex/requests')
+      if (!isAllowed(next)) router.replace('/capex/requests')
     }
     window.addEventListener('capex_rolechange', handler as EventListener)
     return () => window.removeEventListener('capex_rolechange', handler as EventListener)
   }, [router])
 
+  const isAdmin = role === 'super_admin'
+  const isAccounts = role === 'accounts' || role === 'super_admin'
+
+  // Super-admin stage.
   const pending = useMemo(
     () => budgetProposals.filter(p => p.status === 'pending_admin'),
+    [budgetProposals],
+  )
+  // Global-accounts stage (final gate).
+  const pendingAccounts = useMemo(
+    () => budgetProposals.filter(p => p.status === 'pending_accounts'),
     [budgetProposals],
   )
   const pendingAdhoc = useMemo(
@@ -61,15 +74,31 @@ export default function BudgetApprovalsPage() {
     [budgetProposals],
   )
 
-  if (role !== 'super_admin') return null
+  if (!isAllowed(role)) return null
 
   function approve(p: BudgetProposal) {
     decideBudgetProposal(p.id, 'approved', role)
-    toast.success(`Approved — ${plantLabel(p.plant, customPlants)} FY ${p.targetFy} published as the new live budget`)
+    toast.success(`Approved — forwarded to Global Accounts for final sign-off`)
+  }
+  function sendBackWithEdits(p: BudgetProposal, items: BudgetProposalItem[], note: string) {
+    decideBudgetProposal(p.id, 'needs_correction', role, note || undefined, items)
+    setCorrecting(null)
+    toast.success('Sent back for correction — the author will see your edits')
   }
   function reject(p: BudgetProposal) {
-    const note = window.prompt('Reason for rejection (optional):') ?? undefined
-    decideBudgetProposal(p.id, 'rejected', role, note)
+    const note = window.prompt('Reason for rejection (optional):')
+    if (note === null) return // cancelled
+    decideBudgetProposal(p.id, 'rejected', role, note || undefined)
+    toast.success('Proposal rejected')
+  }
+  function approveAccounts(p: BudgetProposal) {
+    decideBudgetAccounts(p.id, 'approved', role)
+    toast.success(`Approved — ${plantLabel(p.plant, customPlants)} FY ${p.targetFy} published as the new live budget`)
+  }
+  function rejectAccounts(p: BudgetProposal) {
+    const note = window.prompt('Reason for rejection (optional):')
+    if (note === null) return // cancelled
+    decideBudgetAccounts(p.id, 'rejected', role, note || undefined)
     toast.success('Proposal rejected')
   }
   const fmtCr = (n: number) => `₹${n.toFixed(2)} Cr`
@@ -86,10 +115,11 @@ export default function BudgetApprovalsPage() {
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
-        {/* Pending */}
+        {/* Super-admin stage */}
+        {isAdmin && (
         <section className="space-y-2">
           <h2 className="text-[12px] font-bold text-muted-foreground uppercase tracking-wide">
-            Pending ({pending.length})
+            With Admin ({pending.length})
           </h2>
           {pending.length === 0 ? (
             <p className="text-sm text-muted-foreground py-4 text-center border border-dashed border-border rounded-xl">
@@ -112,11 +142,91 @@ export default function BudgetApprovalsPage() {
                       {p.items.length} lines · {fmtCr(proposalTotalCr(p))} · from FY {p.sourceFy ?? '—'} · by {ROLE_NAMES[p.createdBy] ?? p.createdBy}
                     </p>
                   </div>
+                  <button onClick={() => setCorrecting(correcting === p.id ? null : p.id)}
+                    className={`flex items-center gap-1.5 px-3 py-2 text-xs font-semibold border rounded-lg ${correcting === p.id ? 'bg-orange-600 text-white border-orange-600' : 'bg-white hover:bg-orange-50 text-orange-600 border-orange-200'}`}>
+                    <RotateCcw className="w-3.5 h-3.5" /> Edit &amp; Send Back
+                  </button>
                   <button onClick={() => reject(p)}
                     className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-white hover:bg-red-50 text-red-600 border border-red-200 rounded-lg">
                     <X className="w-3.5 h-3.5" /> Reject
                   </button>
                   <button onClick={() => approve(p)}
+                    className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-slate-600 hover:bg-slate-700 text-white rounded-lg">
+                    <Check className="w-3.5 h-3.5" /> Approve → Accounts
+                  </button>
+                </div>
+                {correcting === p.id && (
+                  <div className="border-t border-border px-4 py-3 bg-orange-50/30">
+                    <BudgetCorrectionPanel proposal={p} onSendBack={(items, note) => sendBackWithEdits(p, items, note)} />
+                  </div>
+                )}
+                {isOpen && (
+                  <div className="border-t border-border px-4 py-3 bg-muted/30">
+                    <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wide mb-2">Per-head change vs live FY {p.sourceFy ?? '—'}</p>
+                    <table className="w-full text-sm">
+                      <thead className="text-[11px] uppercase text-muted-foreground">
+                        <tr>
+                          <th className="text-left py-1 font-semibold">Head</th>
+                          <th className="text-right py-1 font-semibold">Live</th>
+                          <th className="text-right py-1 font-semibold">Proposed</th>
+                          <th className="text-right py-1 font-semibold">Δ</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {diff.map(d => (
+                          <tr key={d.head} className="border-t border-border/60">
+                            <td className="py-1.5 text-foreground">{d.head}</td>
+                            <td className="py-1.5 text-right font-mono text-muted-foreground">{fmtCr(d.liveCr)}</td>
+                            <td className="py-1.5 text-right font-mono">{fmtCr(d.proposedCr)}</td>
+                            <td className={`py-1.5 text-right font-mono font-semibold ${
+                              d.deltaCr > 0 ? 'text-slate-700' : d.deltaCr < 0 ? 'text-red-600' : 'text-muted-foreground'
+                            }`}>
+                              {d.deltaCr > 0 ? '+' : ''}{fmtCr(d.deltaCr)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </section>
+        )}
+
+        {/* Global-accounts stage (final gate — approving publishes to the live master) */}
+        {isAccounts && (
+        <section className="space-y-2">
+          <h2 className="text-[12px] font-bold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
+            <Landmark className="w-3.5 h-3.5" /> With Global Accounts ({pendingAccounts.length})
+          </h2>
+          {pendingAccounts.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-4 text-center border border-dashed border-border rounded-xl">
+              No proposals awaiting Global Accounts sign-off.
+            </p>
+          ) : pendingAccounts.map(p => {
+            const diff = diffProposalAgainstLive(p, capexMaster)
+            const isOpen = expanded === p.id
+            return (
+              <div key={p.id} className="rounded-xl border border-border bg-card overflow-hidden">
+                <div className="flex items-center gap-3 px-4 py-3 flex-wrap">
+                  <button onClick={() => setExpanded(isOpen ? null : p.id)} className="p-1 text-muted-foreground">
+                    {isOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                  </button>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-foreground">
+                      {plantLabel(p.plant, customPlants)} · {PROJECT_TYPE_LABELS[p.projectType]} · FY {p.targetFy}
+                    </p>
+                    <p className="text-[12px] text-muted-foreground">
+                      {p.items.length} lines · {fmtCr(proposalTotalCr(p))} · admin-approved by {p.adminDecidedBy ?? '—'}
+                    </p>
+                  </div>
+                  <button onClick={() => rejectAccounts(p)}
+                    className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-white hover:bg-red-50 text-red-600 border border-red-200 rounded-lg">
+                    <X className="w-3.5 h-3.5" /> Reject
+                  </button>
+                  <button onClick={() => approveAccounts(p)}
                     className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-slate-600 hover:bg-slate-700 text-white rounded-lg">
                     <Check className="w-3.5 h-3.5" /> Approve & Publish
                   </button>
@@ -154,8 +264,10 @@ export default function BudgetApprovalsPage() {
             )
           })}
         </section>
+        )}
 
         {/* Pending adhoc reallocations */}
+        {isAdmin && (
         <section className="space-y-2">
           <h2 className="text-[12px] font-bold text-muted-foreground uppercase tracking-wide">
             Adhoc Reallocations ({pendingAdhoc.length})
@@ -198,6 +310,7 @@ export default function BudgetApprovalsPage() {
             )
           })}
         </section>
+        )}
 
         {/* Recently decided */}
         {decided.length > 0 && (

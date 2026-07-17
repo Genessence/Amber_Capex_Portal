@@ -34,6 +34,7 @@ import {
   rfqLineGstRate,
   rfqLineSubtotal,
   rfqLineUnitPrice,
+  rfqLineBreakdown,
   rfqTotal,
 } from '@/lib/rfqUtils'
 import {
@@ -56,8 +57,9 @@ import {
   FOCUS_RING,
   fmtCurrency,
 } from '@/lib/auctionTheme'
+import { toInr, isForeignCurrency } from '@/lib/currencyUtils'
 
-const SOURCING_ROLES = ['sourcing_member', 'sourcing_head', 'super_admin']
+const SOURCING_ROLES = ['sourcing_member', 'super_admin']
 const FULFILLMENT_STATUSES = ['pi_requested', 'pi_submitted', 'accounts_processing', 'payment_in_progress', 'completed']
 const CURRENCIES = ['INR', 'USD', 'EUR']
 const SINGLE_LINE_ID = '__single__'
@@ -155,7 +157,7 @@ export function RfqPanel({
   const [showVendorSelect, setShowVendorSelect] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
   const [showNewVendor, setShowNewVendor] = useState(false)
-  const [newVendor, setNewVendor] = useState({ name: '', email: '', phone: '' })
+  const [newVendor, setNewVendor] = useState({ name: '', email: '', phone: '', foreign: false })
   // Per-vendor document selection chosen at invite time (which docs each vendor must approve).
   const [docSel, setDocSel] = useState<Record<string, DocSelection>>({})
   const [customDocs, setCustomDocs] = useState<DocApprovalDoc[]>([])
@@ -168,7 +170,8 @@ export function RfqPanel({
   // Requesting the Proforma Invoice (finalizing for fulfillment) is restricted to the sourcing
   // head / admin, matching the reverse-auction path. A sourcing_member runs the negotiation but
   // does not request the PI.
-  const canFinalize = currentRole === "sourcing_head" || currentRole === "super_admin"
+  // Sourcing team can award directly — no sourcing-head gate.
+  const canFinalize = canManage
   const senderName = ROLE_NAMES[currentRole] ?? currentRole
 
   const invitedIds = useMemo(() => new Set(invites.map(i => i.vendorId)), [invites])
@@ -231,7 +234,7 @@ export function RfqPanel({
     return p * (1 - d / 100) * qtyOf(item)
   }
 
-  const lowest = useMemo(() => lowestRfqTotal(invites), [invites])
+  const lowest = useMemo(() => lowestRfqTotal(invites, gridItems), [invites, gridItems])
   const quotedCount = useMemo(() => invites.filter(i => i.rfqQuote).length, [invites])
   const canStartAuction = quotedCount >= 2
 
@@ -272,13 +275,18 @@ export function RfqPanel({
     return parseFloat(item.quantity) || 1
   }
   // Lowest unit price across vendors for a given line (for the green "Lowest" highlight).
+  // Compared on an INR basis so a foreign-currency unit isn't wrongly flagged lowest; returns the
+  // vendor's own-currency unit that is lowest in INR terms (matches what the cell renders).
   function lowestUnit(itemId: string): number | null {
-    let min: number | null = null
+    let minInr: number | null = null
+    let minUnit: number | null = null
     for (const inv of invites) {
       const u = unitFor(inv, itemId)
-      if (u != null && u > 0 && (min == null || u < min)) min = u
+      if (u == null || u <= 0) continue
+      const inr = toInr(u, inv.rfqQuote?.currency)
+      if (minInr == null || inr < minInr) { minInr = inr; minUnit = u }
     }
-    return min
+    return minUnit
   }
   function grandTotalOf(inv: VendorInvite): number | null {
     if (editingId === inv.id) return formTotal(getForm(inv), gridItems)
@@ -290,10 +298,17 @@ export function RfqPanel({
     return q ? rfqGstAmount(q, gridItems) : 0
   }
 
+  // INR grand total for a vendor (for cross-vendor comparison — the cell renders the own-currency value).
+  function inrGrandTotalOf(inv: VendorInvite): number | null {
+    const t = grandTotalOf(inv)
+    if (t == null) return null
+    const cur = editingId === inv.id ? getForm(inv).currency : inv.rfqQuote?.currency
+    return toInr(t, cur)
+  }
   const liveLowestTotal = useMemo(() => {
     const totals: number[] = []
     for (const inv of invites) {
-      const t = grandTotalOf(inv)
+      const t = inrGrandTotalOf(inv)
       if (t != null) totals.push(t)
     }
     return totals.length ? Math.min(...totals) : null
@@ -302,9 +317,10 @@ export function RfqPanel({
 
   const quotedInvites = useMemo(() => invites.filter(i => i.rfqQuote), [invites])
 
-  const isOneTime = (inv: VendorInvite) => !!vendors.find(v => v.id === inv.vendorId)?.oneTime
-  const oneTimeInvites = useMemo(
-    () => invites.filter(inv => vendors.find(v => v.id === inv.vendorId)?.oneTime),
+  // Incoterms gate FOREIGN vendors (international shipping terms), not one-time vendors.
+  const isForeign = (inv: VendorInvite) => !!vendors.find(v => v.id === inv.vendorId)?.foreign
+  const foreignInvites = useMemo(
+    () => invites.filter(inv => vendors.find(v => v.id === inv.vendorId)?.foreign),
     [invites, vendors],
   )
 
@@ -360,8 +376,8 @@ export function RfqPanel({
     const name = newVendor.name.trim()
     const email = newVendor.email.trim()
     if (!name || !email) { toast.error('Enter the vendor name and email'); return }
-    inviteNewVendor(request.id, { name, email, phone: newVendor.phone.trim() }, senderName, newVendorDocSel)
-    setNewVendor({ name: '', email: '', phone: '' })
+    inviteNewVendor(request.id, { name, email, phone: newVendor.phone.trim(), foreign: newVendor.foreign }, senderName, newVendorDocSel)
+    setNewVendor({ name: '', email: '', phone: '', foreign: false })
     setNewVendorDocSel({ commercialTerms: true, pbg: true, dlc: true, paymentTerms: true, extraDocs: [] })
     setShowNewVendor(false)
     toast.success(`Invited ${name} — INCO Terms sent`)
@@ -400,7 +416,7 @@ export function RfqPanel({
     toast.success(`Counter sent to ${vendorName(inv.vendorId)}`)
   }
   function acceptQuote(inv: VendorInvite) {
-    if (!window.confirm(`Accept ${vendorName(inv.vendorId)}'s quotation of ${inv.rfqQuote ? fmtCurrency(rfqTotal(inv.rfqQuote)) : '—'}? This finalizes this vendor and sends the approval documents for sign-off.`)) return
+    if (!window.confirm(`Accept ${vendorName(inv.vendorId)}'s quotation of ${inv.rfqQuote ? fmtCurrency(rfqTotal(inv.rfqQuote, gridItems)) : '—'}? This finalizes this vendor and sends the approval documents for sign-off.`)) return
     respondToRfqQuote(inv.id, 'approved', 'sourcing', senderName)
     toast.success(`Accepted ${vendorName(inv.vendorId)} — documents sent for approval`)
   }
@@ -424,10 +440,10 @@ export function RfqPanel({
   }
   function startAuction() {
     if (quotedCount < 2) { toast.error('Need at least 2 vendor quotes to start an auction.'); return }
-    if (!window.confirm('Escalate this RFQ to a live reverse auction? Each vendor’s quoted prices carry over as their opening bid (lowest = L1) and they can rebid lower.')) return
+    if (!window.confirm('Escalate this RFQ to a live reverse auction? The current best price drops 5% to become the new price to beat, and every vendor’s rank resets — vendors must submit a fresh bid to reveal their rank.')) return
     seedAuctionFromRfq(request.id)
     setSourcingMode(request.id, 'auction')
-    toast.success('Switched to Reverse Auction — RFQ prices carried over as opening bids')
+    toast.success('Switched to Reverse Auction — best price cut 5% and ranks reset')
   }
   function copyLink(inv: VendorInvite) {
     navigator.clipboard.writeText(buildSupplierLink(inv.token))
@@ -437,11 +453,11 @@ export function RfqPanel({
 
   const invitesByPrice = useMemo(() => {
     return [...invites].sort((a, b) => {
-      const ta = a.rfqQuote ? rfqTotal(a.rfqQuote) : Infinity
-      const tb = b.rfqQuote ? rfqTotal(b.rfqQuote) : Infinity
+      const ta = a.rfqQuote ? rfqTotal(a.rfqQuote, gridItems) : Infinity
+      const tb = b.rfqQuote ? rfqTotal(b.rfqQuote, gridItems) : Infinity
       return ta - tb
     })
-  }, [invites])
+  }, [invites, gridItems])
 
   const historyEntries = useMemo(() => {
     const rows = invites.flatMap(inv =>
@@ -508,7 +524,7 @@ export function RfqPanel({
             <div>
               <p className="text-sm font-semibold text-slate-900">{vendorName(finalInvite.vendorId)}</p>
               <p className="text-xs text-slate-500">
-                Approved RFQ total: <span className="tabular-nums font-semibold text-slate-900">{finalInvite.rfqQuote ? fmtCurrency(rfqTotal(finalInvite.rfqQuote)) : '—'}</span>
+                Approved RFQ total: <span className="tabular-nums font-semibold text-slate-900">{finalInvite.rfqQuote ? fmtCurrency(rfqTotal(finalInvite.rfqQuote, gridItems)) : '—'}</span>
               </p>
             </div>
             <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-800">
@@ -571,7 +587,7 @@ export function RfqPanel({
               {showNewVendor && (
                 <div className="mt-3 border border-slate-200 rounded-lg overflow-hidden">
                   <div className="bg-[#F4F4F5] px-4 py-2 border-b border-slate-200">
-                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">New vendor — INCO Terms sent on invite (must be approved before quoting)</p>
+                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">New / one-time vendor — mark foreign to send Incoterms (approved before quoting)</p>
                   </div>
                   <div className="p-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
@@ -592,6 +608,16 @@ export function RfqPanel({
                         onChange={e => setNewVendor(v => ({ ...v, phone: e.target.value }))}
                         placeholder="Optional" className={INPUT} />
                     </div>
+                  </div>
+                  <div className="px-3 pb-2">
+                    <label className="flex items-start gap-2 cursor-pointer">
+                      <input type="checkbox" checked={newVendor.foreign}
+                        onChange={e => setNewVendor(v => ({ ...v, foreign: e.target.checked }))}
+                        className="mt-0.5 h-4 w-4 accent-[#2563EB]" />
+                      <span className="text-[11px] text-slate-600 leading-snug">
+                        <span className="font-semibold text-slate-800">Foreign / international vendor</span> — the Incoterms (2020) agreement is sent for the vendor to accept before they can quote.
+                      </span>
+                    </label>
                   </div>
                   <div className="px-3 py-2 border-t border-slate-200 bg-[#F4F4F5] flex justify-end">
                     <button onClick={sendNewVendor}
@@ -730,7 +756,7 @@ export function RfqPanel({
                               </div>
                               <span className="text-[11px] font-bold text-white truncate max-w-[130px]">{vendorName(inv.vendorId)}</span>
                               <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${RFQ_STATUS_COLORS[s]}`}>{RFQ_STATUS_LABELS[s]}</span>
-                              {isOneTime(inv) && effectiveIncoTermsStatus(inv) !== 'approved' && (
+                              {isForeign(inv) && effectiveIncoTermsStatus(inv) !== 'approved' && (
                                 <span className="text-[9px] font-semibold text-slate-200 leading-tight max-w-[130px]">Awaiting INCO Terms approval</span>
                               )}
                               {canManage && !isEditing && (s === 'pending_sourcing' || s === 'pending_vendor') && (
@@ -784,7 +810,7 @@ export function RfqPanel({
                                 <p className="text-[10px] font-semibold text-slate-700">GST {gstRateForHsn(item.hsnCode)}%</p>
                               </>
                             ) : (
-                              <span className="text-[12px] text-slate-300">—</span>
+                              <span className="text-[12px] text-amber-600 font-medium">Awaiting HSN</span>
                             )}
                           </td>
                           {invites.map(inv => {
@@ -804,12 +830,28 @@ export function RfqPanel({
                             }
                             const unit = unitFor(inv, item.id)
                             const isLow = unit != null && unit > 0 && low != null && unit === low
+                            const vendorQuote = editingId === inv.id ? quoteFromForm(getForm(inv), gridItems) : inv.rfqQuote
+                            const breakdown = vendorQuote && unit != null && unit > 0 ? rfqLineBreakdown(vendorQuote, item) : null
                             return (
                               <td key={inv.id} className={`px-3 py-2 text-center border-l border-slate-100 ${isLow ? 'bg-emerald-50' : ''}`}>
                                 {unit != null && unit > 0 ? (
                                   <>
                                     <p className={`font-bold text-[12px] ${isLow ? 'text-emerald-700' : 'text-slate-800'}`}>{fmtCurrency(unit)}</p>
-                                    <p className={`text-[11px] ${isLow ? 'text-emerald-600' : 'text-slate-500'}`}>Total: {fmtCurrency(unit * qty)}</p>
+                                    {breakdown && (
+                                      <>
+                                        <p className={`text-[11px] ${isLow ? 'text-emerald-600' : 'text-slate-500'}`}>
+                                          Subtotal: {fmtCurrency(breakdown.taxableSubtotal)}
+                                        </p>
+                                        {breakdown.gstAmount > 0 && (
+                                          <p className={`text-[10px] ${isLow ? 'text-emerald-600' : 'text-slate-500'}`}>
+                                            + {fmtCurrency(breakdown.gstAmount)} GST
+                                          </p>
+                                        )}
+                                        <p className={`text-[11px] font-semibold ${isLow ? 'text-emerald-700' : 'text-slate-700'}`}>
+                                          Total: {fmtCurrency(breakdown.lineTotalInclGst)}
+                                        </p>
+                                      </>
+                                    )}
                                     {isLow && <span className="inline-block mt-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 leading-none">↓ Lowest</span>}
                                   </>
                                 ) : (
@@ -897,12 +939,17 @@ export function RfqPanel({
                       {invites.map(inv => {
                         const total = grandTotalOf(inv)
                         const gst = gstOf(inv)
-                        const isLowest = total != null && liveLowestTotal != null && total === liveLowestTotal
+                        // Foreign quotes: show the INR value (converted), with the original currency amount below.
+                        const cur = inv.rfqQuote?.currency ?? 'INR'
+                        const foreign = isForeignCurrency(cur)
+                        const inrTot = total != null ? toInr(total, cur) : null
+                        const isLowest = inrTot != null && liveLowestTotal != null && inrTot === liveLowestTotal
                         return (
                           <td key={inv.id} className={`px-3 py-2 text-center font-bold tabular-nums border-l border-slate-100 ${isLowest ? 'text-emerald-700 bg-emerald-50' : 'text-slate-900'}`}>
-                            {total != null ? fmtCurrency(total) : '—'}
+                            {total != null ? fmtCurrency(foreign ? toInr(total, cur) : total) : '—'}
                             {isLowest && <span className="ml-1 align-middle text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800">L1</span>}
-                            {total != null && gst > 0 && <p className="text-[10px] font-normal text-slate-500 mt-0.5">incl. {fmtCurrency(gst)} GST</p>}
+                            {foreign && total != null && <p className="text-[10px] font-normal text-slate-500 mt-0.5">{fmtCurrency(total, cur)} {cur}</p>}
+                            {total != null && gst > 0 && <p className="text-[10px] font-normal text-slate-500 mt-0.5">incl. {fmtCurrency(foreign ? toInr(gst, cur) : gst)} GST</p>}
                           </td>
                         )
                       })}
@@ -936,7 +983,7 @@ export function RfqPanel({
                       <div className="flex items-center justify-between gap-2 flex-wrap">
                         <div className="min-w-0">
                           <p className="text-sm font-semibold text-slate-900">{vendorName(inv.vendorId)}</p>
-                          {isOneTime(inv) && effectiveIncoTermsStatus(inv) !== 'approved' && (
+                          {isForeign(inv) && effectiveIncoTermsStatus(inv) !== 'approved' && (
                             <p className="text-[10px] font-semibold text-slate-700">Awaiting INCO Terms approval</p>
                           )}
                         </div>
@@ -970,14 +1017,25 @@ export function RfqPanel({
                             )
                           }
                           const unit = unitFor(inv, item.id)
+                          const vendorQuote = isEditing ? quoteFromForm(form, gridItems) : inv.rfqQuote
+                          const breakdown = vendorQuote && unit != null && unit > 0 ? rfqLineBreakdown(vendorQuote, item) : null
                           return (
                             <div key={item.id} className="flex items-center justify-between gap-2 text-[12px]">
                               <span className="text-slate-600 truncate">
                                 {item.description} <span className="text-slate-400">×{item.quantity}</span>
-                                {item.hsnCode && <span className="text-[10px] text-slate-700 ml-1">HSN {item.hsnCode} · {rfqLineGstRate(item)}%</span>}
+                                {item.hsnCode
+                                  ? <span className="text-[10px] text-slate-700 ml-1">HSN {item.hsnCode} · {rfqLineGstRate(item)}%</span>
+                                  : <span className="text-[10px] text-amber-600 ml-1">Awaiting HSN</span>}
                               </span>
-                              <span className="text-slate-800 font-semibold tabular-nums shrink-0">
-                                {unit != null && unit > 0 ? `${fmtCurrency(unit)} · ${fmtCurrency(unit * qty)}` : '—'}
+                              <span className="text-slate-800 font-semibold tabular-nums shrink-0 text-right">
+                                {unit != null && unit > 0 && breakdown ? (
+                                  <>
+                                    <span>{fmtCurrency(unit)}</span>
+                                    <span className="block text-[10px] text-slate-500">
+                                      {fmtCurrency(breakdown.lineTotalInclGst)} incl. GST
+                                    </span>
+                                  </>
+                                ) : '—'}
                               </span>
                             </div>
                           )
@@ -1074,15 +1132,15 @@ export function RfqPanel({
                 </p>
               )}
 
-              {/* INCO Terms tracker — one-time vendors only (gates their quoting) */}
-              {oneTimeInvites.length > 0 && (
+              {/* INCO Terms tracker — foreign vendors only (gates their quoting) */}
+              {foreignInvites.length > 0 && (
                 <div className="rounded-lg border border-slate-200 overflow-hidden">
                   <div className="flex items-center gap-1.5 px-3 py-2 bg-[#F4F4F5] border-b border-slate-200">
                     <ScrollText className="w-3.5 h-3.5 text-slate-400" />
-                    <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">INCO Terms — New / One-time Vendors</span>
+                    <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">INCO Terms — Foreign Vendors</span>
                   </div>
                   <ul className="divide-y divide-slate-100">
-                    {oneTimeInvites.map(inv => {
+                    {foreignInvites.map(inv => {
                       const incoStatus = effectiveIncoTermsStatus(inv)
                       const isReviewing = incoReviewId === inv.id
                       const needsReview = incoStatus === 'pending_sourcing'
@@ -1192,7 +1250,7 @@ export function RfqPanel({
                     </div>
                     <div className="max-w-md space-y-1">
                       <p className="text-xs text-slate-600">
-                        Escalate to a live reverse auction. Each vendor’s quoted prices carry over as their opening bid — lowest{lowest != null ? <> (<span className="font-semibold tabular-nums text-slate-900">{fmtCurrency(lowest)}</span>)</> : ''} becomes L1 and vendors can rebid lower.
+                        Escalate to a live reverse auction. The current best price{lowest != null ? <> (<span className="font-semibold tabular-nums text-slate-900">{fmtCurrency(lowest)}</span>)</> : ''} drops 5% to become the new price to beat, and every vendor’s rank resets — vendors must submit a fresh bid to reveal their rank.
                       </p>
                       {!canStartAuction && (
                         <p className="text-[11px] font-semibold text-slate-700">Need at least 2 vendor quotes to start an auction.</p>
@@ -1231,7 +1289,7 @@ export function RfqPanel({
                         <li key={`${m.inviteId}-${m.id}`} className="px-3 py-2 text-[11px] text-slate-600">
                           <span className="font-semibold text-slate-900">{m.vendor}</span>{' · '}
                           <span className="capitalize">{m.by}</span> {m.action}
-                          {m.quote ? <span className="tabular-nums"> {fmtCurrency(rfqTotal(m.quote))}</span> : m.price != null ? <span className="tabular-nums"> {fmtCurrency(m.price)}</span> : ''}
+                          {m.quote ? <span className="tabular-nums"> {fmtCurrency(rfqTotal(m.quote, gridItems))}</span> : m.price != null ? <span className="tabular-nums"> {fmtCurrency(m.price)}</span> : ''}
                           {m.message ? ` — ${m.message}` : ''}
                           <span className="text-slate-400"> · {new Date(m.at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
                         </li>

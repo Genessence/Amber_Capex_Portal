@@ -1,6 +1,6 @@
 # Capex Amber — User Stories
 
-**Last updated:** 2026-06-19
+**Last updated:** 2026-07-16
 
 Living backlog for product requirements. The AI agent maintains this file across chats whenever you describe or change a user story.
 
@@ -140,14 +140,16 @@ Full Brown-Field fulfillment lifecycle. **All scoped to `fieldType === 'brown_fi
 
 ### US-066 — Item-wise GST via HSN code
 - **As** sourcing, **I want** to set an HSN code per **line item** (not per vendor) so the correct GST is derived for each item identically across all vendors; **as a** vendor **I want** to see each item's HSN/GST.
-- **Priority:** must · **Status:** done
+- **Priority:** must · **Status:** done · **Updated:** 2026-07-14
 - **Acceptance criteria**
-  - [x] HSN lives on `CapexLineItem.hsnCode` (item-wise, one value per item); **only the vendor enters it** (editable per-line dropdown in their bid table, persisted on submit via `setLineHsn`). **Sourcing sees it read-only** in the RFQ comparison grid (no dropdown) and cannot set/override it
+  - [x] HSN lives on `CapexLineItem.hsnCode` (item-wise, one value per item); **only the vendor enters it** (required per-line HSN dropdown in their bid table). **Sourcing sees it read-only** in the RFQ comparison grid (no dropdown) and cannot set/override it
+  - [x] Supplier RFQ submission is **atomic**: `proposeRfqQuote(..., itemHsn?)` validates required HSN, writes the quote, and patches request line-item HSN in one pass (no separate `setLineHsn` loop). Cross-tab `storage` sync rehydrates **both** `requests` and `invites` so sourcing sees HSN + GST immediately
   - [x] The old whole-quote HSN dropdown is removed from the bid + counter forms; HSN is per line item only
   - [x] GST is per line = unit × qty × `gstRateForHsn(item.hsnCode)` (`rfqLineGstAmount`); footer charges (freight/packing/service) are **not** taxed
+  - [x] Shared `rfqLineBreakdown` drives per-item display: HSN, GST rate, pre-GST subtotal, GST amount, and GST-inclusive line total on supplier + sourcing RFQ grids (desktop + mobile)
   - [x] `rfqGstAmount`/`rfqTotal`/`lowestRfqTotal` accept optional `items[]` and stay GST-inclusive → L1, threshold, auction seeding, PO amount unchanged; grid Grand Total shows an `incl. ₹X GST` subtitle per vendor
   - [x] `RfqQuote.hsnCode` kept only as a legacy fallback for old lump-sum quotes
-- **Files:** `src/lib/hsnGst.ts`, `src/lib/rfqUtils.ts`, `src/lib/types.ts`, `src/lib/capexContext.tsx`, `src/lib/paymentUtils.ts`, `src/app/(public)/supplier/[token]/page.tsx`, `src/app/(internal)/capex/[id]/page.tsx`, `src/components/RfqPanel.tsx`
+- **Files:** `src/lib/hsnGst.ts`, `src/lib/rfqUtils.ts`, `src/lib/types.ts`, `src/lib/capexContext.tsx`, `src/lib/paymentUtils.ts`, `src/app/(public)/supplier/[token]/page.tsx`, `src/app/(internal)/capex/[id]/page.tsx`, `src/components/RfqPanel.tsx`, `src/components/supplier/SupplierQuoteTable.tsx`, `src/components/supplier/SupplierQuoteCards.tsx`
 
 ### US-067 — INCO Terms (Incoterms 2020) gate for new vendors
 - **As a** sourcing user, **I want** to invite any vendor by name/email/phone and require new/one-time vendors to agree a 12-question Incoterms document before they can quote **so that** delivery terms are settled up front.
@@ -538,6 +540,31 @@ Full Brown-Field fulfillment lifecycle. **All scoped to `fieldType === 'brown_fi
   - [x] **All non-pricing states** (auction-approval, closed, invalid, PI upload, fulfillment/PO/payments, INCO gate) unified on `SUPPLIER_CARD` with mobile-stacking action rows.
   - [x] Fixed a latent bug: `/accounts/queue` now renders for `plant_accounts` (render guard previously excluded it → blank screen).
 - **Notes / related files:** `src/lib/uiTokens.ts`, `src/components/supplier/SupplierQuoteTable.tsx`, `src/components/supplier/SupplierQuoteCards.tsx`, `src/app/(public)/supplier/[token]/page.tsx`, `src/components/DocPackageReview.tsx`, `src/app/login/page.tsx`, all `src/app/(internal)/**/page.tsx`. Built/reviewed via frontend-engineer + ux-tester + quality-challenger.
+
+---
+
+## Epic: Workflow overhaul (2026-07)
+
+| ID | Story | Status |
+|----|-------|--------|
+| US-064 | As a budget author, I want my budget to route **plant head → super admin → global accounts** before it goes live, so it's properly approved. | done |
+| US-065 | As a super admin, I want to **approve, reject, or send a budget back for correction** with a remark, so the author can fix and resubmit (restarting from the plant head). | done |
+| US-066 | As a plant head with no portal login, I want to **approve/reject budgets and requests from an emailed link**, so I don't need an account. | done |
+| US-067 | As any internal user, I want to **preview the approval email and copy its link**, so I can see the email + URL layout (demo). | done |
+| US-068 | As a requester, I want all field types **except Green Field** to need plant-head approval before sourcing. | done |
+| US-069 | As sourcing, I want approving a vendor (RFQ or auction) to go **straight to the vendor's PI upload** with no head gate. | done |
+| US-070 | As sourcing, I want starting a reverse auction to **cut the best price 5%** and **reset ranks** until vendors re-bid. | done |
+| US-071 | As sourcing, I want to **require an item trial** before awarding; the vendor uploads a video/photo/report after the advance, I approve/reject (loop), and the **final payment is blocked** until approved. | done |
+| US-072 | As global accounts ("Sandeep"), I want a **public emailed PO link** (`/po/[token]`) to **upload PO docs and issue the PO** (no login); then the **vendor re-uploads the PI**, **Accounts pays milestones**, and if a **trial** is required it runs after the advance (final payment gated). | done |
+| US-073 | As plant accounts, I want the **final-payment date computed** from the supplier's delivery lead time (days) starting at the advance tick. | done |
+| US-074 | As sourcing, I want **foreign vendors** to accept Incoterms before quoting, and to see **INR values with the original foreign amount below**. | done |
+| US-075 | As anyone, I want the **currency I pick to actually change the displayed currency/amount** (bug fix). | done |
+| US-076 | As the vendor, after the PO is issued I want to **re-upload the PI** against it. | done |
+| US-077 | As a super admin, I want to **edit the budget line items** (not just write a remark) when sending it back, so the author sees my corrections. | done |
+| US-078 | As a plant head, I want the **same edit + send-back-for-correction** ability on my approval link, not just approve/reject. | done |
+| US-079 | As the budget-upload user (maintenance), I want my **Requests screen to show my budget approval requests** (status + corrections), not the item requests. | done |
+
+- **Notes / related files:** `src/app/(public)/approve/[token]/page.tsx`, `src/components/EmailPreviewModal.tsx`, `src/components/TrialCard.tsx`, `src/lib/currencyUtils.ts`, `src/lib/trialUtils.ts`, `src/lib/tokenUtils.ts`, `src/lib/capexContext.tsx`, `src/lib/rfqUtils.ts`, `src/lib/paymentUtils.ts`, `src/components/{RfqPanel,VendorGrid,FinalDecisionActions,AccountsPanel,VendorOnboardModal}.tsx`, `src/app/(internal)/capex/{[id],budget-proposals,budget-approvals}/page.tsx`, `src/app/(public)/supplier/[token]/page.tsx`, `src/components/{Sidebar,TopNav}.tsx`, `src/app/login/page.tsx`. `plant_head*`/`sourcing_head` roles removed. Built with frontend/backend engineers; reviewed by security-auditor + quality-challenger + ux-tester; verified via `tsc`/`build` + runtime (plant-head approval + budget publish). See **Workflow overhaul (2026-07)** in `CLAUDE.md`.
 
 ---
 

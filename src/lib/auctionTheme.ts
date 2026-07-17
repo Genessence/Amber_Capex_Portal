@@ -18,7 +18,13 @@ export const LABEL_REQ = `${LABEL} after:content-['*'] after:ml-0.5 after:text-r
 export const FOCUS_RING =
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563EB]/50 focus-visible:ring-offset-2";
 
-/** Currency formatter shared across auction/RFQ screens. */
-export function fmtCurrency(n: number): string {
-  return "₹" + Math.round(n).toLocaleString("en-IN");
+import { formatCurrency } from "./currencyUtils";
+
+/**
+ * Currency formatter shared across auction/RFQ screens. Defaults to INR (`₹`) so existing call
+ * sites are unchanged; pass a `currency` code to render in that currency, or `{ convert: true }`
+ * to convert a foreign amount to INR.
+ */
+export function fmtCurrency(n: number, currency = "INR", opts?: { convert?: boolean }): string {
+  return formatCurrency(n, currency, opts);
 }

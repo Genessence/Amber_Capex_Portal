@@ -72,10 +72,11 @@ export function isIncoDocComplete(doc?: IncoTermsDoc): boolean {
 }
 
 /**
- * INCO gating: a one-time / new vendor must reach `approved` before quoting. Onboarded vendors
- * (not one-time) are never gated. `vendor` may be undefined for a yet-unresolved invite.
+ * INCO gating: a FOREIGN vendor must reach `approved` on the Incoterms agreement before quoting
+ * (Incoterms are international-shipping terms). Domestic vendors are never gated. `vendor` may be
+ * undefined for a yet-unresolved invite.
  */
 export function incoTermsBlocksQuote(invite: VendorInvite, vendor?: Vendor | null): boolean {
-  if (!vendor?.oneTime) return false;
+  if (!vendor?.foreign) return false;
   return effectiveIncoTermsStatus(invite) !== 'approved';
 }

@@ -5,10 +5,12 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import {
-  ArrowLeft, Plus, Trash2, Upload, Download, Send, Save, ClipboardList, FileSpreadsheet,
+  ArrowLeft, Plus, Trash2, Upload, Download, Send, Save, ClipboardList, FileSpreadsheet, Copy, Mail, AlertCircle,
 } from 'lucide-react'
 import { useCapex } from '@/lib/capexContext'
-import { PLANTS, ROLE_NAMES, getPlantForRole } from '@/lib/constants'
+import { PLANTS, ROLE_NAMES, PLANT_HEAD_EMAIL, getPlantForRole } from '@/lib/constants'
+import { buildApprovalLink } from '@/lib/tokenUtils'
+import { EmailPreviewModal } from '@/components/EmailPreviewModal'
 import type { BudgetProposal, BudgetProposalItem, ProjectType } from '@/lib/types'
 import {
   BROWN_FIELD_HEAD_ORDER,
@@ -28,10 +30,7 @@ import {
 } from '@/lib/budgetProposalUtils'
 import { parseCsvText, parseMasterWorkbook, downloadImportTemplate } from '@/lib/bulkMasterImport'
 
-const ALLOWED_ROLES = [
-  'maintenance', 'sourcing_member', 'sourcing_head', 'super_admin',
-  'plant_head', 'plant_head_jhajjar_p1', 'plant_head_jhajjar_p2',
-]
+const ALLOWED_ROLES = ['maintenance', 'sourcing_member', 'super_admin']
 
 function fmtCr(n: number) {
   return `₹${n.toFixed(2)} Cr`
@@ -52,7 +51,7 @@ export default function BudgetProposalsPage() {
 
   useEffect(() => {
     const r = localStorage.getItem('capex_role') ?? ''
-    if (!ALLOWED_ROLES.includes(r) && !r.startsWith('plant_head_')) {
+    if (!ALLOWED_ROLES.includes(r)) {
       router.replace('/capex/requests')
       return
     }
@@ -116,7 +115,7 @@ export default function BudgetProposalsPage() {
           if (errors.length) { toast.error(errors[0]); return }
           submitBudgetProposal(editing.id)
           setEditingId(null)
-          toast.success('Proposal submitted for admin approval')
+          toast.success('Proposal submitted to Plant Head for approval')
         }}
         fileRef={fileRef}
       />
@@ -207,7 +206,7 @@ export default function BudgetProposalsPage() {
                     </td>
                     <td className="px-4 py-2.5 text-muted-foreground text-[12px]">{ROLE_NAMES[p.createdBy] ?? p.createdBy}</td>
                     <td className="px-4 py-2.5 text-right">
-                      {(p.status === 'draft' || p.status === 'rejected') ? (
+                      {(p.status === 'draft' || p.status === 'rejected' || p.status === 'needs_correction') ? (
                         <button onClick={() => setEditingId(p.id)}
                           className="text-xs font-semibold text-primary hover:underline">Edit & Submit</button>
                       ) : (
@@ -242,7 +241,23 @@ function BudgetProposalEditor({ proposal, plantLabel, onBack, onSave, onSubmit, 
   const [targetFy, setTargetFy] = useState(proposal.targetFy)
   const [items, setItems] = useState<BudgetProposalItem[]>(proposal.items)
   const [importMode, setImportMode] = useState<'replace' | 'append'>('append')
-  const readOnly = proposal.status !== 'draft' && proposal.status !== 'rejected'
+  const [emailOpen, setEmailOpen] = useState(false)
+  // Draft, rejected AND sent-back-for-correction are editable (correction restarts the flow).
+  const editableStatuses = ['draft', 'rejected', 'needs_correction']
+  const readOnly = !editableStatuses.includes(proposal.status)
+  const approvalLink = proposal.approvalToken ? buildApprovalLink(proposal.approvalToken) : ''
+  const emailSubject = `Budget Approval — ${plantLabel} · FY ${proposal.targetFy}`
+  const emailBody = [
+    'Dear Plant Head,',
+    '',
+    `A next-FY Brown Field budget proposal for ${plantLabel} (FY ${proposal.targetFy}) requires your approval.`,
+    '',
+    'Please review and Approve / Reject using the secure link below:',
+    approvalLink,
+    '',
+    'Regards,',
+    'Amber Enterprises CAPEX Portal',
+  ].join('\n')
 
   const headOptions = useMemo(
     () => [...new Set([...BROWN_FIELD_HEAD_ORDER, ...items.map(i => i.head)])],
@@ -323,6 +338,69 @@ function BudgetProposalEditor({ proposal, plantLabel, onBack, onSave, onSubmit, 
         </div>
       </div>
 
+      {/* Rejection reason (rejected at any stage — author may revise and resubmit). */}
+      {proposal.status === 'rejected' && (
+        <div className="shrink-0 rounded-xl border border-red-200 bg-red-50 px-4 py-3 flex items-start gap-2">
+          <AlertCircle className="w-4 h-4 text-red-600 mt-0.5 shrink-0" />
+          <div>
+            <p className="text-sm font-semibold text-red-800">Proposal rejected</p>
+            <p className="text-sm text-red-700 mt-0.5">
+              {proposal.decisionNote || 'This proposal was rejected. You can revise it and resubmit — it restarts from the plant head.'}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Correction remark from the super-admin (sent back for correction). */}
+      {proposal.status === 'needs_correction' && (
+        <div className="shrink-0 rounded-xl border border-orange-200 bg-orange-50 px-4 py-3 flex items-start gap-2">
+          <AlertCircle className="w-4 h-4 text-orange-600 mt-0.5 shrink-0" />
+          <div>
+            <p className="text-sm font-semibold text-orange-800">Sent back for correction</p>
+            <p className="text-sm text-orange-700 mt-0.5">
+              {proposal.correctionNote || 'The admin asked for changes. Make your corrections and resubmit — it restarts from the plant head.'}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Awaiting plant-head approval — the emailed public link. */}
+      {proposal.status === 'pending_plant_head' && (
+        <div className="shrink-0 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <p className="text-sm font-semibold text-amber-800">Awaiting Plant Head approval (sent via email)</p>
+            <p className="text-xs text-amber-700 mt-0.5">The plant head approves or rejects through the secure link.</p>
+          </div>
+          <div className="flex gap-2 shrink-0">
+            <button
+              onClick={() => { if (approvalLink) { navigator.clipboard?.writeText(approvalLink); toast.success('Approval link copied') } }}
+              className="px-3 py-2 rounded-lg bg-white border border-slate-300 hover:bg-slate-50 text-slate-800 text-xs font-semibold inline-flex items-center gap-1.5"
+            >
+              <Copy className="w-3.5 h-3.5" /> Copy link
+            </button>
+            <button
+              onClick={() => setEmailOpen(true)}
+              className="px-3 py-2 rounded-lg bg-blue-700 hover:bg-blue-800 text-white text-xs font-semibold inline-flex items-center gap-1.5"
+            >
+              <Mail className="w-3.5 h-3.5" /> Preview email
+            </button>
+          </div>
+        </div>
+      )}
+
+      <EmailPreviewModal
+        open={emailOpen}
+        onClose={() => setEmailOpen(false)}
+        title="Plant Head Budget Approval — Email Preview"
+        defaultTo={PLANT_HEAD_EMAIL}
+        subject={emailSubject}
+        body={emailBody}
+        link={approvalLink}
+        linkLabel="Plant-head approval link"
+        sendLabel="Send to Plant Head"
+        onSend={(to) => { toast.success(`Budget approval email sent to ${to}`); setEmailOpen(false) }}
+      />
+
       {/* Toolbar */}
       {!readOnly && (
         <div className="flex flex-wrap items-center gap-2 shrink-0">
@@ -356,7 +434,7 @@ function BudgetProposalEditor({ proposal, plantLabel, onBack, onSave, onSubmit, 
           </button>
           <button onClick={() => { onSave({ targetFy: targetFy.trim(), items }); onSubmit() }}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg">
-            <Send className="w-3.5 h-3.5" /> Submit for Approval
+            <Send className="w-3.5 h-3.5" /> Submit to Plant Head
           </button>
         </div>
       )}

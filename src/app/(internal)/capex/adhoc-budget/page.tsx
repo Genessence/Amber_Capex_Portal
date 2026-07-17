@@ -18,7 +18,7 @@ import {
   validateAdhoc,
 } from '@/lib/adhocBudgetUtils'
 
-const ALLOWED = ['sourcing_member', 'sourcing_head', 'super_admin', 'plant_head', 'plant_head_jhajjar_p1', 'plant_head_jhajjar_p2']
+const ALLOWED = ['sourcing_member', 'super_admin']
 
 function fmtCr(n: number) {
   return `₹${n.toFixed(2)} Cr`
@@ -41,7 +41,7 @@ export default function AdhocBudgetPage() {
 
   useEffect(() => {
     const r = localStorage.getItem('capex_role') ?? ''
-    if (!ALLOWED.includes(r) && !r.startsWith('plant_head_')) { router.replace('/capex/requests'); return }
+    if (!ALLOWED.includes(r)) { router.replace('/capex/requests'); return }
     setRole(r)
     const scoped = getPlantForRole(r)
     if (scoped) setPlant(scoped)

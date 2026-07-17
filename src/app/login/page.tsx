@@ -15,10 +15,7 @@ import {
 const ROLES = [
   { value: "buyer_jhajjar_p1",      label: "Buyer · Jhajjar Plant 1" },
   { value: "buyer_jhajjar_p2",      label: "Buyer · Jhajjar Plant 2" },
-  { value: "plant_head_jhajjar_p1", label: "Plant Head · Jhajjar P1" },
-  { value: "plant_head_jhajjar_p2", label: "Plant Head · Jhajjar P2" },
   { value: "sourcing_member",       label: "Sourcing Member" },
-  { value: "sourcing_head",         label: "Sourcing Head" },
   { value: "maintenance",           label: "Maintenance" },
   { value: "plant_accounts",        label: "Plant Accounts (FA codes)" },
   { value: "accounts",              label: "Global Accounts (PO & payments)" },
@@ -41,10 +38,9 @@ export default function LoginPage() {
       if (raw) {
         const { customPlants = [] } = JSON.parse(raw) as { customPlants?: { value: string; label: string }[] }
         setDynamicRoles(
-          customPlants.flatMap(p => [
-            { value: `buyer_${p.value}`,      label: `Buyer · ${p.label}` },
-            { value: `plant_head_${p.value}`, label: `Plant Head · ${p.label}` },
-          ])
+          customPlants.map(p => (
+            { value: `buyer_${p.value}`, label: `Buyer · ${p.label}` }
+          ))
         )
       }
     } catch {}

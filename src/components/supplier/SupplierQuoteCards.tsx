@@ -13,8 +13,9 @@
  *               signal lives in the page (header chip + summary card).
  */
 import type { CapexLineItem, RfqQuote } from "@/lib/types";
+import { useMemo } from "react";
 import { INPUT_RIGHT, LABEL, fmtCurrency } from "@/lib/auctionTheme";
-import { rfqTotal, rfqGstAmount, rfqLineGstRate, rfqLineUnitPrice } from "@/lib/rfqUtils";
+import { rfqTotal, rfqGstAmount, rfqLineGstRate, rfqLineUnitPrice, rfqLineBreakdown, rfqLineSubtotal } from "@/lib/rfqUtils";
 import { HSN_GST_OPTIONS, gstRateForHsn } from "@/lib/hsnGst";
 import type { SupplierQuoteVariant } from "./SupplierQuoteTable";
 
@@ -62,18 +63,40 @@ export function SupplierQuoteCards({
   const isRead = variant === "read";
   const hasLinePrices = !!quote?.linePrices && Object.keys(quote.linePrices).length > 0;
 
+  const previewQuote = useMemo((): RfqQuote | undefined => {
+    if (isRead) return quote;
+    if (!linePrices) return undefined;
+    const lp: Record<string, number> = {};
+    for (const [id, v] of Object.entries(linePrices)) {
+      const n = Number(v);
+      if (Number.isFinite(n) && n >= 0) lp[id] = n;
+    }
+    if (!Object.keys(lp).length) return undefined;
+    return { price: rfqLineSubtotal(lp, lineItems), linePrices: lp };
+  }, [isRead, quote, linePrices, lineItems]);
+
+  const effectiveItems = useMemo(
+    () => lineItems.map(it => ({
+      ...it,
+      hsnCode: onHsnChange ? (hsnByItem?.[it.id]?.trim() || it.hsnCode) : it.hsnCode,
+    })),
+    [lineItems, hsnByItem, onHsnChange],
+  );
+
+  const activeQuote = isRead ? quote : previewQuote;
+
   const unitOf = (item: CapexLineItem): number =>
     isRead ? (hasLinePrices ? rfqLineUnitPrice(quote, item.id) ?? 0 : 0) : Number(linePrices?.[item.id] ?? 0);
 
-  const gst = rfqGstAmount(quote, lineItems);
-  const total = rfqTotal(quote, lineItems);
+  const gst = rfqGstAmount(activeQuote, effectiveItems);
+  const total = rfqTotal(activeQuote, effectiveItems);
 
   return (
     <div className="space-y-3">
       {lineItems.map((item, idx) => {
         const unit = unitOf(item);
-        const qty = parseFloat(item.quantity) || 1;
-        const lineTotal = unit * qty;
+        const effItem = effectiveItems.find(it => it.id === item.id) ?? item;
+        const breakdown = rfqLineBreakdown(activeQuote, effItem);
         const hsn = onHsnChange ? hsnByItem?.[item.id] ?? "" : item.hsnCode ?? "";
         return (
           <div key={item.id} className="rounded-xl border border-slate-200 bg-white p-3.5 space-y-2.5">
@@ -107,7 +130,12 @@ export function SupplierQuoteCards({
                   {hsn && <p className="text-[10px] text-slate-700 font-semibold mt-0.5 text-right">GST {gstRateForHsn(hsn)}%</p>}
                 </div>
               ) : hsn ? (
-                <span className="text-xs text-slate-700">{hsn} <span className="text-slate-700 font-semibold">· {rfqLineGstRate(item)}%</span></span>
+                <div className="text-xs text-slate-700 text-right">
+                  <p>{hsn} <span className="font-semibold">· {breakdown.gstRate}%</span></p>
+                  {breakdown.gstAmount > 0 && (
+                    <p className="text-[10px] text-slate-500 mt-0.5">GST {fmtCurrency(breakdown.gstAmount)}</p>
+                  )}
+                </div>
               ) : (
                 <span className="text-xs text-slate-300">—</span>
               )}
@@ -136,10 +164,19 @@ export function SupplierQuoteCards({
               )}
             </div>
 
-            {/* Line total */}
+            {/* Line total (GST-inclusive) */}
             <div className="flex items-center justify-between gap-3 border-t border-slate-100 pt-2">
-              <span className="text-xs font-semibold text-slate-500">Line Total</span>
-              <span className="text-sm font-bold tabular-nums text-slate-900">{lineTotal > 0 ? fmtCurrency(lineTotal) : "—"}</span>
+              <span className="text-xs font-semibold text-slate-500">Line Total <span className="font-normal text-slate-400">(incl. GST)</span></span>
+              <div className="text-right">
+                <span className="text-sm font-bold tabular-nums text-slate-900">
+                  {breakdown.taxableSubtotal > 0 ? fmtCurrency(breakdown.lineTotalInclGst) : "—"}
+                </span>
+                {breakdown.gstAmount > 0 && (
+                  <p className="text-[10px] text-slate-500">
+                    {fmtCurrency(breakdown.taxableSubtotal)} + {fmtCurrency(breakdown.gstAmount)} GST
+                  </p>
+                )}
+              </div>
             </div>
           </div>
         );

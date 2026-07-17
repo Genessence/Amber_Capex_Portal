@@ -8,6 +8,7 @@
 import type { RfqPriceStatus, RfqQuote, VendorInvite, RfqPriceMessage, CapexLineItem } from './types';
 import { effectiveDocApprovalStatus } from './docPackageUtils';
 import { gstAmount, gstRateForHsn } from './hsnGst';
+import { toInr } from './currencyUtils';
 
 /** Minimal line-item shape needed to compute item-wise GST (satisfied by CapexLineItem). */
 export type GstLineItem = Pick<CapexLineItem, 'id' | 'quantity' | 'hsnCode'>;
@@ -50,6 +51,11 @@ export function rfqTaxableValue(quote?: RfqQuote): number {
   return (quote.price ?? 0) + (quote.freight ?? 0) + (quote.packing ?? 0) + (quote.service ?? 0);
 }
 
+/** Parsed quantity for a line item (defaults to 1). */
+export function rfqItemQuantity(item?: GstLineItem): number {
+  return parseFloat(item?.quantity ?? '1') || 1;
+}
+
 /** GST rate (%) for a single line item, derived from THAT item's HSN code (0 if none). */
 export function rfqLineGstRate(item?: GstLineItem): number {
   return item?.hsnCode ? gstRateForHsn(item.hsnCode) : 0;
@@ -59,8 +65,71 @@ export function rfqLineGstRate(item?: GstLineItem): number {
 export function rfqLineGstAmount(quote: RfqQuote | undefined, item: GstLineItem): number {
   if (!quote || !item.hsnCode) return 0;
   const unit = quote.linePrices?.[item.id] ?? 0;
-  const qty = parseFloat(item.quantity) || 1;
+  const qty = rfqItemQuantity(item);
   return gstAmount(unit * qty, item.hsnCode);
+}
+
+/** Canonical per-line pricing breakdown (pre-GST subtotal, GST rate/amount, GST-inclusive total). */
+export interface RfqLineBreakdown {
+  unitPrice: number;
+  quantity: number;
+  taxableSubtotal: number;
+  gstRate: number;
+  gstAmount: number;
+  lineTotalInclGst: number;
+}
+
+export function rfqLineBreakdown(quote: RfqQuote | undefined, item: GstLineItem): RfqLineBreakdown {
+  const unitPrice = quote?.linePrices?.[item.id] ?? 0;
+  const quantity = rfqItemQuantity(item);
+  const taxableSubtotal = unitPrice * quantity;
+  const gstRate = rfqLineGstRate(item);
+  const lineGst = rfqLineGstAmount(quote, item);
+  return {
+    unitPrice,
+    quantity,
+    taxableSubtotal,
+    gstRate,
+    gstAmount: lineGst,
+    lineTotalInclGst: taxableSubtotal + lineGst,
+  };
+}
+
+/** True when every listed line item has a non-empty HSN in the map. */
+export function isCompleteItemHsnMap(lineItemIds: string[], hsnByItem?: Record<string, string>): boolean {
+  if (!lineItemIds.length) return true;
+  return lineItemIds.every((id) => !!hsnByItem?.[id]?.trim());
+}
+
+/** Line-item ids missing a non-empty HSN in the map. */
+export function missingItemHsnIds(lineItemIds: string[], hsnByItem?: Record<string, string>): string[] {
+  return lineItemIds.filter((id) => !hsnByItem?.[id]?.trim());
+}
+
+/**
+ * Merge supplier-entered HSN with request-level HSN for a supplier quote. Returns null when any
+ * priced line still lacks an HSN (required before a supplier quotation can be accepted).
+ */
+export function resolveSupplierItemHsn(
+  items: GstLineItem[],
+  quote: RfqQuote,
+  itemHsn?: Record<string, string>,
+): Record<string, string> | null {
+  if (!items.length) return {};
+  const pricedIds = quote.linePrices
+    ? Object.entries(quote.linePrices)
+        .filter(([, v]) => Number(v) > 0)
+        .map(([id]) => id)
+    : items.map((it) => it.id);
+  const merged: Record<string, string> = {};
+  for (const id of pricedIds) {
+    const fromForm = itemHsn?.[id]?.trim();
+    const fromRequest = items.find((it) => it.id === id)?.hsnCode?.trim();
+    const code = fromForm || fromRequest;
+    if (!code) return null;
+    merged[id] = code;
+  }
+  return merged;
 }
 
 /**
@@ -81,6 +150,16 @@ export function rfqGstAmount(quote?: RfqQuote, items?: GstLineItem[]): number {
 export function rfqTotal(quote?: RfqQuote, items?: GstLineItem[]): number {
   if (!quote) return 0;
   return rfqTaxableValue(quote) + rfqGstAmount(quote, items);
+}
+
+/**
+ * Grand total converted to INR using the quote's currency. Use this (not `rfqTotal`) whenever
+ * comparing quotes across vendors or persisting an award amount, so a foreign-currency quote is
+ * never mistaken for the lowest or paid at its raw face value.
+ */
+export function inrRfqTotal(quote?: RfqQuote, items?: GstLineItem[]): number {
+  if (!quote) return 0;
+  return toInr(rfqTotal(quote, items), quote.currency);
 }
 
 /** Unit price a quote offers for a given line item (per-line, with legacy single-price fallback). */
@@ -124,8 +203,8 @@ export function hasApprovedRfqVendor(invites: VendorInvite[]): boolean {
   return invites.some(canRequestPi);
 }
 
-/** The lowest RFQ grand total across invites that carry a quotation (null if none). */
+/** The lowest RFQ grand total across invites that carry a quotation (INR basis; null if none). */
 export function lowestRfqTotal(invites: VendorInvite[], items?: GstLineItem[]): number | null {
-  const totals = invites.filter((i) => i.rfqQuote).map((i) => rfqTotal(i.rfqQuote, items));
+  const totals = invites.filter((i) => i.rfqQuote).map((i) => inrRfqTotal(i.rfqQuote, items));
   return totals.length ? Math.min(...totals) : null;
 }

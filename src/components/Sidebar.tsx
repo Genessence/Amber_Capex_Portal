@@ -17,10 +17,6 @@ const ROLE_META: Record<string, { name: string; label: string; colorClass: strin
   buyer_jhajjar_p1:       { name: "Arjun Mehta",  label: "Buyer · Jhajjar P1",   colorClass: "bg-blue-600",   dot: "bg-blue-500",  plant: "jhajjar_p1" },
   buyer_jhajjar_p2:       { name: "Ravi Kumar",   label: "Buyer · Jhajjar P2",   colorClass: "bg-blue-600",   dot: "bg-blue-500",  plant: "jhajjar_p2" },
   sourcing_member:        { name: "Neha Kapoor",  label: "Sourcing Member",      colorClass: "bg-slate-600", dot: "bg-slate-500" },
-  plant_head:             { name: "Karan Mehta",  label: "Plant Head",           colorClass: "bg-primary",    dot: "bg-primary/80", plant: "all" },
-  plant_head_jhajjar_p1:  { name: "Karan Mehta",  label: "Plant Head · P1",      colorClass: "bg-primary",    dot: "bg-primary/80", plant: "jhajjar_p1" },
-  plant_head_jhajjar_p2:  { name: "Ajay Gupta",   label: "Plant Head · P2",      colorClass: "bg-primary",    dot: "bg-primary/80", plant: "jhajjar_p2" },
-  sourcing_head:          { name: "Rajiv Sinha",  label: "Sourcing Head",        colorClass: "bg-slate-800", dot: "bg-slate-700" },
   maintenance:            { name: "Sunil Verma",  label: "Maintenance",          colorClass: "bg-slate-600",  dot: "bg-slate-500"  },
   plant_accounts:         { name: "Meera Iyer",   label: "Plant Accounts",       colorClass: "bg-neutral-600", dot: "bg-neutral-500" },
   accounts:               { name: "Priya Nair",   label: "Global Accounts",      colorClass: "bg-neutral-800", dot: "bg-neutral-700" },
@@ -35,8 +31,6 @@ function buildDynamicMeta(role: string, customPlants: PlantMeta[]) {
   for (const p of customPlants) {
     if (role === `buyer_${p.value}`)
       return { name: p.assignedUser ?? "Buyer", label: `Buyer · ${p.label}`, colorClass: "bg-blue-600", dot: "bg-blue-500" }
-    if (role === `plant_head_${p.value}`)
-      return { name: p.assignedUser ?? "Plant Head", label: `Plant Head · ${p.label}`, colorClass: "bg-primary", dot: "bg-primary/80" }
   }
   return null
 }
@@ -45,7 +39,6 @@ function roleCanSeeLink(role: string, linkRoles: string[] | undefined): boolean 
   if (!linkRoles) return true
   if (linkRoles.includes(role)) return true
   if (role.startsWith('buyer_') && linkRoles.some(r => r.startsWith('buyer_'))) return true
-  if (role.startsWith('plant_head_') && linkRoles.some(r => r.startsWith('plant_head_'))) return true
   return false
 }
 
@@ -58,16 +51,14 @@ type NavLink = {
 }
 
 const NAV: NavLink[] = [
-  { href: '/capex/dashboard',  label: 'Dashboard',        icon: LayoutDashboard, roles: ['buyer', 'buyer_jhajjar_p1', 'buyer_jhajjar_p2', 'sourcing_member', 'sourcing_head', 'maintenance', 'accounts', 'plant_accounts', 'super_admin'] },
+  { href: '/capex/dashboard',  label: 'Dashboard',        icon: LayoutDashboard, roles: ['buyer', 'buyer_jhajjar_p1', 'buyer_jhajjar_p2', 'sourcing_member', 'maintenance', 'accounts', 'plant_accounts', 'super_admin'] },
   { href: '/capex/new',        label: 'New Request',       icon: FilePlus,        roles: ['buyer', 'buyer_jhajjar_p1', 'buyer_jhajjar_p2', 'super_admin'] },
-  { href: '/capex/requests',   label: 'Pending Approvals', icon: List,            roles: ['plant_head', 'plant_head_jhajjar_p1', 'plant_head_jhajjar_p2'], params: '?filter=pending_head_approval' },
-  { href: '/capex/requests',   label: 'All Requests',      icon: List,            roles: ['plant_head', 'plant_head_jhajjar_p1', 'plant_head_jhajjar_p2'] },
-  { href: '/capex/requests',   label: 'Requests',          icon: List,            roles: ['buyer', 'buyer_jhajjar_p1', 'buyer_jhajjar_p2', 'sourcing_member', 'sourcing_head', 'maintenance', 'accounts', 'plant_accounts', 'super_admin'] },
-  { href: '/sourcing/vendors', label: 'Vendors',           icon: Users,           roles: ['sourcing_member', 'sourcing_head', 'super_admin'] },
-  { href: '/capex/master',     label: 'CAPEX Master',      icon: TableProperties, roles: ['plant_head', 'plant_head_jhajjar_p1', 'plant_head_jhajjar_p2', 'sourcing_member', 'sourcing_head', 'maintenance', 'super_admin'] },
-  { href: '/capex/budget-proposals', label: 'Budget Planning', icon: ClipboardList, roles: ['plant_head', 'plant_head_jhajjar_p1', 'plant_head_jhajjar_p2', 'sourcing_member', 'sourcing_head', 'maintenance', 'super_admin'] },
-  { href: '/capex/adhoc-budget', label: 'Adhoc Budget',    icon: ArrowLeftRight,  roles: ['plant_head', 'plant_head_jhajjar_p1', 'plant_head_jhajjar_p2', 'sourcing_member', 'sourcing_head', 'super_admin'] },
-  { href: '/capex/budget-approvals', label: 'Budget Approvals', icon: ClipboardCheck, roles: ['super_admin'] },
+  { href: '/capex/requests',   label: 'Requests',          icon: List,            roles: ['buyer', 'buyer_jhajjar_p1', 'buyer_jhajjar_p2', 'sourcing_member', 'maintenance', 'accounts', 'plant_accounts', 'super_admin'] },
+  { href: '/sourcing/vendors', label: 'Vendors',           icon: Users,           roles: ['sourcing_member', 'super_admin'] },
+  { href: '/capex/master',     label: 'CAPEX Master',      icon: TableProperties, roles: ['sourcing_member', 'maintenance', 'super_admin'] },
+  { href: '/capex/budget-proposals', label: 'Budget Planning', icon: ClipboardList, roles: ['sourcing_member', 'maintenance', 'super_admin'] },
+  { href: '/capex/adhoc-budget', label: 'Adhoc Budget',    icon: ArrowLeftRight,  roles: ['sourcing_member', 'super_admin'] },
+  { href: '/capex/budget-approvals', label: 'Budget Approvals', icon: ClipboardCheck, roles: ['accounts', 'super_admin'] },
   { href: '/accounts/queue',   label: 'Accounts',          icon: Wallet,          roles: ['accounts', 'plant_accounts', 'super_admin'] },
   { href: '/settings',         label: 'Configurations',    icon: Settings,        roles: ['super_admin'] },
 ]

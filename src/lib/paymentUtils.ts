@@ -3,10 +3,11 @@
  * split (e.g. 30% advance / 60% dispatch / 10% installation). Accounts (or sourcing) marks
  * each milestone paid; ticking the final one stops the TAT clock and completes the request.
  */
-import type { AwardStatus, CapexLineItem, CapexRequest, CapexStatus, PaymentMilestone, Vendor, VendorInvite } from './types';
+import type { AwardStatus, CapexLineItem, CapexRequest, CapexStatus, PaymentMilestone, TrialStatus, Vendor, VendorInvite } from './types';
 import { DEFAULT_PAYMENT_SPLITS } from './docPackageUtils';
-import { rfqTotal } from './rfqUtils';
+import { inrRfqTotal } from './rfqUtils';
 import { gstAmount } from './hsnGst';
+import { toInr } from './currencyUtils';
 
 const FULFILLMENT_STATUSES = ['pi_submitted', 'accounts_processing', 'payment_in_progress', 'completed'];
 
@@ -132,15 +133,18 @@ export function resolveFinalVendor(
   request: CapexRequest,
   invites: VendorInvite[],
 ): { invite?: VendorInvite; amount: number } {
+  // All amounts resolved on an INR basis (converts a foreign-currency quote) for PO/milestone math.
   if (request.sourcingMode === 'rfq' && request.finalVendorId) {
     const invite = invites.find(i => i.vendorId === request.finalVendorId);
-    return { invite, amount: invite?.rfqQuote ? rfqTotal(invite.rfqQuote, request.lineItems) : request.budget ?? 0 };
+    return { invite, amount: invite?.rfqQuote ? inrRfqTotal(invite.rfqQuote, request.lineItems) : request.budget ?? 0 };
   }
   const approved = invites.find(i => i.status === 'approved');
   if (approved) {
-    const q = approved.quotes[approved.quotes.length - 1];
+    // Auction ranks reset on start (seeded bid lives on openingQuote, not quotes[]) — fall back to
+    // the opening bid so an awarded vendor who never re-bid still has a price to fulfill against.
+    const q = approved.quotes[approved.quotes.length - 1] ?? approved.openingQuote;
     const amount = q
-      ? q.price + (q.freight ?? 0) + (q.packing ?? 0) + (q.service ?? 0)
+      ? toInr(q.price + (q.freight ?? 0) + (q.packing ?? 0) + (q.service ?? 0), q.currency)
       : request.budget ?? 0;
     return { invite: approved, amount };
   }
@@ -149,4 +153,38 @@ export function resolveFinalVendor(
 
 export function isFulfillmentStatus(status: string): boolean {
   return FULFILLMENT_STATUSES.includes(status);
+}
+
+// ── Trials + delivery-lead-time → final-payment date ─────────────────────────
+
+/**
+ * Whether the FINAL payment is blocked because a required trial has not been approved yet.
+ * Only the final (`isFinal`) milestone is gated — advance + interim milestones are unaffected.
+ */
+export function finalPaymentBlockedByTrial(entity: { trialRequired?: boolean; trialStatus?: TrialStatus }): boolean {
+  return !!entity.trialRequired && entity.trialStatus !== 'approved';
+}
+
+/** Delivery lead time in DAYS from a vendor invite (RFQ days → weeks fallback → auction quote). */
+export function deliveryLeadDays(invite?: VendorInvite): number | undefined {
+  if (!invite) return undefined;
+  const rq = invite.rfqQuote;
+  if (rq?.deliveryDays != null) return rq.deliveryDays;
+  if (rq?.deliveryWeeks != null) return rq.deliveryWeeks * 7;
+  const q = invite.quotes[invite.quotes.length - 1] ?? invite.openingQuote;
+  if (q?.deliveryDays != null) return q.deliveryDays;
+  return undefined;
+}
+
+/**
+ * Expected final-payment date = advance-tick date + delivery lead time (days). The delivery clock
+ * starts when Plant Accounts tick the advance milestone. Returns null when either input is missing.
+ */
+export function expectedFinalPaymentDate(advancePaidAt?: string, leadDays?: number): Date | null {
+  if (!advancePaidAt || leadDays == null) return null;
+  const start = new Date(advancePaidAt);
+  if (isNaN(start.getTime())) return null;
+  const d = new Date(start);
+  d.setDate(d.getDate() + Math.round(leadDays));
+  return d;
 }

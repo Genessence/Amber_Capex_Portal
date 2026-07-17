@@ -40,7 +40,8 @@ export function FinalDecisionActions({
   blockedReason?: string
 }) {
   const { awardAndRequestPi } = useCapex()
-  const canFinalize = currentRole === 'sourcing_head' || currentRole === 'super_admin'
+  // Sourcing team can award directly — there is no sourcing-head gate.
+  const canFinalize = ['sourcing_member', 'super_admin'].includes(currentRole)
   const actor = ROLE_NAMES[currentRole] ?? currentRole
   const lineItems = request.lineItems ?? []
   const sd = request.sourcingDecision
@@ -73,7 +74,7 @@ export function FinalDecisionActions({
   const box = 'rounded-lg border border-slate-200 bg-white p-4'
 
   if (!canFinalize) {
-    return <div className={`${box} text-sm text-slate-500`}>Awaiting the sourcing head to award the Final Decision.</div>
+    return <div className={`${box} text-sm text-slate-500`}>Awaiting the sourcing team to award the Final Decision.</div>
   }
   if (groups.length === 0) {
     return (
@@ -102,6 +103,9 @@ export function FinalDecisionActions({
         </button>
       </div>
       {!canAward && blockedReason && <p className="text-xs text-amber-700">{blockedReason}</p>}
+      {request.trialRequired && (
+        <p className="text-[11px] font-semibold text-blue-700">Item trial is ON — the awarded vendor(s) will upload a trial and the final payment is blocked until you approve it.</p>
+      )}
       <div className="border-t border-slate-100 divide-y divide-slate-100">
         {groups.map(g => {
           const inv = inviteFor(g.vendorId)

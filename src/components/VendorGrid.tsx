@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { useCapex } from "@/lib/capexContext"
 import { buildSupplierLink } from "@/lib/tokenUtils"
 import { isAuctionExpired } from "@/lib/auctionUtils"
+import { toInr } from "@/lib/currencyUtils"
 import { INVITE_STATUS_COLORS, INVITE_STATUS_ICONS, SOURCING_ENGINEERS, ROLE_NAMES } from "@/lib/constants"
 import type { CapexRequest, CapexLineItem, VendorInvite, Vendor, Quote, SourcingDecision } from "@/lib/types"
 
@@ -29,7 +30,7 @@ interface Props {
 }
 
 const isSourcingRole = (role: string) =>
-  ["sourcing_member", "sourcing_member_2", "sourcing_member_3", "sourcing_member_4", "sourcing_head", "super_admin"].includes(role)
+  ["sourcing_member", "sourcing_member_2", "sourcing_member_3", "sourcing_member_4", "super_admin"].includes(role)
 
 /* ── Shared style constants (module-level = stable references, no per-render DOM thrashing) ── */
 const LABEL_TD_CLASS =
@@ -345,7 +346,8 @@ function ItemRowGrid({ request, invites, vendors, currentRole, onSelectFinal, au
   // not the legacy single "✓ OK" / "✓ Approve → buyer" controls.
   const ranAuction = !!request.auctionConfig?.endsAt
   const auctionEnded = ranAuction && isAuctionExpired(request.auctionConfig)
-  const canFinalize = currentRole === "sourcing_head" || currentRole === "super_admin"
+  // Sourcing team can award directly — no sourcing-head gate.
+  const canFinalize = ["sourcing_member", "super_admin"].includes(currentRole)
 
   // Lock the editable offer / final-decision cells once a final vendor is chosen. The auction
   // path now stays in `sourcing` after finalize (mirrors RFQ), so key off the approved invite
@@ -407,9 +409,12 @@ function ItemRowGrid({ request, invites, vendors, currentRole, onSelectFinal, au
     // Auto-fill the Final Decision price from the chosen vendor's quoted line price for this item.
     if (val) {
       const inv = invites.find(i => i.vendorId === val)
-      const q = inv?.quotes[inv.quotes.length - 1]
-      const unit = q ? (q.itemPrices?.[itemId] ?? q.price) : undefined
-      if (unit != null) setFinalPrices(p => ({ ...p, [`${itemId}-price`]: String(unit) }))
+      // Fall back to the seeded opening bid — after an auction start, ranks reset (quotes[] empty)
+      // until a vendor re-bids, but the opening bid still carries the award price.
+      const q = inv?.quotes[inv.quotes.length - 1] ?? inv?.openingQuote
+      const rawUnit = q ? (q.itemPrices?.[itemId] ?? q.price) : undefined
+      // Store the award price in INR (converts a foreign quote), so the PO/milestone amounts are INR.
+      if (rawUnit != null) setFinalPrices(p => ({ ...p, [`${itemId}-price`]: String(Math.round(toInr(rawUnit, q?.currency))) }))
     }
   }, [invites])
 
@@ -675,7 +680,7 @@ function ItemRowGrid({ request, invites, vendors, currentRole, onSelectFinal, au
               { key: "freight",  label: "Transportation / Freight",   placeholder: "Enter freight",            getVal: (q: Quote) => q.freight  != null ? String(q.freight)  : "0" },
               { key: "packing",  label: "Packing / Forwarding",       placeholder: "Enter packing charges",    getVal: (q: Quote) => q.packing  != null ? String(q.packing)  : "0" },
               { key: "service",  label: "Service / Installation",     placeholder: "Enter service / install",  getVal: (q: Quote) => q.service  != null ? String(q.service)  : "0" },
-              { key: "delivery", label: "Delivery Lead Time (Weeks)", placeholder: "Enter delivery lead time", getVal: (q: Quote) => String(Math.round(q.deliveryDays / 7)) },
+              { key: "delivery", label: "Delivery Lead Time (Days)", placeholder: "Enter delivery lead time", getVal: (q: Quote) => String(q.deliveryDays) },
               { key: "warranty", label: "Warranty (Years)",           placeholder: "Enter warranty",           getVal: (q: Quote) => q.warranty != null ? String(q.warranty) : "0" },
             ].map((attr, attrIdx) => (
               <tr key={attr.key} className={attrIdx % 2 === 0 ? "bg-slate-50/70" : "bg-white"}>
@@ -786,8 +791,15 @@ function ItemRowGrid({ request, invites, vendors, currentRole, onSelectFinal, au
               {vendorCols.map(({ inv, latestQuote }, colIdx) => {
                 const q = latestQuote
                 const total = q
-                  ? items.reduce((s, item) => s + q.price * (parseFloat(item.quantity) || 1), 0)
-                    + (q.freight ?? 0) + (q.packing ?? 0) + (q.service ?? 0)
+                  ? (() => {
+                      const itemSubtotal = q.itemPrices
+                        ? items.reduce(
+                            (s, item) => s + (q.itemPrices![item.id] ?? 0) * (parseFloat(item.quantity) || 1),
+                            0,
+                          )
+                        : q.price
+                      return itemSubtotal + (q.freight ?? 0) + (q.packing ?? 0) + (q.service ?? 0)
+                    })()
                   : 0
                 return (
                   <td key={inv.id}
@@ -1007,7 +1019,7 @@ function AttributeRowGrid({ request, invites, vendors, currentRole, onSelectFina
       freight:  q?.freight  != null ? String(q.freight)  : "",
       packing:  q?.packing  != null ? String(q.packing)  : "",
       service:  q?.service  != null ? String(q.service)  : "",
-      delivery: q ? String(Math.round(q.deliveryDays / 7)) : "",
+      delivery: q ? String(q.deliveryDays) : "",
       warranty: q?.warranty != null ? String(q.warranty) : "",
       currency: q?.currency ?? "INR",
       remarks:  "",
@@ -1073,7 +1085,7 @@ function AttributeRowGrid({ request, invites, vendors, currentRole, onSelectFina
                       <div className="flex items-center justify-center gap-1 mt-2">
                         <button onClick={() => copyLink(invite)} className="p-1.5 rounded-md text-slate-400 hover:text-[#171717] hover:bg-[#E5E5E5] transition-colors"><Copy className="w-3.5 h-3.5" /></button>
                         {isLatest && <button onClick={() => setEmailOpenId(id => id === invite.id ? null : invite.id)} className={["p-1.5 rounded-md transition-colors", emailOpenId === invite.id ? "bg-[#E5E5E5] text-[#171717]" : "text-slate-400 hover:text-[#171717] hover:bg-[#E5E5E5]"].join(" ")}><Mail className="w-3.5 h-3.5" /></button>}
-                        {currentRole === "sourcing_head" && isLatest && !isApproved && invite.quotes.length > 0 && (
+                        {isSourcingRole(currentRole) && isLatest && !isApproved && invite.quotes.length > 0 && (
                           <Button size="sm" disabled={auctionLive} title={auctionLive ? "Auction in progress — finalize the winner after it ends" : "Approve this vendor"} onClick={() => approveInvite(invite.id)} className="h-6 px-2.5 text-xs bg-slate-600 hover:bg-slate-700 text-white ml-0.5 disabled:opacity-40 disabled:cursor-not-allowed">Approve</Button>
                         )}
                       </div>
@@ -1131,7 +1143,7 @@ function AttributeRowGrid({ request, invites, vendors, currentRole, onSelectFina
                     { label: "Freight (₹)",    key: "freight",  bg: "bg-slate-50/40", getValue: (q: Quote) => q.freight  != null ? `₹${q.freight.toLocaleString("en-IN")}` : "—",  getFD: () => <input type="number" value={finalForm.freight}  onChange={e => setFinalForm(f => ({ ...f, freight:  e.target.value }))} placeholder="₹ Freight" className={FD_INPUT} /> },
                     { label: "Packing (₹)",    key: "packing",  bg: "bg-white",       getValue: (q: Quote) => q.packing  != null ? `₹${q.packing.toLocaleString("en-IN")}` : "—",  getFD: () => <input type="number" value={finalForm.packing}  onChange={e => setFinalForm(f => ({ ...f, packing:  e.target.value }))} placeholder="₹ Packing" className={FD_INPUT} /> },
                     { label: "Service (₹)",    key: "service",  bg: "bg-slate-50/40", getValue: (q: Quote) => q.service  != null ? `₹${q.service.toLocaleString("en-IN")}` : "—",  getFD: () => <input type="number" value={finalForm.service}  onChange={e => setFinalForm(f => ({ ...f, service:  e.target.value }))} placeholder="₹ Service" className={FD_INPUT} /> },
-                    { label: "Delivery (wks)", key: "delivery", bg: "bg-white",       getValue: (q: Quote) => `${Math.round(q.deliveryDays / 7)} wks`, getFD: () => <input type="number" value={finalForm.delivery} onChange={e => setFinalForm(f => ({ ...f, delivery: e.target.value }))} placeholder="Weeks"    className={FD_INPUT} /> },
+                    { label: "Delivery (days)", key: "delivery", bg: "bg-white",       getValue: (q: Quote) => `${q.deliveryDays} days`, getFD: () => <input type="number" value={finalForm.delivery} onChange={e => setFinalForm(f => ({ ...f, delivery: e.target.value }))} placeholder="Days"    className={FD_INPUT} /> },
                     { label: "Warranty (yrs)", key: "warranty", bg: "bg-slate-50/40", getValue: (q: Quote) => q.warranty != null ? `${q.warranty} yr${q.warranty !== 1 ? "s" : ""}` : "—", getFD: () => <input type="number" value={finalForm.warranty} onChange={e => setFinalForm(f => ({ ...f, warranty: e.target.value }))} placeholder="Years"    className={FD_INPUT} /> },
                   ].map(row => (
                     <tr key={row.key} className={row.bg}>
@@ -1255,7 +1267,7 @@ function AttributeRowGrid({ request, invites, vendors, currentRole, onSelectFina
                   <div className="px-4 py-3 text-xs text-slate-600 space-y-3">
                     {latestQ ? (
                       <div className="rounded-lg bg-slate-50 border border-slate-100 px-3 py-2.5 space-y-2">
-                        {[{ label: "Unit Price", value: "₹" + latestQ.price.toLocaleString("en-IN"), bold: true }, { label: "Delivery", value: `${Math.round(latestQ.deliveryDays / 7)} weeks`, bold: false }, { label: "Valid Until", value: new Date(latestQ.validUntil).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }), bold: false }].map(({ label, value, bold }) => (
+                        {[{ label: "Unit Price", value: "₹" + latestQ.price.toLocaleString("en-IN"), bold: true }, { label: "Delivery", value: `${latestQ.deliveryDays} days`, bold: false }, { label: "Valid Until", value: new Date(latestQ.validUntil).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }), bold: false }].map(({ label, value, bold }) => (
                           <div key={label} className="flex gap-2"><span className="text-[10px] font-bold text-slate-400 uppercase w-20 shrink-0">{label}</span><span className={bold ? "text-sm font-bold text-slate-800" : "text-xs text-slate-700"}>{value}</span></div>
                         ))}
                       </div>
@@ -1277,7 +1289,7 @@ function AttributeRowGrid({ request, invites, vendors, currentRole, onSelectFina
           <div className="overflow-x-auto">
             <table className="w-full text-sm border-collapse">
               <thead><tr className="bg-slate-50 border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
-                {["Vendor", "Base Price", "Freight", "Packing", "Service", "Total", "Delivery", "Warranty", "Status", ...(currentRole === "sourcing_head" ? ["Action"] : [])].map(h => (
+                {["Vendor", "Base Price", "Freight", "Packing", "Service", "Total", "Delivery", "Warranty", "Status", ...(isSourcingRole(currentRole) ? ["Action"] : [])].map(h => (
                   <th key={h} scope="col" className={["px-4 py-2.5 font-semibold", h === "Vendor" ? "text-left" : h === "Action" ? "text-center" : "text-right"].join(" ")}>{h}</th>
                 ))}
               </tr></thead>
@@ -1300,10 +1312,10 @@ function AttributeRowGrid({ request, invites, vendors, currentRole, onSelectFina
                       <td className="px-4 py-3 text-right text-slate-600">{quote.packing != null ? `₹${quote.packing.toLocaleString("en-IN")}` : "—"}</td>
                       <td className="px-4 py-3 text-right text-slate-600">{quote.service != null ? `₹${quote.service.toLocaleString("en-IN")}` : "—"}</td>
                       <td className="px-4 py-3 text-right font-bold text-slate-800">₹{total.toLocaleString("en-IN")}</td>
-                      <td className="px-4 py-3 text-center text-slate-600">{Math.round(quote.deliveryDays / 7)} wks</td>
+                      <td className="px-4 py-3 text-center text-slate-600">{quote.deliveryDays} days</td>
                       <td className="px-4 py-3 text-center text-slate-600">{quote.warranty != null ? `${quote.warranty} yr${quote.warranty !== 1 ? "s" : ""}` : "—"}</td>
                       <td className="px-4 py-3 text-center"><span className={["inline-flex items-center gap-1.5 text-xs font-semibold px-2 py-0.5 rounded-full", INVITE_STATUS_COLORS[inv.status] ?? "bg-slate-200 text-slate-600"].join(" ")}>{(() => { const I = INVITE_STATUS_ICONS[inv.status]; return I ? <I className="w-3.5 h-3.5 shrink-0" strokeWidth={2.25} aria-hidden /> : null })()}{INVITE_STATUS_LABELS[inv.status] ?? inv.status}</span></td>
-                      {currentRole === "sourcing_head" && <td className="px-4 py-3 text-center">{isApproved ? <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-100 text-slate-700">✓ Selected</span> : <button disabled={!!approvedInviteId || auctionLive} title={auctionLive ? "Auction in progress — finalize the winner after it ends" : "Select as final vendor"} onClick={() => { approveInvite(inv.id); onSelectFinal?.(inv.id) }} className="px-3 py-1.5 rounded-lg bg-[#171717] hover:bg-[#000000] text-white text-xs font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed">Select as Final</button>}</td>}
+                      {isSourcingRole(currentRole) && <td className="px-4 py-3 text-center">{isApproved ? <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-100 text-slate-700">✓ Selected</span> : <button disabled={!!approvedInviteId || auctionLive} title={auctionLive ? "Auction in progress — finalize the winner after it ends" : "Select as final vendor"} onClick={() => { approveInvite(inv.id); onSelectFinal?.(inv.id) }} className="px-3 py-1.5 rounded-lg bg-[#171717] hover:bg-[#000000] text-white text-xs font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed">Select as Final</button>}</td>}
                     </tr>
                   )
                 })}
