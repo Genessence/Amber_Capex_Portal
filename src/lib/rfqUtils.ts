@@ -7,6 +7,7 @@
  */
 import type { RfqPriceStatus, RfqQuote, VendorInvite, RfqPriceMessage, CapexLineItem } from './types';
 import { effectiveDocApprovalStatus } from './docPackageUtils';
+import { incoTermsBlocksAward } from './incoTermsUtils';
 import { gstAmount, gstRateForHsn } from './hsnGst';
 import { toInr } from './currencyUtils';
 
@@ -188,13 +189,16 @@ export function latestRfqOffer(invite: VendorInvite): RfqPriceMessage | undefine
 }
 
 /**
- * A vendor is ready for a PI request once BOTH the quotation is approved AND the approval
- * documents (auto-sent on price agreement) are approved by the vendor.
+ * A vendor is ready for a PI request once the quotation is approved, the approval documents
+ * (auto-sent on price agreement) are approved by the vendor, and — for a foreign vendor — the
+ * Incoterms agreement has been settled. Incoterms are answered alongside the quotation and
+ * negotiated separately, so they can still be open when the price is agreed.
  */
 export function canRequestPi(invite: VendorInvite): boolean {
   return (
     effectiveRfqStatus(invite) === 'approved' &&
-    effectiveDocApprovalStatus(invite.docApprovalStatus) === 'approved'
+    effectiveDocApprovalStatus(invite.docApprovalStatus) === 'approved' &&
+    !incoTermsBlocksAward(invite)
   );
 }
 

@@ -6,6 +6,7 @@ import { toast } from "sonner"
 import { CheckIcon, ClockIcon, SearchIcon, BellIcon, CheckCircleIcon, XCircleIcon, Gavel, Timer, Copy, Users, Plus, X, FileText, Printer, Bell, UserX, AlertCircle, ArrowLeftRight } from "lucide-react"
 import { VendorGrid } from "@/components/VendorGrid"
 import { FinalDecisionActions } from "@/components/FinalDecisionActions"
+import { TechSpecPanel } from "@/components/TechSpecPanel"
 import { RfqPanel } from "@/components/RfqPanel"
 import { AccountsPanel } from "@/components/AccountsPanel"
 import { TatBanner } from "@/components/TatBanner"
@@ -2175,6 +2176,17 @@ export default function CapexDetailPage() {
                 auctionSelectedVendorIds={auctionSelectedVendorIds}
                 onAuctionSelectionChange={setAuctionSelectedVendorIds}
               />
+
+              {/* Technical spec sign-off — the gate that must clear BEFORE the award below */}
+              {(request.status === "sourcing" || awardBased) && (
+                <TechSpecPanel
+                  request={request}
+                  invites={reqInvites}
+                  vendors={vendors}
+                  canManage={canManageSourcing}
+                  senderName={ROLE_NAMES[currentRole] ?? currentRole}
+                />
+              )}
 
               {/* Unified Final-Decision approve + Request-PI (split award; bulk or per-vendor) */}
               {canManageSourcing && (request.status === "sourcing" || awardBased) && (

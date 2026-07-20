@@ -22,7 +22,6 @@ import {
   BUDGET_PROPOSAL_STATUS_LABELS,
   createProposalFromLiveFy,
   emptyProposalItem,
-  diffProposalAgainstLive,
   parsedRowToProposalItem,
   proposalTotalCr,
   summarizeProposalByHead,
@@ -107,7 +106,6 @@ export default function BudgetProposalsPage() {
       <BudgetProposalEditor
         proposal={editing}
         plantLabel={plantLabel(editing.plant)}
-        liveDiff={diffProposalAgainstLive(editing, capexMaster)}
         onBack={() => setEditingId(null)}
         onSave={(updates) => updateBudgetProposal(editing.id, updates)}
         onSubmit={() => {
@@ -230,7 +228,6 @@ export default function BudgetProposalsPage() {
 interface EditorProps {
   proposal: BudgetProposal
   plantLabel: string
-  liveDiff: ReturnType<typeof diffProposalAgainstLive>
   onBack: () => void
   onSave: (updates: Partial<BudgetProposal>) => void
   onSubmit: () => void

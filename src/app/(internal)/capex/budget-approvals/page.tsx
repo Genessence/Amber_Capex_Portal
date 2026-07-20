@@ -6,13 +6,13 @@ import { toast } from 'sonner'
 import { ClipboardCheck, Check, X, ChevronDown, ChevronRight, RotateCcw, Landmark } from 'lucide-react'
 import { useCapex } from '@/lib/capexContext'
 import { BudgetCorrectionPanel } from '@/components/BudgetCorrectionPanel'
+import { BudgetProposalBreakdown } from '@/components/BudgetProposalBreakdown'
 import { PLANTS, ROLE_NAMES } from '@/lib/constants'
 import type { BudgetProposal, BudgetProposalItem } from '@/lib/types'
 import { PROJECT_TYPE_LABELS } from '@/lib/greenFieldConstants'
 import {
   BUDGET_PROPOSAL_STATUS_COLORS,
   BUDGET_PROPOSAL_STATUS_LABELS,
-  diffProposalAgainstLive,
   proposalTotalCr,
 } from '@/lib/budgetProposalUtils'
 import { ADHOC_STATUS_COLORS, ADHOC_STATUS_LABELS, effectiveHeadAllocationCr, headUsedCr } from '@/lib/adhocBudgetUtils'
@@ -126,7 +126,6 @@ export default function BudgetApprovalsPage() {
               No proposals awaiting approval.
             </p>
           ) : pending.map(p => {
-            const diff = diffProposalAgainstLive(p, capexMaster)
             const isOpen = expanded === p.id
             return (
               <div key={p.id} className="rounded-xl border border-border bg-card overflow-hidden">
@@ -162,31 +161,10 @@ export default function BudgetApprovalsPage() {
                 )}
                 {isOpen && (
                   <div className="border-t border-border px-4 py-3 bg-muted/30">
-                    <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wide mb-2">Per-head change vs live FY {p.sourceFy ?? '—'}</p>
-                    <table className="w-full text-sm">
-                      <thead className="text-[11px] uppercase text-muted-foreground">
-                        <tr>
-                          <th className="text-left py-1 font-semibold">Head</th>
-                          <th className="text-right py-1 font-semibold">Live</th>
-                          <th className="text-right py-1 font-semibold">Proposed</th>
-                          <th className="text-right py-1 font-semibold">Δ</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {diff.map(d => (
-                          <tr key={d.head} className="border-t border-border/60">
-                            <td className="py-1.5 text-foreground">{d.head}</td>
-                            <td className="py-1.5 text-right font-mono text-muted-foreground">{fmtCr(d.liveCr)}</td>
-                            <td className="py-1.5 text-right font-mono">{fmtCr(d.proposedCr)}</td>
-                            <td className={`py-1.5 text-right font-mono font-semibold ${
-                              d.deltaCr > 0 ? 'text-slate-700' : d.deltaCr < 0 ? 'text-red-600' : 'text-muted-foreground'
-                            }`}>
-                              {d.deltaCr > 0 ? '+' : ''}{fmtCr(d.deltaCr)}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                    <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wide mb-2">
+                      Proposed FY {p.targetFy} budget · head &amp; sub particulars
+                    </p>
+                    <BudgetProposalBreakdown proposal={p} />
                   </div>
                 )}
               </div>
@@ -206,7 +184,6 @@ export default function BudgetApprovalsPage() {
               No proposals awaiting Global Accounts sign-off.
             </p>
           ) : pendingAccounts.map(p => {
-            const diff = diffProposalAgainstLive(p, capexMaster)
             const isOpen = expanded === p.id
             return (
               <div key={p.id} className="rounded-xl border border-border bg-card overflow-hidden">
@@ -233,31 +210,10 @@ export default function BudgetApprovalsPage() {
                 </div>
                 {isOpen && (
                   <div className="border-t border-border px-4 py-3 bg-muted/30">
-                    <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wide mb-2">Per-head change vs live FY {p.sourceFy ?? '—'}</p>
-                    <table className="w-full text-sm">
-                      <thead className="text-[11px] uppercase text-muted-foreground">
-                        <tr>
-                          <th className="text-left py-1 font-semibold">Head</th>
-                          <th className="text-right py-1 font-semibold">Live</th>
-                          <th className="text-right py-1 font-semibold">Proposed</th>
-                          <th className="text-right py-1 font-semibold">Δ</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {diff.map(d => (
-                          <tr key={d.head} className="border-t border-border/60">
-                            <td className="py-1.5 text-foreground">{d.head}</td>
-                            <td className="py-1.5 text-right font-mono text-muted-foreground">{fmtCr(d.liveCr)}</td>
-                            <td className="py-1.5 text-right font-mono">{fmtCr(d.proposedCr)}</td>
-                            <td className={`py-1.5 text-right font-mono font-semibold ${
-                              d.deltaCr > 0 ? 'text-slate-700' : d.deltaCr < 0 ? 'text-red-600' : 'text-muted-foreground'
-                            }`}>
-                              {d.deltaCr > 0 ? '+' : ''}{fmtCr(d.deltaCr)}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                    <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wide mb-2">
+                      Proposed FY {p.targetFy} budget · head &amp; sub particulars
+                    </p>
+                    <BudgetProposalBreakdown proposal={p} />
                   </div>
                 )}
               </div>

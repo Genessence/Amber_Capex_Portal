@@ -6,12 +6,12 @@ import { CheckCircle2, XCircle, ShieldCheck, FileText, Building2, Landmark, Cloc
 import { useCapex } from '@/lib/capexContext'
 import { resolveApprovalTarget } from '@/lib/tokenUtils'
 import { BudgetCorrectionPanel } from '@/components/BudgetCorrectionPanel'
+import { BudgetProposalBreakdown } from '@/components/BudgetProposalBreakdown'
 import { SUPPLIER_CARD } from '@/lib/uiTokens'
 import { FIELD_TYPE_LABELS } from '@/lib/types'
 import { STATUS_LABELS } from '@/lib/constants'
 import {
   BUDGET_PROPOSAL_STATUS_LABELS,
-  summarizeProposalByHead,
   proposalTotalCr,
 } from '@/lib/budgetProposalUtils'
 
@@ -174,7 +174,6 @@ export default function ApprovePage() {
       </Shell>
     )
   }
-  const heads = summarizeProposalByHead(p.items)
   const total = proposalTotalCr(p)
   return (
     <Shell>
@@ -188,35 +187,10 @@ export default function ApprovePage() {
           <span className="inline-flex items-center gap-1"><Building2 className="w-3.5 h-3.5" /> {p.plant}</span>
           <span className="uppercase">{p.projectType}</span>
           <span>{p.items.length} line items</span>
+          <span className="font-semibold text-foreground tabular-nums">{cr(total)}</span>
         </div>
 
-        <div className="mt-4 rounded-lg border border-border overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-muted/40 text-[11px] uppercase tracking-wider text-muted-foreground">
-                <th className="text-left px-3 py-2 font-semibold">Head</th>
-                <th className="text-right px-3 py-2 font-semibold">Rows</th>
-                <th className="text-right px-3 py-2 font-semibold">Budget (Cr)</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {heads.map((h) => (
-                <tr key={h.head}>
-                  <td className="px-3 py-2 text-foreground">{h.head}</td>
-                  <td className="px-3 py-2 text-right text-muted-foreground">{h.count}</td>
-                  <td className="px-3 py-2 text-right font-semibold tabular-nums">{cr(h.totalCr)}</td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr className="bg-[#F4F4F5] font-bold">
-                <td className="px-3 py-2">Total</td>
-                <td className="px-3 py-2 text-right">{p.items.length}</td>
-                <td className="px-3 py-2 text-right tabular-nums">{cr(total)}</td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
+        <BudgetProposalBreakdown proposal={p} className="mt-4" />
 
         <div className="mt-6 flex flex-col sm:flex-row gap-2">
           <button

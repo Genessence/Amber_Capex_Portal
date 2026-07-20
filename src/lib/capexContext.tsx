@@ -30,18 +30,34 @@ import {
   RfqQuote,
   SourcingDecision,
   TrialMessage,
+  TechSpecDocument,
   TrialStatus,
   TrialSubmission,
   Vendor,
   VendorInvite,
 } from './types';
 import { buildMasterItemsFromProposal } from './budgetProposalUtils';
-import { generateApprovalToken, generatePoToken } from './tokenUtils';
+import { generateApprovalToken, generatePoToken, generateTechSpecToken } from './tokenUtils';
 import { buildDocApprovalPackage, effectiveDocApprovalStatus } from './docPackageUtils';
 import { buildAwardGroups, deriveRequestStatus, isAwardBased, awardedInvites, finalPaymentBlockedByTrial } from './paymentUtils';
 import { effectiveRfqStatus, resolveSupplierItemHsn, rfqTotal } from './rfqUtils';
 import { toInr } from './currencyUtils';
-import { buildBlankIncoTermsDoc, effectiveIncoTermsStatus } from './incoTermsUtils';
+import {
+  buildBlankIncoTermsDoc,
+  effectiveIncoTermsStatus,
+  incoTermsRequired,
+  isIncoDocComplete,
+  needsIncoTermsWithQuote,
+} from './incoTermsUtils';
+import {
+  MAX_TECH_SPEC_DOCS,
+  buildBlankTechSpec,
+  canDecideTechSpec,
+  canSendTechSpec,
+  effectiveTechSpecStatus,
+  isTechSpecReadyToSend,
+  techSpecBlocksAward,
+} from './techSpecUtils';
 import { getAllFiles, putAllFiles, type FileMap } from './fileStore';
 import { effectiveHeadAllocationCr } from './adhocBudgetUtils';
 import { FLAT_MASTER_DIVISION } from './greenFieldConstants';
@@ -209,6 +225,8 @@ interface CapexContextValue {
     senderName: string,
     message?: string,
     itemHsn?: Record<string, string>,
+    /** Foreign vendors answer the Incoterms questionnaire with their quotation — both save atomically. */
+    incoDoc?: IncoTermsDoc,
   ) => boolean;
   /** Either side accepts or rejects the quotation currently on the table. */
   respondToRfqQuote: (
@@ -232,6 +250,21 @@ interface CapexContextValue {
   proposeIncoTerms: (inviteId: string, doc: IncoTermsDoc, by: 'sourcing' | 'vendor', senderName: string, message?: string) => void;
   respondToIncoTerms: (inviteId: string, response: 'approved' | 'rejected', by: 'sourcing' | 'vendor', senderName: string, message?: string) => void;
   requestProformaInvoice: (requestId: string, vendorId: string, actor: string) => void;
+  // ── Technical specification approval (pre-award gate, per vendor) ──
+  /** Attach/remove spec documents or edit the notes on a vendor's spec package. */
+  saveTechSpecDraft: (
+    inviteId: string,
+    patch: { notes?: string; addDocuments?: TechSpecDocument[]; removeDocumentId?: string },
+  ) => boolean;
+  /** Send (or re-send) a vendor's machine spec to the Technical team; mints/rotates the public link. */
+  sendTechSpecForApproval: (inviteId: string, senderName: string, notes?: string) => boolean;
+  /** Technical team's verdict from the public /tech-spec/[token] page. */
+  decideTechSpec: (
+    inviteId: string,
+    decision: 'approved' | 'rejected' | 'needs_revision',
+    deciderName: string,
+    note?: string,
+  ) => boolean;
   submitProformaInvoice: (inviteId: string, pi: ProformaInvoice) => void;
   // ── Split award (reverse auction): finalize per-line vendor selections into per-vendor awards ──
   finalizeSplitAward: (requestId: string, decision?: SourcingDecision, onlyVendorId?: string) => void;
@@ -453,6 +486,18 @@ function stripInviteFiles(invites: VendorInvite[], files: FileMap): VendorInvite
       files[`trial:${inv.id}`] = inv.trialSubmission.base64;
       v = { ...v, trialSubmission: { ...inv.trialSubmission, base64: '' } };
     }
+    if (inv.techSpec?.documents?.some((d) => d.base64)) {
+      v = {
+        ...v,
+        techSpec: {
+          ...inv.techSpec,
+          documents: inv.techSpec.documents.map((d) => {
+            if (d.base64) { files[`techspec:${d.id}`] = d.base64; return { ...d, base64: '' }; }
+            return d;
+          }),
+        },
+      };
+    }
     return v;
   });
 }
@@ -537,6 +582,18 @@ function hydrateInviteFiles(invites: VendorInvite[], files: FileMap): VendorInvi
       const f = files[`trial:${inv.id}`];
       if (f) v = { ...v, trialSubmission: { ...inv.trialSubmission, base64: f } };
     }
+    if (inv.techSpec?.documents?.length) {
+      v = {
+        ...v,
+        techSpec: {
+          ...inv.techSpec,
+          documents: inv.techSpec.documents.map((d) => {
+            const f = files[`techspec:${d.id}`];
+            return f ? { ...d, base64: f } : d;
+          }),
+        },
+      };
+    }
     return v;
   });
 }
@@ -619,6 +676,14 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
   // were just read FROM localStorage (storage event path). Writing back would
   // trigger the other tab's storage listener, creating an infinite ping-pong.
   const skipNextPersist = useRef(false);
+  /**
+   * True once the IndexedDB file map has been read back into state. Until then the in-memory
+   * state is LEAN (base64 stripped by the previous session's write), so persisting the file map
+   * would overwrite IndexedDB with an empty object and destroy every stored blob — PIs, PO
+   * documents, trial uploads, spec sheets, attachments. localStorage still persists normally;
+   * only the blob write waits for hydration.
+   */
+  const filesHydrated = useRef(false);
 
   useEffect(() => {
     try {
@@ -729,8 +794,9 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
     } catch (e) {
       console.error('[CapexContext] Failed to persist to localStorage', e);
     }
-    // File blobs go to IndexedDB (much larger quota); fire-and-forget.
-    void putAllFiles(files);
+    // File blobs go to IndexedDB (much larger quota); fire-and-forget. Skipped until hydration
+    // has merged the stored blobs back into state — writing the lean map first would wipe them.
+    if (filesHydrated.current) void putAllFiles(files);
   }, [requests, vendors, invites, chatMessages, plants, categories, capexMaster, masterHeads, customPlants, greenFieldBudgetAllocations, budgetProposals, adhocBudgetRequests, brownFieldHeadAllocations, brownfieldSeedVersion, digitisationMigrationVersion, flatMasterMigrationVersion, greenFieldSectionMigrationVersion, brownFieldNestedMigrationVersion]);
 
   // Hydrate file blobs from IndexedDB after the initial (lean) load — metadata renders
@@ -739,7 +805,10 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
     if (!loaded) return;
     let cancelled = false;
     getAllFiles().then((files) => {
-      if (cancelled || !files || !Object.keys(files).length) return;
+      if (cancelled) return;
+      // Blob writes are unblocked either way — an empty map is a legitimate "nothing stored yet".
+      filesHydrated.current = true;
+      if (!files || !Object.keys(files).length) return;
       skipNextPersist.current = true;
       setRequests((prev) => hydrateRequestFiles(prev, files));
       setInvites((prev) => hydrateInviteFiles(prev, files));
@@ -879,8 +948,8 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
                   : { docApprovalStatus: 'not_sent' as const }),
               }
             : {};
-          // Foreign vendors must accept the Incoterms agreement before quoting/bidding (gates the
-          // supplier form) — seed the blank doc up front regardless of RFQ/auction mode.
+          // Foreign vendors answer the Incoterms questionnaire WITH their quotation — seed the
+          // blank doc up front (status `awaiting_vendor`) so the portal knows to ask at submit.
           const incoBits = isForeign
             ? {
                 incoTermsStatus: 'awaiting_vendor' as const,
@@ -1197,6 +1266,12 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
    * → awaiting sourcing; sourcing counters inline (by 'sourcing') → awaiting vendor. Documents are
    * NOT sent here — they auto-send only once the price is agreed (see respondToRfqQuote). Untrusted
    * supplier input is sanitized: price must be finite > 0; footer charges coerced to non-negative.
+   *
+   * INCO Terms ride along with a FOREIGN vendor's first quotation (`incoDoc`): the portal collects
+   * the 12 answers in a modal behind the Submit button and passes them here, so the quote and the
+   * Incoterms land in **one state pass** — either both persist or neither does. A foreign vendor
+   * who has never answered the questionnaire cannot submit a quotation without it; the check runs
+   * here (not only in the UI) so the invariant holds for every caller.
    */
   function proposeRfqQuote(
     inviteId: string,
@@ -1205,6 +1280,7 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
     senderName: string,
     message?: string,
     itemHsn?: Record<string, string>,
+    incoDoc?: IncoTermsDoc,
   ): boolean {
     const clean = sanitizeRfqQuote(quote);
     if (!clean) {
@@ -1220,6 +1296,29 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
       hsnPatch = resolveSupplierItemHsn(targetRequest.lineItems, clean, itemHsn);
       if (!hsnPatch) {
         console.error('proposeRfqQuote: missing HSN for one or more line items');
+        return false;
+      }
+    }
+    // ── INCO Terms attached to a supplier quotation ──────────────────────────
+    let incoPatch: Pick<VendorInvite, 'incoTermsDoc' | 'incoTermsStatus'> | null = null;
+    if (by === 'supplier' && targetInvite) {
+      const vendor = vendors.find((v) => v.id === targetInvite.vendorId) ?? null;
+      const mustAnswer = needsIncoTermsWithQuote(targetInvite, vendor);
+      if (incoDoc) {
+        if (!incoTermsRequired(vendor)) {
+          console.error('proposeRfqQuote: INCO Terms supplied for a vendor that does not need them');
+          return false;
+        }
+        if (!isIncoDocComplete(incoDoc)) {
+          console.error('proposeRfqQuote: incomplete INCO Terms rejected — quotation not saved');
+          return false;
+        }
+        incoPatch = {
+          incoTermsDoc: { ...incoDoc, sentAt: incoDoc.sentAt ?? new Date().toISOString() },
+          incoTermsStatus: 'pending_sourcing',
+        };
+      } else if (mustAnswer) {
+        console.error('proposeRfqQuote: foreign vendor must answer the INCO Terms with the quotation');
         return false;
       }
     }
@@ -1257,12 +1356,28 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
         };
         // Countering an already-approved quote re-opens the negotiation → stale documents reset.
         const wasApproved = inv.rfqStatus === 'approved';
+        // INCO answers submitted with this quotation open their own negotiation thread.
+        const incoThread = incoPatch
+          ? [
+              ...(inv.incoTermsThread ?? []),
+              {
+                id: `inco-${Date.now()}-${inv.vendorId}`,
+                by: 'vendor' as const,
+                senderName,
+                doc: incoPatch.incoTermsDoc,
+                action: 'filled' as const,
+                message: 'Submitted with the quotation',
+                at: now,
+              },
+            ]
+          : inv.incoTermsThread;
         return {
           ...inv,
           rfqQuote: clean,
           rfqStatus: by === 'sourcing' ? 'pending_vendor' : 'pending_sourcing',
           rfqThread: [...thread, msg],
           ...(wasApproved ? { docApprovalStatus: 'not_sent' as const, docApprovalPackage: undefined } : {}),
+          ...(incoPatch ? { ...incoPatch, incoTermsThread: incoThread } : {}),
         };
       }),
     );
@@ -1414,6 +1529,160 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
    * vendors already approved the pre-bid "Business Rules" doc (Commercial Terms + PBG + DLC) to
    * participate, so awarded vendors go straight to the PI request. Request status is untouched.
    */
+  // ── Technical specification approval (pre-award gate, per vendor) ──────────
+  /**
+   * Attach / replace the spec package sourcing is preparing for a vendor (documents typically come
+   * FROM the vendor). Editable while the package is not with the Technical team; the doc cap keeps
+   * the IndexedDB payload bounded. Returns false if the edit was rejected.
+   */
+  function saveTechSpecDraft(
+    inviteId: string,
+    patch: { notes?: string; addDocuments?: TechSpecDocument[]; removeDocumentId?: string },
+  ): boolean {
+    const target = invites.find((i) => i.id === inviteId);
+    if (!target) {
+      console.error(`[CapexContext] saveTechSpecDraft: invite "${inviteId}" not found`);
+      return false;
+    }
+    if (!canSendTechSpec(target)) {
+      console.error('[CapexContext] saveTechSpecDraft: spec is with the Technical team — cannot edit');
+      return false;
+    }
+    const current = target.techSpec ?? buildBlankTechSpec();
+    const kept = patch.removeDocumentId
+      ? current.documents.filter((d) => d.id !== patch.removeDocumentId)
+      : current.documents;
+    const nextDocs = [...kept, ...(patch.addDocuments ?? [])];
+    if (nextDocs.length > MAX_TECH_SPEC_DOCS) {
+      console.error(`[CapexContext] saveTechSpecDraft: at most ${MAX_TECH_SPEC_DOCS} spec documents`);
+      return false;
+    }
+    setInvites((prev) =>
+      prev.map((inv) =>
+        inv.id === inviteId
+          ? {
+              ...inv,
+              techSpec: {
+                ...current,
+                ...(patch.notes !== undefined ? { notes: patch.notes } : {}),
+                documents: nextDocs,
+              },
+            }
+          : inv,
+      ),
+    );
+    return true;
+  }
+
+  /**
+   * Send this vendor's machine specification to Amber's Technical team for sign-off. Mints (or
+   * rotates) the public `/tech-spec/<token>` link, so a superseded link stops working on re-send.
+   * State-guarded: only from not_sent / needs_revision / rejected, and only with something to review.
+   */
+  function sendTechSpecForApproval(inviteId: string, senderName: string, notes?: string): boolean {
+    const target = invites.find((i) => i.id === inviteId);
+    if (!target) {
+      console.error(`[CapexContext] sendTechSpecForApproval: invite "${inviteId}" not found`);
+      return false;
+    }
+    if (!canSendTechSpec(target)) {
+      console.error(`[CapexContext] sendTechSpecForApproval: cannot send while ${effectiveTechSpecStatus(target)}`);
+      return false;
+    }
+    // `notes` carries the caller's unsaved edit so the save and the send happen in ONE state pass —
+    // saving separately first would be read back stale here and silently overwritten.
+    const base = target.techSpec ?? buildBlankTechSpec();
+    const current = notes !== undefined ? { ...base, notes } : base;
+    if (!isTechSpecReadyToSend(current)) {
+      console.error('[CapexContext] sendTechSpecForApproval: attach a document or write notes first');
+      return false;
+    }
+    const now = new Date().toISOString();
+    setInvites((prev) =>
+      prev.map((inv) =>
+        inv.id === inviteId
+          ? {
+              ...inv,
+              techSpec: {
+                ...current,
+                status: 'pending_technical' as const,
+                token: generateTechSpecToken(inv.id),
+                sentAt: now,
+                sentBy: senderName,
+                // A fresh round clears the previous decision so stale remarks don't read as current.
+                decidedAt: undefined,
+                decidedBy: undefined,
+                decisionNote: undefined,
+                thread: [
+                  ...current.thread,
+                  { id: `ts-${Date.now()}-${inv.vendorId}`, by: 'sourcing' as const, senderName, action: 'sent' as const, at: now },
+                ],
+              },
+            }
+          : inv,
+      ),
+    );
+    return true;
+  }
+
+  /**
+   * The Technical team's verdict, submitted from the public link. Turn-guarded to
+   * `pending_technical` so a stale tab cannot re-decide a package that already moved on.
+   */
+  function decideTechSpec(
+    inviteId: string,
+    decision: 'approved' | 'rejected' | 'needs_revision',
+    deciderName: string,
+    note?: string,
+  ): boolean {
+    const target = invites.find((i) => i.id === inviteId);
+    if (!target || !target.techSpec) {
+      console.error(`[CapexContext] decideTechSpec: no spec package on invite "${inviteId}"`);
+      return false;
+    }
+    if (!canDecideTechSpec(target)) {
+      console.error(`[CapexContext] decideTechSpec: cannot decide while ${effectiveTechSpecStatus(target)}`);
+      return false;
+    }
+    const now = new Date().toISOString();
+    const action =
+      decision === 'approved' ? 'approved' : decision === 'rejected' ? 'rejected' : 'revision_requested';
+    setInvites((prev) =>
+      prev.map((inv) => {
+        if (inv.id !== inviteId || !inv.techSpec) return inv;
+        return {
+          ...inv,
+          techSpec: {
+            ...inv.techSpec,
+            status: decision,
+            decidedAt: now,
+            decidedBy: deciderName,
+            decisionNote: note?.trim() || undefined,
+            // Burn the link once decided — a new one is minted if sourcing re-sends.
+            token: undefined,
+            thread: [
+              ...inv.techSpec.thread,
+              { id: `ts-${Date.now()}-${inv.vendorId}`, by: 'technical' as const, senderName: deciderName, action, message: note?.trim() || undefined, at: now },
+            ],
+          },
+        };
+      }),
+    );
+    return true;
+  }
+
+  /**
+   * Technical-spec gate shared by every award path. Returns the vendor ids that CANNOT be awarded
+   * because Amber's Technical team has not approved their machine specification. Enforced here (not
+   * only in the UI) so no caller can skip the step.
+   */
+  function techSpecBlockedVendorIds(requestId: string, vendorIds: string[]): string[] {
+    return vendorIds.filter((vid) => {
+      const inv = invites.find((i) => i.requestId === requestId && i.vendorId === vid);
+      return !inv || techSpecBlocksAward(inv);
+    });
+  }
+
   function finalizeSplitAward(requestId: string, decision?: SourcingDecision, onlyVendorId?: string) {
     const request = requests.find((r) => r.id === requestId);
     if (!request) {
@@ -1431,6 +1700,13 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
     const groups = buildAwardGroups(lineItems, dec.finalPrices ?? {}, dec.finalVendorPerItem);
     if (groups.length === 0) {
       console.error('[CapexContext] finalizeSplitAward: no vendors selected in the final decision');
+      return;
+    }
+    // Technical-spec sign-off is a hard pre-award gate (per vendor).
+    const targetVendors = groups.map((g) => g.vendorId).filter((v) => !onlyVendorId || v === onlyVendorId);
+    const blocked = techSpecBlockedVendorIds(requestId, targetVendors);
+    if (blocked.length) {
+      console.error('[CapexContext] finalizeSplitAward: technical spec not approved for', blocked);
       return;
     }
     // When `onlyVendorId` is given, award just that vendor's group (additive — other vendors are
@@ -1462,6 +1738,10 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
    * requests it sets `finalVendorId` + request status as before.
    */
   function requestProformaInvoice(requestId: string, vendorId: string, actor: string) {
+    if (techSpecBlockedVendorIds(requestId, [vendorId]).length) {
+      console.error('[CapexContext] requestProformaInvoice: technical spec not approved for', vendorId);
+      return;
+    }
     const reqInvites = invites.filter((i) => i.requestId === requestId);
     if (isAwardBased(reqInvites)) {
       const nextInvites = reqInvites.map((i) =>
@@ -1510,6 +1790,14 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
     const groups = buildAwardGroups(lineItems, dec.finalPrices ?? {}, dec.finalVendorPerItem);
     if (groups.length === 0) {
       console.error('[CapexContext] awardAndRequestPi: no vendors selected in the final decision');
+      return;
+    }
+    // Technical-spec sign-off is a hard pre-award gate (per vendor) — award nothing if any of the
+    // vendors being awarded in this call is still unapproved.
+    const targetVendors = groups.map((g) => g.vendorId).filter((v) => !onlyVendorId || v === onlyVendorId);
+    const blocked = techSpecBlockedVendorIds(requestId, targetVendors);
+    if (blocked.length) {
+      console.error('[CapexContext] awardAndRequestPi: technical spec not approved for', blocked);
       return;
     }
     setInvites((prev) =>
@@ -2507,6 +2795,9 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
         proposeIncoTerms,
         respondToIncoTerms,
         requestProformaInvoice,
+        saveTechSpecDraft,
+        sendTechSpecForApproval,
+        decideTechSpec,
         submitProformaInvoice,
         finalizeSplitAward,
         awardAndRequestPi,

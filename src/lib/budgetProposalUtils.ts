@@ -162,59 +162,6 @@ export function summarizeProposalByHead(items: BudgetProposalItem[]): HeadSummar
   return [...map.values()].sort((a, b) => a.head.localeCompare(b.head));
 }
 
-/** Group live master rows by head for diffing against a proposal. */
-export function summarizeMasterByHead(
-  capexMaster: CapexMasterItem[],
-  plant: string,
-  fy: string,
-  projectType: ProjectType,
-): HeadSummary[] {
-  const items = capexMaster.filter(
-    (m) =>
-      (m.fieldType ?? 'brown_field') === 'brown_field' &&
-      m.plant === plant &&
-      m.fy === fy &&
-      resolveProjectType(m) === projectType,
-  );
-  const map = new Map<string, HeadSummary>();
-  items.forEach((it) => {
-    const existing = map.get(it.head) ?? { head: it.head, totalCr: 0, count: 0 };
-    existing.totalCr += it.totalCost || 0;
-    existing.count += 1;
-    map.set(it.head, existing);
-  });
-  return [...map.values()].sort((a, b) => a.head.localeCompare(b.head));
-}
-
-export interface HeadDiffRow {
-  head: string;
-  liveCr: number;
-  proposedCr: number;
-  deltaCr: number;
-}
-
-/** Per-head diff of a proposal vs the live FY it was based on. */
-export function diffProposalAgainstLive(
-  proposal: BudgetProposal,
-  capexMaster: CapexMasterItem[],
-): HeadDiffRow[] {
-  const live = summarizeMasterByHead(
-    capexMaster,
-    proposal.plant,
-    proposal.sourceFy ?? '',
-    proposal.projectType,
-  );
-  const proposed = summarizeProposalByHead(proposal.items);
-  const heads = [...new Set([...live.map((h) => h.head), ...proposed.map((h) => h.head)])].sort(
-    (a, b) => a.localeCompare(b),
-  );
-  return heads.map((head) => {
-    const liveCr = live.find((h) => h.head === head)?.totalCr ?? 0;
-    const proposedCr = proposed.find((h) => h.head === head)?.totalCr ?? 0;
-    return { head, liveCr, proposedCr, deltaCr: proposedCr - liveCr };
-  });
-}
-
 export function proposalTotalCr(proposal: BudgetProposal): number {
   return proposal.items.reduce((s, it) => s + (it.totalCost || 0), 0);
 }

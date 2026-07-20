@@ -134,6 +134,14 @@ export const FA_CODE_RECIPIENT_EMAIL = "asset.register@amber-enterprises.in"
 export const GLOBAL_ACCOUNTS_EMAIL = "sandeep.accounts@amber-enterprises.in"
 
 /**
+ * Recipient for the technical specification approval email. Amber's Technical team signs off a
+ * vendor's machine spec BEFORE sourcing can award that vendor — they have no portal login, so the
+ * emailed **public** `/tech-spec/[token]` link is the real payload. Simulated send (preview + toast);
+ * the address is a placeholder, editable in the preview modal.
+ */
+export const TECHNICAL_TEAM_EMAIL = "technical.team@amber-enterprises.in"
+
+/**
  * Default recipient for plant-head approval emails (budget + request). The plant head has no portal
  * login — the emailed public link is the real payload; the address is a placeholder, editable in
  * the preview modal before "sending".

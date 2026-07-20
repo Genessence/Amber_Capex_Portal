@@ -24,6 +24,7 @@ import {
   Download,
   ScrollText,
   Receipt,
+  X,
 } from "lucide-react"
 import { useCapex } from "@/lib/capexContext"
 import { resolveInviteByToken, isSubmissionAllowed } from "@/lib/tokenUtils"
@@ -34,7 +35,8 @@ import {
   INCO_TERMS_STATUS_LABELS,
   INCO_TERMS_STATUS_COLORS,
   effectiveIncoTermsStatus,
-  incoTermsBlocksQuote,
+  incoTermsRequired,
+  needsIncoTermsWithQuote,
   isIncoDocComplete,
   buildBlankIncoTermsDoc,
 } from "@/lib/incoTermsUtils"
@@ -461,13 +463,18 @@ function RfqQuoteSummary({
 function QuotationEntryForm({
   invite,
   request,
+  vendor,
   vendorName,
 }: {
   invite: VendorInvite
   request: CapexRequest
+  vendor: Vendor | null
   vendorName: string
 }) {
   const { proposeRfqQuote } = useCapex()
+  // Foreign vendors answer the Incoterms questionnaire in a modal behind Submit; the quote is only
+  // sent once they complete it (both persist in one mutation).
+  const [incoOpen, setIncoOpen] = useState(false)
   const existing = invite.rfqQuote
   const lineItems = request.lineItems ?? []
   const hasLineItems = lineItems.length > 0
@@ -532,17 +539,10 @@ function QuotationEntryForm({
     setDeliveryDays(""); setWarranty(""); setCurrency("INR")
   }
 
-  function submit() {
-    if (!valid) {
-      if (hasLineItems && !allLinesHaveHsn) {
-        toast.error("Select an HSN code for every line item")
-        return
-      }
-      toast.error(hasLineItems ? "Enter a unit price for every line item and a delivery lead time" : "Enter a valid price and delivery lead time")
-      return
-    }
+  /** Build the quotation payload from the current form state. */
+  function buildQuote(): RfqQuote {
     const num = (s: string) => (s.trim() === "" ? undefined : Number(s))
-    const quote: RfqQuote = {
+    return {
       price: subtotal,
       ...(hasLineItems ? { linePrices: numericLinePrices } : {}),
       freight: num(freight),
@@ -552,19 +552,44 @@ function QuotationEntryForm({
       warranty: num(warranty),
       currency,
     }
+  }
+
+  /** Send the quotation — together with the Incoterms answers when they were collected. */
+  function sendQuote(incoDoc?: IncoTermsDoc) {
     const ok = proposeRfqQuote(
       invite.id,
-      quote,
+      buildQuote(),
       "supplier",
       vendorName,
       undefined,
       hasLineItems ? hsnByItem : undefined,
+      incoDoc,
     )
     if (!ok) {
-      toast.error("Could not submit quotation — select an HSN code for every line item")
+      toast.error(
+        incoDoc
+          ? "Could not submit — check the INCO Terms answers and try again"
+          : "Could not submit quotation — select an HSN code for every line item",
+      )
+      return false
+    }
+    setIncoOpen(false)
+    toast.success(incoDoc ? "INCO Terms and quotation sent to Amber." : "Quotation sent to Amber.")
+    return true
+  }
+
+  function submit() {
+    if (!valid) {
+      if (hasLineItems && !allLinesHaveHsn) {
+        toast.error("Select an HSN code for every line item")
+        return
+      }
+      toast.error(hasLineItems ? "Enter a unit price for every line item and a delivery lead time" : "Enter a valid price and delivery lead time")
       return
     }
-    toast.success("Quotation sent to Amber.")
+    // Foreign vendor, Incoterms not answered yet → collect them first; the quote goes with them.
+    if (needsIncoTermsWithQuote(invite, vendor)) { setIncoOpen(true); return }
+    sendQuote()
   }
 
   return (
@@ -739,6 +764,13 @@ function QuotationEntryForm({
           </div>
         </div>
       </div>
+
+      {/* INCO Terms popup — foreign vendors answer it to complete the submission */}
+      <IncoTermsModal
+        open={incoOpen}
+        onClose={() => setIncoOpen(false)}
+        onConfirm={doc => sendQuote(doc)}
+      />
     </div>
   )
 }
@@ -831,114 +863,190 @@ function IncoTermsReview({ doc, revisionNote }: { doc?: IncoTermsDoc; revisionNo
   )
 }
 
-/* ── INCO Terms gate screen (one-time vendors agree before quoting) ──────── */
-function IncoTermsGate({
+/* ── INCO Terms submit modal (shown behind the Submit Quotation button) ──── */
+/**
+ * A foreign vendor answers the Incoterms 2020 questionnaire at the moment they submit their
+ * quotation. `onConfirm` hands the completed doc back to the caller, which passes it to
+ * `proposeRfqQuote` so the quote and the terms are persisted in a single mutation — closing the
+ * modal without answering leaves the quotation unsent.
+ */
+function IncoTermsModal({
+  open,
+  submitting,
+  onConfirm,
+  onClose,
+}: {
+  open: boolean
+  submitting?: boolean
+  onConfirm: (doc: IncoTermsDoc) => void
+  onClose: () => void
+}) {
+  const [draft, setDraft] = useState<IncoTermsDoc>(buildBlankIncoTermsDoc)
+  const setField = (key: keyof IncoTermsDoc, value: string) =>
+    setDraft(prev => ({ ...prev, [key]: value }))
+  const complete = isIncoDocComplete(draft)
+
+  // Esc closes; body scroll locked while open.
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose() }
+    window.addEventListener("keydown", onKey)
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+    return () => {
+      window.removeEventListener("keydown", onKey)
+      document.body.style.overflow = prevOverflow
+    }
+  }, [open, onClose])
+
+  if (!open) return null
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="inco-modal-title"
+    >
+      <div className="bg-white w-full sm:max-w-3xl sm:rounded-2xl rounded-t-2xl shadow-xl max-h-[92vh] flex flex-col">
+        <div className="flex items-start gap-3 px-5 py-4 border-b border-slate-200 shrink-0">
+          <ScrollText className="w-5 h-5 text-[#2563EB] mt-0.5 shrink-0" />
+          <div className="min-w-0 flex-1">
+            <h2 id="inco-modal-title" className="text-base font-bold text-slate-900">
+              One last step — INCO Terms (Incoterms 2020)
+            </h2>
+            <p className="text-xs text-slate-600 mt-0.5">
+              As an international supplier, confirm the delivery, cost and risk terms for this quotation.
+              Your quotation is submitted together with these answers.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close without submitting"
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 shrink-0"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="overflow-y-auto px-5 py-4 flex-1 min-h-0">
+          <IncoTermsForm doc={draft} onChange={setField} />
+        </div>
+
+        <div className="px-5 py-4 border-t border-slate-200 flex flex-col sm:flex-row gap-3 shrink-0">
+          <button
+            type="button"
+            onClick={() => onConfirm(draft)}
+            disabled={!complete || submitting}
+            className="flex-1 inline-flex items-center justify-center gap-2 min-h-[44px] px-6 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed text-white font-bold text-sm transition-colors"
+          >
+            <Send className="w-4 h-4" /> Submit Terms &amp; Quotation
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 min-h-[44px] rounded-lg bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 font-semibold text-sm"
+          >
+            Back to quotation
+          </button>
+        </div>
+        {!complete && (
+          <p className="px-5 pb-4 -mt-2 text-[11px] text-slate-500 shrink-0">
+            Answer every required question to submit.
+          </p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/* ── INCO Terms negotiation card (post-submission loop) ──────────────────── */
+/**
+ * The Incoterms agreement negotiates on its own track once submitted with the quotation:
+ * sourcing reviews → sends back a revision → the vendor accepts, counters with their own changes,
+ * or declines — repeating until it is approved. Rendered inline above the quotation view so the
+ * vendor can act on it without losing sight of their quote.
+ */
+function IncoTermsNegotiationCard({
   invite,
-  request,
-  vendor,
   vendorName,
+  className = "",
 }: {
   invite: VendorInvite
-  request: CapexRequest
-  vendor: Vendor | null
   vendorName: string
+  className?: string
 }) {
   const { proposeIncoTerms, respondToIncoTerms } = useCapex()
   const status = effectiveIncoTermsStatus(invite)
-  const card = SUPPLIER_CARD
-
-  // Editable working copy of the doc (used in awaiting_vendor + "Suggest changes").
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState<IncoTermsDoc>(() => invite.incoTermsDoc ?? buildBlankIncoTermsDoc())
+
+  // Re-seed the working copy whenever sourcing sends a new revision.
+  useEffect(() => {
+    if (invite.incoTermsDoc) setDraft(invite.incoTermsDoc)
+  }, [invite.incoTermsDoc])
+
+  const complete = isIncoDocComplete(draft)
   const setField = (key: keyof IncoTermsDoc, value: string) =>
     setDraft(prev => ({ ...prev, [key]: value }))
 
-  const complete = isIncoDocComplete(draft)
-  const isFormScreen = status === "awaiting_vendor" || status === "not_sent" || editing
-
-  function submitTerms() {
-    if (!complete) { toast.error("Answer all required questions before submitting"); return }
+  function sendChanges() {
+    if (!complete) { toast.error("Answer all required questions before sending"); return }
     proposeIncoTerms(invite.id, draft, "vendor", vendorName)
     setEditing(false)
-    toast.success("INCO Terms sent to Amber for review")
+    toast.success("Your revised INCO Terms were sent to Amber")
   }
 
-  // Turn banner copy by state.
-  let actionNeeded = false
-  let turnLabel = "Waiting on Amber's sourcing team."
-  if (isFormScreen) { actionNeeded = true; turnLabel = "Action needed — complete the INCO (Incoterms 2020) agreement to begin quoting." }
-  else if (status === "pending_sourcing") { turnLabel = "Waiting on Amber — your INCO Terms are under review." }
-  else if (status === "pending_vendor") { actionNeeded = true; turnLabel = "Action needed — review Amber's revised INCO Terms." }
-  else if (status === "rejected") { turnLabel = "INCO Terms declined." }
+  const card = `${SUPPLIER_CARD} ${className}`
 
-  let body: React.ReactNode
+  if (status === "not_sent" || status === "approved") return null
 
-  if (isFormScreen) {
-    /* ── Vendor fills (or re-opens to suggest changes) ── */
-    body = (
-      <div className={`${card} max-w-3xl mx-auto`}>
-        <div className="flex items-center gap-2 mb-1">
-          <ScrollText className="w-5 h-5 text-[#2563EB]" />
-          <h2 className="text-lg font-bold text-slate-900">INCO Terms (Incoterms 2020)</h2>
+  return (
+    <div className={card}>
+      <div className="flex items-start justify-between gap-3 flex-wrap mb-3">
+        <div className="flex items-center gap-2 min-w-0">
+          <ScrollText className="w-5 h-5 text-[#2563EB] shrink-0" />
+          <h3 className="font-bold text-slate-900">INCO Terms (Incoterms 2020)</h3>
         </div>
-        <p className="text-sm text-slate-600 mb-5">
-          As a first-time supplier, please confirm the delivery and risk terms below before submitting a price quote.
+        <IncoStatusPill status={status} />
+      </div>
+
+      {status === "awaiting_vendor" && (
+        <p className="text-sm text-slate-600">
+          As an international supplier you&apos;ll be asked to confirm the Incoterms 2020 delivery, cost and
+          risk terms when you submit your quotation below — the two are sent together.
         </p>
-        <IncoTermsForm doc={draft} onChange={setField} />
-        <div className="mt-6 flex flex-col sm:flex-row gap-3">
-          <button
-            type="button"
-            onClick={submitTerms}
-            disabled={!complete}
-            className="flex-1 inline-flex items-center justify-center gap-2 min-h-[44px] px-6 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed text-white font-bold text-sm transition-colors shadow-sm"
-          >
-            <Send className="w-4 h-4" /> Submit Terms
-          </button>
-          {editing && (
-            <button
-              type="button"
-              onClick={() => { setDraft(invite.incoTermsDoc ?? buildBlankIncoTermsDoc()); setEditing(false) }}
-              className="px-4 min-h-[44px] rounded-lg bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 font-semibold text-sm transition-colors"
-            >
-              Cancel
-            </button>
-          )}
-        </div>
-      </div>
-    )
-  } else if (status === "pending_sourcing") {
-    /* ── Under review by sourcing ── */
-    body = (
-      <div className="space-y-4 max-w-3xl mx-auto">
-        <div className={`${card} text-center`}>
-          <Hourglass className="w-12 h-12 text-slate-400 mx-auto mb-3" />
-          <h2 className="text-lg font-bold text-slate-900">Under Review by Amber&apos;s Sourcing Team</h2>
-          <p className="text-sm text-slate-600 mt-2">
-            We&apos;ll update this page once Amber reviews your INCO Terms. You can start quoting once they&apos;re approved.
+      )}
+
+      {status === "pending_sourcing" && !editing && (
+        <>
+          <p className="text-sm text-slate-600 mb-3">
+            Your Incoterms answers are with Amber&apos;s sourcing team for review. They may accept them or
+            send back a revision for you to confirm.
           </p>
-        </div>
-        <div className={card}>
-          <h3 className="text-sm font-bold text-slate-800 mb-3">Your Submitted Terms</h3>
           <IncoTermsReview doc={invite.incoTermsDoc} />
-        </div>
-      </div>
-    )
-  } else if (status === "pending_vendor") {
-    /* ── Sourcing revised — vendor accepts / suggests changes / declines ── */
-    body = (
-      <div className="space-y-4 max-w-3xl mx-auto">
-        <div className={card}>
-          <div className="flex items-center gap-2 mb-1">
-            <ScrollText className="w-5 h-5 text-[#2563EB]" />
-            <h2 className="text-lg font-bold text-slate-900">Amber&apos;s Revised INCO Terms</h2>
-          </div>
-          <p className="text-sm text-slate-600 mb-4">
-            Amber&apos;s sourcing team has revised the terms. Review them and accept, suggest changes, or decline.
+        </>
+      )}
+
+      {status === "rejected" && (
+        <>
+          <p className="text-sm text-slate-600 mb-3">
+            Amber declined the Incoterms agreement, so this quotation cannot proceed to a Proforma Invoice.
+            Please contact your Amber sourcing contact to revise and resubmit the terms.
+          </p>
+          <IncoTermsReview doc={invite.incoTermsDoc} />
+        </>
+      )}
+
+      {status === "pending_vendor" && !editing && (
+        <>
+          <p className="text-sm text-slate-600 mb-3">
+            Amber&apos;s sourcing team revised the Incoterms. Review the changes and accept them, send back
+            your own corrections, or decline.
           </p>
           <IncoTermsReview doc={invite.incoTermsDoc} revisionNote={invite.incoTermsDoc?.revisionNote} />
-        </div>
-        <div className={card}>
-          <div className="flex flex-col sm:flex-row gap-3">
+          <div className="mt-4 flex flex-col sm:flex-row gap-3">
             <button
               type="button"
               onClick={() => { respondToIncoTerms(invite.id, "approved", "vendor", vendorName); toast.success("INCO Terms accepted") }}
@@ -948,10 +1056,10 @@ function IncoTermsGate({
             </button>
             <button
               type="button"
-              onClick={() => { setDraft(invite.incoTermsDoc ?? buildBlankIncoTermsDoc()); setEditing(true) }}
+              onClick={() => setEditing(true)}
               className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-white border border-[#2563EB]/30 text-[#2563EB] hover:bg-[#2563EB]/5 font-semibold py-2.5 min-h-[44px]"
             >
-              <RotateCcw className="w-4 h-4" /> Suggest Changes
+              <RotateCcw className="w-4 h-4" /> Send Back Corrections
             </button>
             <button
               type="button"
@@ -961,44 +1069,35 @@ function IncoTermsGate({
               <ThumbsDown className="w-4 h-4" /> Decline
             </button>
           </div>
-        </div>
-      </div>
-    )
-  } else {
-    /* ── Terminal: rejected ── */
-    body = (
-      <div className="space-y-4 max-w-2xl mx-auto">
-        <div className={`${card} text-center`}>
-          <XCircle className="w-12 h-12 text-red-400 mx-auto mb-3" />
-          <h2 className="text-lg font-bold text-slate-900">INCO Terms Declined</h2>
-          <p className="text-sm text-slate-600 mt-2">
-            The INCO (Incoterms 2020) agreement was declined, so quoting is on hold. Please contact your Amber
-            sourcing contact to revise and resubmit the terms.
-          </p>
-        </div>
-        {invite.incoTermsDoc && (
-          <div className={card}>
-            <h3 className="text-sm font-bold text-slate-800 mb-3">Last Submitted Terms</h3>
-            <IncoTermsReview doc={invite.incoTermsDoc} />
-          </div>
-        )}
-      </div>
-    )
-  }
+        </>
+      )}
 
-  return (
-    <AuctionShell
-      requestNo={request.requestNo}
-      subject={request.subject}
-      vendorName={vendor?.vendorName}
-      vendorCode={vendor?.vendorCode}
-    >
-      <div className={`flex flex-wrap items-center justify-between gap-3 ${isFormScreen ? "max-w-3xl" : "max-w-3xl"} mx-auto`}>
-        <TurnBanner actionNeeded={actionNeeded} label={turnLabel} />
-        <IncoStatusPill status={status} />
-      </div>
-      {body}
-    </AuctionShell>
+      {editing && (
+        <>
+          <p className="text-sm text-slate-600 mb-3">
+            Adjust any answer below and send it back to Amber for review.
+          </p>
+          <IncoTermsForm doc={draft} onChange={setField} />
+          <div className="mt-4 flex flex-col sm:flex-row gap-3">
+            <button
+              type="button"
+              onClick={sendChanges}
+              disabled={!complete}
+              className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed text-white font-semibold py-2.5 min-h-[44px]"
+            >
+              <Send className="w-4 h-4" /> Send Back to Amber
+            </button>
+            <button
+              type="button"
+              onClick={() => { setDraft(invite.incoTermsDoc ?? buildBlankIncoTermsDoc()); setEditing(false) }}
+              className="px-4 rounded-lg bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 font-semibold py-2.5 min-h-[44px]"
+            >
+              Cancel
+            </button>
+          </div>
+        </>
+      )}
+    </div>
   )
 }
 
@@ -1095,6 +1194,7 @@ function RfqSupplierView({
   // Counter-offer form (vendor edits sourcing's counter and sends it back).
   const cq = invite.rfqQuote
   const [counterOpen, setCounterOpen] = useState(false)
+  const [counterIncoOpen, setCounterIncoOpen] = useState(false)
   // Per-line counter prices, pre-filled from the current quote's line prices.
   const [cLinePrices, setCLinePrices] = useState<Record<string, string>>(() => {
     const seed: Record<string, string> = {}
@@ -1125,10 +1225,11 @@ function RfqSupplierView({
   const piRequested = isAward ? invite.awardStatus === "pi_requested" : request.status === "pi_requested"
   const card = `${SUPPLIER_CARD} max-w-2xl mx-auto`
 
-  // INCO Terms gate: a one-time vendor must agree to the Incoterms questionnaire before the
-  // price-quote flow opens. Never gate once we're past quoting (PI request + fulfillment).
+  // Incoterms are answered WITH the quotation (see IncoTermsModal) and then negotiated on their own
+  // track — they never block the quote form. The inline card below drives the vendor's side of that
+  // loop; the agreement must be settled before the award (enforced by `canRequestPi`).
   const inQuotingPhase = !fulfilled && !piRequested
-  const incoBlocked = inQuotingPhase && incoTermsBlocksQuote(invite, vendor)
+  const showIncoCard = inQuotingPhase && incoTermsRequired(vendor)
   // Contract-documents gate: an RFQ vendor must approve the doc-package (Commercial Terms / PBG /
   // Delay Liability Clause / payment terms) BEFORE entering their price. Only blocks when a package
   // was actually sent (legacy invites with no package fall through unchanged).
@@ -1151,14 +1252,8 @@ function RfqSupplierView({
   const cGstValue = hasLineItems ? rfqGstAmount({ price: cSubtotal, linePrices: cNumericLinePrices }, lineItems) : 0
   const cGrandTotal = cTaxable + cGstValue
 
-  function sendCounter() {
-    if (hasLineItems) {
-      const allPriced = lineItems.every(it => (Number(cLinePrices[it.id]) || 0) > 0)
-      if (!allPriced) { toast.error("Enter a unit price for every line item"); return }
-    } else {
-      const price = parseFloat(cForm.price)
-      if (isNaN(price) || price <= 0) { toast.error("Enter a valid price"); return }
-    }
+  /** Send the counter-quotation, carrying the Incoterms answers when they are still outstanding. */
+  function sendCounterQuote(incoDoc?: IncoTermsDoc) {
     const num = (s: string) => (s.trim() === "" ? undefined : parseFloat(s))
     const quote: RfqQuote = {
       price: cSubtotal,
@@ -1170,13 +1265,32 @@ function RfqSupplierView({
     const hsnFromItems = hasLineItems
       ? Object.fromEntries(lineItems.filter(it => it.hsnCode).map(it => [it.id, it.hsnCode!]))
       : undefined
-    const ok = proposeRfqQuote(invite.id, quote, "supplier", vendorName, undefined, hsnFromItems)
+    const ok = proposeRfqQuote(invite.id, quote, "supplier", vendorName, undefined, hsnFromItems, incoDoc)
     if (!ok) {
-      toast.error("Could not send counter — HSN is missing for one or more line items")
+      toast.error(
+        incoDoc
+          ? "Could not send counter — check the INCO Terms answers and try again"
+          : "Could not send counter — HSN is missing for one or more line items",
+      )
       return
     }
+    setCounterIncoOpen(false)
     setCounterOpen(false)
-    toast.success("Counter-quotation sent to Amber")
+    toast.success(incoDoc ? "INCO Terms and counter-quotation sent to Amber" : "Counter-quotation sent to Amber")
+  }
+
+  function sendCounter() {
+    if (hasLineItems) {
+      const allPriced = lineItems.every(it => (Number(cLinePrices[it.id]) || 0) > 0)
+      if (!allPriced) { toast.error("Enter a unit price for every line item"); return }
+    } else {
+      const price = parseFloat(cForm.price)
+      if (isNaN(price) || price <= 0) { toast.error("Enter a valid price"); return }
+    }
+    // A foreign vendor who has somehow not answered the Incoterms yet (e.g. an invite created
+    // before this flow existed) answers them here, with the counter.
+    if (needsIncoTermsWithQuote(invite, vendor)) { setCounterIncoOpen(true); return }
+    sendCounterQuote()
   }
 
   function handlePiFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -1221,11 +1335,6 @@ function RfqSupplierView({
       note: piNote || undefined,
     })
     toast.success("Revised Proforma Invoice submitted")
-  }
-
-  // One-time vendors agree to INCO Terms before the quote flow renders.
-  if (incoBlocked) {
-    return <IncoTermsGate invite={invite} request={request} vendor={vendor} vendorName={vendorName} />
   }
 
   // Contract documents must be approved BEFORE the vendor can enter a price.
@@ -1427,7 +1536,7 @@ function RfqSupplierView({
     )
   } else if (rfqStatus === "awaiting_quote") {
     /* ── 1. Vendor submits the first quotation ── */
-    body = <QuotationEntryForm invite={invite} request={request} vendorName={vendorName} />
+    body = <QuotationEntryForm invite={invite} request={request} vendor={vendor} vendorName={vendorName} />
   } else if (rfqStatus === "pending_sourcing") {
     /* ── 2. Vendor's quotation under review by sourcing ── */
     body = (
@@ -1612,7 +1721,21 @@ function RfqSupplierView({
         <TurnBanner actionNeeded={actionNeeded} label={turnLabel} />
         <RfqStatusPill status={rfqStatus} />
       </div>
+      {/* Incoterms negotiation runs alongside the quotation for foreign vendors */}
+      {showIncoCard && (
+        <IncoTermsNegotiationCard
+          invite={invite}
+          vendorName={vendorName}
+          className={`mb-4 mx-auto ${hasLineItems ? "max-w-3xl" : "max-w-2xl"}`}
+        />
+      )}
       {body}
+      {/* Counter path: collect outstanding Incoterms with the counter-quotation */}
+      <IncoTermsModal
+        open={counterIncoOpen}
+        onClose={() => setCounterIncoOpen(false)}
+        onConfirm={doc => sendCounterQuote(doc)}
+      />
     </AuctionShell>
   )
 }
@@ -1719,7 +1842,7 @@ function CounterField({ label, value, onChange, required }: { label: string; val
 
 export default function SupplierPortalPage() {
   const { token } = useParams<{ token: string }>()
-  const { loaded, invites, requests, vendors, submitQuote, addNegotiationMessage } = useCapex()
+  const { loaded, invites, requests, vendors, submitQuote, addNegotiationMessage, respondToAuctionApproval } = useCapex()
 
   const [ready, setReady] = useState(false)
   const [itemPrices, setItemPrices] = useState<Record<string, string>>({})
@@ -1877,7 +2000,6 @@ export default function SupplierPortalPage() {
   const approvalStatus = getEffectiveAuctionApprovalStatus(invite, document?.vendorRevertDeadlineAt)
   const isApproved = isVendorEligibleForAuction(invite, document?.vendorRevertDeadlineAt)
   const hasPendingDocument = document && !request?.auctionConfig && approvalStatus === 'pending'
-  const { respondToAuctionApproval } = useCapex()
 
   const siblingInvites = invites.filter(i => i.requestId === invite.requestId)
   const rankings = computeVendorRankings(siblingInvites)

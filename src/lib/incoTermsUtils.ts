@@ -1,7 +1,19 @@
 /**
- * INCO (Incoterms 2020) agreement helpers. A new / one-time vendor must agree to a 12-question
- * Incoterms document before they can submit a price quote. Sourcing and the vendor negotiate it
- * (fill → review → edit & resend → approve/reject), mirroring the RFQ turn-taking.
+ * INCO (Incoterms 2020) agreement helpers.
+ *
+ * Flow (2026-07): the Incoterms questionnaire is answered **with the quotation, not before it**.
+ * A FOREIGN vendor fills in their prices, hits Submit Quotation, and is shown the 12 questions in a
+ * modal; answering them submits the quote and the Incoterms together in one atomic mutation
+ * (`proposeRfqQuote(..., incoDoc)`) — neither is persisted without the other. Sourcing then sees the
+ * answers, and the two sides negotiate exactly like the RFQ price thread:
+ *
+ *   vendor fills (with quote) → pending_sourcing
+ *     sourcing edits & sends back → pending_vendor
+ *       vendor accepts → approved | suggests changes → pending_sourcing | declines → rejected
+ *     sourcing approves → approved | rejects → rejected
+ *
+ * The loop repeats until the terms are approved. An unsettled Incoterms agreement no longer blocks
+ * quoting — it blocks the **award** (see `incoTermsBlocksAward`, folded into `canRequestPi`).
  */
 import type { IncoTermsDoc, IncoTermsStatus, VendorInvite, Vendor } from './types';
 
@@ -72,11 +84,38 @@ export function isIncoDocComplete(doc?: IncoTermsDoc): boolean {
 }
 
 /**
- * INCO gating: a FOREIGN vendor must reach `approved` on the Incoterms agreement before quoting
- * (Incoterms are international-shipping terms). Domestic vendors are never gated. `vendor` may be
- * undefined for a yet-unresolved invite.
+ * Incoterms apply to FOREIGN vendors only (they are international-shipping terms). Domestic
+ * vendors never see the questionnaire. `vendor` may be undefined for a yet-unresolved invite.
  */
-export function incoTermsBlocksQuote(invite: VendorInvite, vendor?: Vendor | null): boolean {
-  if (!vendor?.foreign) return false;
-  return effectiveIncoTermsStatus(invite) !== 'approved';
+export function incoTermsRequired(vendor?: Vendor | null): boolean {
+  return !!vendor?.foreign;
+}
+
+/** Statuses that mean the vendor has never actually answered the questionnaire. */
+const UNANSWERED: IncoTermsStatus[] = ['not_sent', 'awaiting_vendor'];
+
+/**
+ * Whether submitting a quotation must first collect the Incoterms answers — i.e. the vendor is
+ * foreign and has not yet filled the form. Once answered, re-quoting never re-asks: the agreement
+ * negotiates on its own track.
+ */
+export function needsIncoTermsWithQuote(invite: VendorInvite, vendor?: Vendor | null): boolean {
+  if (!incoTermsRequired(vendor)) return false;
+  return UNANSWERED.includes(effectiveIncoTermsStatus(invite));
+}
+
+/** True while the Incoterms ball is in the vendor's court (sourcing sent back a revision). */
+export function incoTermsAwaitingVendor(invite: VendorInvite, vendor?: Vendor | null): boolean {
+  return incoTermsRequired(vendor) && effectiveIncoTermsStatus(invite) === 'pending_vendor';
+}
+
+/**
+ * Award gate: a foreign vendor cannot be taken to Proforma Invoice while the Incoterms agreement
+ * is still open. Keyed off the invite alone (the field is only ever set for foreign vendors), so
+ * callers that have no `Vendor` in hand — e.g. `canRequestPi` — can still enforce it.
+ */
+export function incoTermsBlocksAward(invite: VendorInvite): boolean {
+  const status = invite.incoTermsStatus;
+  if (!status || status === 'not_sent') return false; // never applied to this vendor
+  return status !== 'approved';
 }

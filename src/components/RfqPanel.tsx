@@ -23,7 +23,8 @@ import { useCapex } from '@/lib/capexContext'
 import { buildSupplierLink } from '@/lib/tokenUtils'
 import { ROLE_NAMES } from '@/lib/constants'
 import { FinalDecisionActions } from '@/components/FinalDecisionActions'
-import type { CapexLineItem, CapexRequest, DocApprovalDoc, DocSelection, IncoTermsDoc, RfqQuote, Vendor, VendorInvite } from '@/lib/types'
+import { TechSpecPanel } from '@/components/TechSpecPanel'
+import type { CapexLineItem, CapexRequest, DocApprovalDoc, DocSelection, IncoTermsDoc, IncoTermsStatus, RfqQuote, Vendor, VendorInvite } from '@/lib/types'
 import {
   RFQ_STATUS_COLORS,
   RFQ_STATUS_LABELS,
@@ -48,7 +49,19 @@ import {
   INCO_TERMS_STATUS_COLORS,
   INCO_TERMS_STATUS_LABELS,
   effectiveIncoTermsStatus,
+  incoTermsBlocksAward,
+  isIncoDocComplete,
 } from '@/lib/incoTermsUtils'
+
+/** One-line "what happens next" per Incoterms state, for the sourcing tracker. */
+const INCO_TRACKER_HINT: Record<IncoTermsStatus, string> = {
+  not_sent: 'Incoterms will be answered with the vendor’s quotation.',
+  awaiting_vendor: 'Awaiting the vendor’s quotation — Incoterms are answered with it.',
+  pending_sourcing: 'Your turn — review the vendor’s Incoterms.',
+  pending_vendor: 'Sent back to the vendor for confirmation.',
+  approved: 'Agreed — this vendor can be awarded.',
+  rejected: 'Declined — this vendor cannot be awarded until the terms are agreed.',
+}
 import { gstRateForHsn } from '@/lib/hsnGst'
 import {
   INPUT,
@@ -380,31 +393,43 @@ export function RfqPanel({
     setNewVendor({ name: '', email: '', phone: '', foreign: false })
     setNewVendorDocSel({ commercialTerms: true, pbg: true, dlc: true, paymentTerms: true, extraDocs: [] })
     setShowNewVendor(false)
-    toast.success(`Invited ${name} — INCO Terms sent`)
+    toast.success(`Invited ${name} — Incoterms will be collected with their quotation`)
   }
 
-  // INCO Terms review (one-time vendors) — sourcing reviews the vendor's 12 answers.
+  // INCO Terms review — foreign vendors answer the questionnaire WITH their quotation; sourcing
+  // reviews the 12 answers here and approves, sends back a revision, or rejects. The loop repeats
+  // until approved; an unsettled agreement blocks the award (`canRequestPi`), not the quoting.
   function incoDoc(inv: VendorInvite): IncoTermsDoc {
     return incoEdits[inv.id] ?? inv.incoTermsDoc ?? { id: `inco-${inv.id}` }
   }
   function setIncoField(inviteId: string, base: IncoTermsDoc, key: keyof IncoTermsDoc, val: string) {
     setIncoEdits(prev => ({ ...prev, [inviteId]: { ...base, ...(prev[inviteId] ?? {}), [key]: val } }))
   }
+  function clearIncoEdits(inviteId: string) {
+    setIncoEdits(prev => { const next = { ...prev }; delete next[inviteId]; return next })
+  }
   function approveInco(inv: VendorInvite) {
     respondToIncoTerms(inv.id, 'approved', 'sourcing', senderName)
     setIncoReviewId(null)
-    toast.success(`INCO Terms approved for ${vendorName(inv.vendorId)} — vendor can now quote`)
+    clearIncoEdits(inv.id)
+    toast.success(`INCO Terms approved for ${vendorName(inv.vendorId)}`)
   }
   function editResendInco(inv: VendorInvite) {
-    proposeIncoTerms(inv.id, incoDoc(inv), 'sourcing', senderName)
+    const doc = incoDoc(inv)
+    if (!isIncoDocComplete(doc)) {
+      toast.error('Answer every required Incoterms question before sending it back')
+      return
+    }
+    proposeIncoTerms(inv.id, doc, 'sourcing', senderName)
     setIncoReviewId(null)
-    setIncoEdits(prev => { const next = { ...prev }; delete next[inv.id]; return next })
+    clearIncoEdits(inv.id)
     toast.success(`INCO Terms revised & sent back to ${vendorName(inv.vendorId)}`)
   }
   function rejectInco(inv: VendorInvite) {
-    if (!window.confirm(`Reject ${vendorName(inv.vendorId)}'s INCO Terms? They will not be able to quote.`)) return
+    if (!window.confirm(`Reject ${vendorName(inv.vendorId)}'s INCO Terms? This vendor cannot be awarded until the terms are agreed.`)) return
     respondToIncoTerms(inv.id, 'rejected', 'sourcing', senderName)
     setIncoReviewId(null)
+    clearIncoEdits(inv.id)
     toast(`INCO Terms rejected for ${vendorName(inv.vendorId)}`)
   }
 
@@ -587,7 +612,7 @@ export function RfqPanel({
               {showNewVendor && (
                 <div className="mt-3 border border-slate-200 rounded-lg overflow-hidden">
                   <div className="bg-[#F4F4F5] px-4 py-2 border-b border-slate-200">
-                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">New / one-time vendor — mark foreign to send Incoterms (approved before quoting)</p>
+                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">New / one-time vendor — mark foreign to collect Incoterms with their quotation</p>
                   </div>
                   <div className="p-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
@@ -615,14 +640,14 @@ export function RfqPanel({
                         onChange={e => setNewVendor(v => ({ ...v, foreign: e.target.checked }))}
                         className="mt-0.5 h-4 w-4 accent-[#2563EB]" />
                       <span className="text-[11px] text-slate-600 leading-snug">
-                        <span className="font-semibold text-slate-800">Foreign / international vendor</span> — the Incoterms (2020) agreement is sent for the vendor to accept before they can quote.
+                        <span className="font-semibold text-slate-800">Foreign / international vendor</span> — the Incoterms (2020) questionnaire is presented when they submit their quotation, then negotiated here until agreed.
                       </span>
                     </label>
                   </div>
                   <div className="px-3 py-2 border-t border-slate-200 bg-[#F4F4F5] flex justify-end">
                     <button onClick={sendNewVendor}
                       disabled={!newVendor.name.trim() || !newVendor.email.trim()}
-                      aria-label="Send invite and INCO Terms to the new vendor"
+                      aria-label="Send invite to the new vendor"
                       className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-[#171717] hover:bg-[#000000] disabled:opacity-50 text-white rounded-lg ${FOCUS_RING}`}>
                       <Send className="w-3.5 h-3.5" /> Send invite
                     </button>
@@ -756,8 +781,8 @@ export function RfqPanel({
                               </div>
                               <span className="text-[11px] font-bold text-white truncate max-w-[130px]">{vendorName(inv.vendorId)}</span>
                               <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${RFQ_STATUS_COLORS[s]}`}>{RFQ_STATUS_LABELS[s]}</span>
-                              {isForeign(inv) && effectiveIncoTermsStatus(inv) !== 'approved' && (
-                                <span className="text-[9px] font-semibold text-slate-200 leading-tight max-w-[130px]">Awaiting INCO Terms approval</span>
+                              {isForeign(inv) && incoTermsBlocksAward(inv) && (
+                                <span className="text-[9px] font-semibold text-slate-200 leading-tight max-w-[130px]">INCO Terms open — settle before award</span>
                               )}
                               {canManage && !isEditing && (s === 'pending_sourcing' || s === 'pending_vendor') && (
                                 <button
@@ -983,8 +1008,8 @@ export function RfqPanel({
                       <div className="flex items-center justify-between gap-2 flex-wrap">
                         <div className="min-w-0">
                           <p className="text-sm font-semibold text-slate-900">{vendorName(inv.vendorId)}</p>
-                          {isForeign(inv) && effectiveIncoTermsStatus(inv) !== 'approved' && (
-                            <p className="text-[10px] font-semibold text-slate-700">Awaiting INCO Terms approval</p>
+                          {isForeign(inv) && incoTermsBlocksAward(inv) && (
+                            <p className="text-[10px] font-semibold text-slate-700">INCO Terms open — settle before award</p>
                           )}
                         </div>
                         <div className="flex items-center gap-2">
@@ -1132,7 +1157,7 @@ export function RfqPanel({
                 </p>
               )}
 
-              {/* INCO Terms tracker — foreign vendors only (gates their quoting) */}
+              {/* INCO Terms tracker — foreign vendors only (answered with the quote; gates the award) */}
               {foreignInvites.length > 0 && (
                 <div className="rounded-lg border border-slate-200 overflow-hidden">
                   <div className="flex items-center gap-1.5 px-3 py-2 bg-[#F4F4F5] border-b border-slate-200">
@@ -1143,39 +1168,42 @@ export function RfqPanel({
                     {foreignInvites.map(inv => {
                       const incoStatus = effectiveIncoTermsStatus(inv)
                       const isReviewing = incoReviewId === inv.id
+                      // Sourcing's turn to act; other statuses are read-only but still viewable.
                       const needsReview = incoStatus === 'pending_sourcing'
+                      const hasAnswers = !!inv.incoTermsDoc && incoStatus !== 'not_sent' && incoStatus !== 'awaiting_vendor'
                       const doc = incoDoc(inv)
+                      const editable = canManage && needsReview
                       return (
                         <li key={inv.id} className="px-3 py-2.5">
                           <div className="flex items-center justify-between gap-2 flex-wrap">
                             <div className="min-w-0">
                               <p className="text-sm font-semibold text-slate-900 truncate">{vendorName(inv.vendorId)}</p>
-                              {incoStatus !== 'approved' && (
-                                <p className="text-[11px] text-slate-700">Awaiting INCO Terms approval — vendor can’t quote yet</p>
-                              )}
+                              <p className="text-[11px] text-slate-700">{INCO_TRACKER_HINT[incoStatus]}</p>
                             </div>
                             <div className="flex items-center gap-2">
                               <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${INCO_TERMS_STATUS_COLORS[incoStatus]}`}>
                                 {INCO_TERMS_STATUS_LABELS[incoStatus]}
                               </span>
-                              {canManage && needsReview && (
+                              {hasAnswers && (
                                 <button
-                                  onClick={() => setIncoReviewId(isReviewing ? null : inv.id)}
+                                  onClick={() => { setIncoReviewId(isReviewing ? null : inv.id); if (isReviewing) clearIncoEdits(inv.id) }}
                                   aria-expanded={isReviewing}
-                                  aria-label={`Review INCO Terms from ${vendorName(inv.vendorId)}`}
+                                  aria-label={`${editable ? 'Review' : 'View'} INCO Terms from ${vendorName(inv.vendorId)}`}
                                   className={`flex items-center gap-1 text-[11px] font-semibold text-[#171717] hover:underline ${FOCUS_RING} rounded`}
                                 >
-                                  {isReviewing ? 'Close' : 'Review'}
+                                  {isReviewing ? 'Close' : editable ? 'Review' : 'View'}
                                   <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isReviewing ? 'rotate-180' : ''}`} />
                                 </button>
                               )}
                             </div>
                           </div>
 
-                          {canManage && needsReview && isReviewing && (
+                          {hasAnswers && isReviewing && (
                             <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50/60 p-3 space-y-3">
                               <p className="text-[11px] text-slate-500">
-                                Review the vendor’s answers below. Approve to let them quote, edit &amp; resend to send back for confirmation, or reject.
+                                {editable
+                                  ? 'Review the vendor’s answers below. Approve them, edit any field and send it back for the vendor to confirm, or reject.'
+                                  : 'The Incoterms currently on the table. You can act on them when it is your turn.'}
                               </p>
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                 {INCO_TERMS_QUESTIONS.map(q => {
@@ -1185,42 +1213,57 @@ export function RfqPanel({
                                     <div key={q.key} className={q.type === 'textarea' ? 'sm:col-span-2' : ''}>
                                       <label htmlFor={fieldId} className={LABEL}>{q.label}</label>
                                       {q.type === 'select' ? (
-                                        <select id={fieldId} value={val}
+                                        <select id={fieldId} value={val} disabled={!editable}
                                           onChange={e => setIncoField(inv.id, doc, q.key, e.target.value)}
-                                          className={INPUT}>
+                                          className={`${INPUT} disabled:bg-slate-100 disabled:text-slate-600`}>
                                           <option value="">Select…</option>
                                           {(q.options ?? []).map(opt => <option key={opt} value={opt}>{opt}</option>)}
                                         </select>
                                       ) : q.type === 'textarea' ? (
-                                        <textarea id={fieldId} value={val} rows={2}
+                                        <textarea id={fieldId} value={val} rows={2} disabled={!editable}
                                           onChange={e => setIncoField(inv.id, doc, q.key, e.target.value)}
-                                          className={`${INPUT} resize-y`} />
+                                          className={`${INPUT} resize-y disabled:bg-slate-100 disabled:text-slate-600`} />
                                       ) : (
-                                        <input id={fieldId} type="text" value={val}
+                                        <input id={fieldId} type="text" value={val} disabled={!editable}
                                           onChange={e => setIncoField(inv.id, doc, q.key, e.target.value)}
-                                          className={INPUT} />
+                                          className={`${INPUT} disabled:bg-slate-100 disabled:text-slate-600`} />
                                       )}
                                     </div>
                                   )
                                 })}
                               </div>
-                              <div className="flex flex-wrap items-center gap-2 pt-1">
-                                <button onClick={() => approveInco(inv)}
-                                  aria-label={`Approve INCO Terms for ${vendorName(inv.vendorId)}`}
-                                  className={`flex items-center gap-1 px-3 py-1.5 text-[11px] font-semibold bg-slate-600 hover:bg-slate-700 text-white rounded-lg ${FOCUS_RING}`}>
-                                  <CheckCircle2 className="w-3.5 h-3.5" /> Approve
-                                </button>
-                                <button onClick={() => editResendInco(inv)}
-                                  aria-label={`Edit and resend INCO Terms to ${vendorName(inv.vendorId)}`}
-                                  className={`flex items-center gap-1 px-3 py-1.5 text-[11px] font-semibold bg-[#171717] hover:bg-[#000000] text-white rounded-lg ${FOCUS_RING}`}>
-                                  <Send className="w-3.5 h-3.5" /> Edit &amp; resend
-                                </button>
-                                <button onClick={() => rejectInco(inv)}
-                                  aria-label={`Reject INCO Terms for ${vendorName(inv.vendorId)}`}
-                                  className={`flex items-center gap-1 px-3 py-1.5 text-[11px] font-medium text-red-600 hover:text-red-700 ${FOCUS_RING} rounded`}>
-                                  <X className="w-3.5 h-3.5" /> Reject
-                                </button>
-                              </div>
+                              {editable && (
+                                <div>
+                                  <label htmlFor={`inco-note-${inv.id}`} className={LABEL}>Note to the vendor (sent with a revision)</label>
+                                  <textarea
+                                    id={`inco-note-${inv.id}`}
+                                    rows={2}
+                                    value={doc.revisionNote ?? ''}
+                                    onChange={e => setIncoField(inv.id, doc, 'revisionNote', e.target.value)}
+                                    placeholder="e.g. Freight must be seller-borne up to Nhava Sheva."
+                                    className={`${INPUT} resize-y`}
+                                  />
+                                </div>
+                              )}
+                              {editable && (
+                                <div className="flex flex-wrap items-center gap-2 pt-1">
+                                  <button onClick={() => approveInco(inv)}
+                                    aria-label={`Approve INCO Terms for ${vendorName(inv.vendorId)}`}
+                                    className={`flex items-center gap-1 px-3 py-1.5 text-[11px] font-semibold bg-slate-600 hover:bg-slate-700 text-white rounded-lg ${FOCUS_RING}`}>
+                                    <CheckCircle2 className="w-3.5 h-3.5" /> Approve
+                                  </button>
+                                  <button onClick={() => editResendInco(inv)}
+                                    aria-label={`Edit and send INCO Terms back to ${vendorName(inv.vendorId)}`}
+                                    className={`flex items-center gap-1 px-3 py-1.5 text-[11px] font-semibold bg-[#171717] hover:bg-[#000000] text-white rounded-lg ${FOCUS_RING}`}>
+                                    <Send className="w-3.5 h-3.5" /> Edit &amp; send back
+                                  </button>
+                                  <button onClick={() => rejectInco(inv)}
+                                    aria-label={`Reject INCO Terms for ${vendorName(inv.vendorId)}`}
+                                    className={`flex items-center gap-1 px-3 py-1.5 text-[11px] font-medium text-red-600 hover:text-red-700 ${FOCUS_RING} rounded`}>
+                                    <X className="w-3.5 h-3.5" /> Reject
+                                  </button>
+                                </div>
+                              )}
                             </div>
                           )}
                         </li>
@@ -1228,6 +1271,17 @@ export function RfqPanel({
                     })}
                   </ul>
                 </div>
+              )}
+
+              {/* Technical spec sign-off — the gate that must clear BEFORE the award below */}
+              {quotedCount >= 1 && !inFulfillment && (
+                <TechSpecPanel
+                  request={request}
+                  invites={invites}
+                  vendors={vendors}
+                  canManage={canManage}
+                  senderName={senderName}
+                />
               )}
 
               {/* Unified Final-Decision approve + Request-PI (split award; bulk or per-vendor) */}

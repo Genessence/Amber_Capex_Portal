@@ -102,7 +102,7 @@ export function VendorOnboardModal({ open, onClose, requestId, defaultTab = "exi
     addVendor(vendor)
     if (requestId) {
       const nowIso = new Date().toISOString()
-      // Foreign vendors must accept the Incoterms agreement before quoting — seed it up front.
+      // Foreign vendors answer the Incoterms questionnaire with their quotation — seed it up front.
       const incoBits = foreign
         ? {
             incoTermsStatus: "awaiting_vendor" as const,

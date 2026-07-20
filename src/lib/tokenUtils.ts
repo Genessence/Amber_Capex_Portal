@@ -90,3 +90,36 @@ export function generatePoToken(kind: 'request' | 'award', id: string): string {
 export function buildPoLink(token: string): string {
   return `${window.location.origin}/po/${token}`;
 }
+
+// ── Technical-team spec-approval links (public, no login) ────────────────────
+// Amber's Technical team signs off a vendor's machine specification BEFORE sourcing can award that
+// vendor. They have no portal account, so the package is reviewed at /tech-spec/<token>. A token is
+// minted per VendorInvite (the approval is per vendor) and rotated on every re-send.
+
+export interface TechSpecTarget {
+  invite: VendorInvite;
+  request: CapexRequest;
+}
+
+/** Resolve a technical spec-approval token to the vendor invite + request it belongs to. */
+export function resolveTechSpecTarget(
+  token: string,
+  invites: VendorInvite[],
+  requests: CapexRequest[],
+): TechSpecTarget | null {
+  if (!token) return null;
+  const invite = invites.find((inv) => inv.techSpec?.token === token);
+  if (!invite) return null;
+  const request = requests.find((r) => r.id === invite.requestId);
+  return request ? { invite, request } : null;
+}
+
+/** Mint a fresh spec-approval token (CSPRNG suffix — this token is the only credential). */
+export function generateTechSpecToken(inviteId: string): string {
+  const rand = crypto.randomUUID().replace(/-/g, '');
+  return `spec_${inviteId}_${rand}`;
+}
+
+export function buildTechSpecLink(token: string): string {
+  return `${window.location.origin}/tech-spec/${token}`;
+}

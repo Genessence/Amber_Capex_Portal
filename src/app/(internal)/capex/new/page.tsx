@@ -947,6 +947,17 @@ export default function NewCapexPage() {
     return item ? item.totalCost * CR_TO_INR : null
   }
 
+  /**
+   * The item name shown everywhere downstream (line-item description + request subject).
+   * There is no free-text Subject field on the form any more — the name is always the
+   * selected master Sub Particular, resolved live from `capexMaster` so it can never drift
+   * from the linked budget line. `row.description` is only a cached copy of the same value.
+   */
+  function getRowDescription(row: GridRow): string {
+    const item = row.masterItemId ? capexMaster.find(m => m.id === row.masterItemId) : undefined
+    return (item?.subParticulars ?? row.description ?? "").trim()
+  }
+
   const mixedCurrencyVendorIds = useMemo(() => findMixedCurrencyVendors(quoteRows), [quoteRows])
   const quotesValid =
     validateQuoteRows(quoteRows) &&
@@ -954,9 +965,12 @@ export default function NewCapexPage() {
     validateQuotesPerLine(quoteRows, rows.map(r => r.id))
   // Brown Field buyers enter specs + preferred vendor (no quotations); other field types
   // keep the buyer-quote flow and its validation.
-  const formValid = isBrownFieldRequest
-    ? rows.every(r => r.description.trim() && r.quantity.trim() && r.remarks.trim())
-    : rows.every(r => r.description.trim() && r.quantity.trim() && r.remarks.trim()) && quotesValid
+  // The Sub Particular selection *is* the item identity now (it replaced the free-text Subject),
+  // so it is what has to be filled — not a description string the user can no longer type.
+  const rowsComplete = rows.every(
+    r => r.masterItemId.trim() && getRowDescription(r) && r.quantity.trim() && r.remarks.trim(),
+  )
+  const formValid = isBrownFieldRequest ? rowsComplete : rowsComplete && quotesValid
 
   function handleSubmit() {
     if (isBrownFieldRequest && !brownFieldHead) {
@@ -1013,7 +1027,7 @@ export default function NewCapexPage() {
           isMachineryHead && row.masterItemId && row.machineCapacity.trim()
             ? row.machineCapacity.trim()
             : undefined,
-        description: row.description,
+        description: getRowDescription(row),
         category: resolvedHead ?? 'General',
         quantity: row.quantity,
         budget: budgetNum,
@@ -1035,7 +1049,9 @@ export default function NewCapexPage() {
       ...(needsProjectType && projectType
         ? { projectType, greenFieldProjectType: projectType }
         : {}),
-      subject: first.description,
+      // Derived from the first line's Sub Particular (the Subject input was removed from the
+      // form); fall back through head → generic so the subject is never blank downstream.
+      subject: first.description || first.masterHead || lockedHead || "CAPEX Request",
       masterItemId: first.masterItemId,
       category: rows.length > 1 ? "Multiple" : (lockedHead ?? first.masterHead ?? "General"),
       quantity: rows.length > 1 ? `${rows.length} items` : first.quantity,
@@ -1530,7 +1546,7 @@ export default function NewCapexPage() {
               The required-field footnote is linked via aria-describedby on the table.
             */}
             <caption className="sr-only">
-              CAPEX request line items. Subject, Quantity, and Description are required per row.
+              CAPEX request line items. Sub Particular, Quantity, and Description are required per row.
             </caption>
 
             {/* ── Desktop thead (hidden on mobile) ── */}
@@ -1538,17 +1554,15 @@ export default function NewCapexPage() {
               <tr className="bg-foreground text-background text-xs font-semibold uppercase tracking-wider">
                 {/* # — 40px fixed */}
                 <th scope="col" className="px-3 py-3 text-center w-10 border-r border-slate-700 select-none">#</th>
-                {/* Subject — flex-1, min 220px */}
-                <th scope="col" className="px-3 py-3 text-left min-w-[220px] border-r border-slate-700">
-                  Subject
-                  <span className="text-red-400 ml-1" aria-hidden="true">*</span>
-                  <span className="sr-only"> (required)</span>
-                </th>
                 {/* Head — 180px (chip for Machinery; dropdown for others) */}
                 <th scope="col" className="px-3 py-3 text-left w-[180px] border-r border-slate-700">Head</th>
                 {isMachineryHead ? (
                   <>
-                    <th scope="col" className="px-3 py-3 text-left w-[300px] border-r border-slate-700">Sub Particular</th>
+                    <th scope="col" className="px-3 py-3 text-left min-w-[300px] border-r border-slate-700">
+                      Sub Particular
+                      <span className="text-red-400 ml-1" aria-hidden="true">*</span>
+                      <span className="sr-only"> (required)</span>
+                    </th>
                     <th scope="col" className="px-3 py-3 text-left w-[160px] border-r border-slate-700">Machine Capacity</th>
                   </>
                 ) : (
@@ -1556,7 +1570,11 @@ export default function NewCapexPage() {
                     {fieldType === "green_field" && (
                       <th scope="col" className="px-3 py-3 text-left w-[160px] border-r border-slate-700">Machine Capacity</th>
                     )}
-                    <th scope="col" className="px-3 py-3 text-left w-[300px] border-r border-slate-700">Sub Particular</th>
+                    <th scope="col" className="px-3 py-3 text-left min-w-[300px] border-r border-slate-700">
+                      Sub Particular
+                      <span className="text-red-400 ml-1" aria-hidden="true">*</span>
+                      <span className="sr-only"> (required)</span>
+                    </th>
                   </>
                 )}
                 {/* Qty — 90px, right-aligned */}
@@ -1580,22 +1598,9 @@ export default function NewCapexPage() {
                 const rowBase       = idx % 2 === 0 ? "bg-white" : "bg-slate-50/60"
                 const rowExtra      = "border-l-4 border-l-transparent"
                 const lineQuotes    = getQuotesForLine(quoteRows, row.id)
-                const mainColSpan   = isMachineryHead ? 8 : fieldType === "green_field" ? 8 : 7
+                // Desktop columns: # · Head · [Machine Capacity] · Sub Particular · Qty · Allocated · delete
+                const mainColSpan   = isMachineryHead || fieldType === "green_field" ? 7 : 6
                 // ── Shared cell render helpers (reused in both desktop and card) ──
-
-                const subjectField = (
-                  <input
-                    type="text"
-                    id={`desc-${row.id}`}
-                    value={row.description}
-                    onChange={e => updateRowMulti(row.id, { description: e.target.value })}
-                    placeholder="Enter item name…"
-                    className={cn(cellCtrl, "h-10", !row.description && cellCtrlRequired)}
-                    aria-label={`Row ${idx + 1} subject (required)`}
-                    aria-required="true"
-                    aria-invalid={!row.description || undefined}
-                  />
-                )
 
                 const scopeItems = filterMasterItemsForRequest({
                   capexMaster,
@@ -1639,13 +1644,12 @@ export default function NewCapexPage() {
                   <select
                     value={row.masterHead}
                     onChange={e => {
-                      const prevItem = row.masterItemId
-                        ? capexMaster.find(m => m.id === row.masterItemId)
-                        : null
+                      // Changing the head invalidates the sub particular — and the item name,
+                      // which is derived from it.
                       updateRowMulti(row.id, {
                         masterHead: e.target.value,
                         masterItemId: "",
-                        ...(row.description === prevItem?.subParticulars ? { description: "" } : {}),
+                        description: "",
                       })
                     }}
                     className={cn(cellCtrl, "h-10", !row.masterHead && "text-slate-500")}
@@ -1695,17 +1699,13 @@ export default function NewCapexPage() {
                     : []
                   const isLocked   = !activeHead
 
+                  // The sub particular is the item's name — there is no separate Subject input,
+                  // so the description always mirrors the selection (and clears with it).
                   const handleSubChange = (val: string) => {
-                    if (!val) { updateRowMulti(row.id, { masterItemId: "" }); return }
+                    if (!val) { updateRowMulti(row.id, { masterItemId: "", description: "" }); return }
                     const item = subItems.find(m => m.id === val)
                     if (!item || item.head !== activeHead) return
-                    const updates: Partial<GridRow> = { masterItemId: val }
-                    const prevItem = row.masterItemId
-                      ? capexMaster.find(m => m.id === row.masterItemId)
-                      : null
-                    if (!row.description || row.description === prevItem?.subParticulars)
-                      updates.description = item.subParticulars
-                    updateRowMulti(row.id, updates)
+                    updateRowMulti(row.id, { masterItemId: val, description: item.subParticulars })
                   }
 
                   return (
@@ -1731,9 +1731,12 @@ export default function NewCapexPage() {
                         className={cn(
                           cellCtrl, "h-10",
                           !row.masterItemId && "text-slate-500",
+                          !isLocked && !row.masterItemId && cellCtrlRequired,
                           isLocked && "opacity-0"
                         )}
-                        aria-label={`Row ${idx + 1} sub particular`}
+                        aria-label={`Row ${idx + 1} sub particular (required)`}
+                        aria-required="true"
+                        aria-invalid={(!isLocked && !row.masterItemId) || undefined}
                         aria-disabled={isLocked}
                         tabIndex={isLocked ? -1 : 0}
                       >
@@ -1853,10 +1856,6 @@ export default function NewCapexPage() {
                       <td className="px-3 py-3 text-center border-r border-slate-200 bg-slate-100/60 group-hover:bg-[#EBF0FB]/40 w-10">
                         <span className="text-xs font-bold text-slate-500 select-none">{idx + 1}</span>
                       </td>
-                      {/* Subject */}
-                      <td className="px-3 py-3 border-r border-slate-200 min-w-[220px]">
-                        {subjectField}
-                      </td>
                       {/* Head */}
                       <td className="px-3 py-3 border-r border-slate-200 w-[180px]">
                         {headField}
@@ -1937,9 +1936,8 @@ export default function NewCapexPage() {
                       <td colSpan={mainColSpan} className="px-3 py-3">
                         <div className="flex gap-3 mb-3 items-start flex-wrap">
                           <span className="text-xs font-bold text-slate-500 select-none w-6 shrink-0 pt-2.5 text-center">{idx + 1}</span>
-                          <div className="flex-1 min-w-[180px]">{subjectField}</div>
                           <div className="w-[160px] shrink-0">{headField}</div>
-                          <div className="w-[220px] shrink-0">{subParticularField}</div>
+                          <div className="flex-1 min-w-[220px]">{subParticularField}</div>
                           {isMachineryHead && (
                             <div className="w-[180px] shrink-0">{machineCapacityField}</div>
                           )}
@@ -1971,17 +1969,13 @@ export default function NewCapexPage() {
                           </div>
                           <div className="p-3 grid grid-cols-1 gap-3">
                             <div>
-                              <label className={fieldLabel}>
-                                Subject <span className="text-red-500" aria-hidden="true">*</span>
-                              </label>
-                              {subjectField}
-                            </div>
-                            <div>
                               <label className={fieldLabel}>Head</label>
                               {headField}
                             </div>
                             <div>
-                              <label className={fieldLabel}>Sub Particular</label>
+                              <label className={fieldLabel}>
+                                Sub Particular <span className="text-red-500" aria-hidden="true">*</span>
+                              </label>
                               {subParticularField}
                             </div>
                             {isMachineryHead && (
@@ -2049,8 +2043,8 @@ export default function NewCapexPage() {
             {!formValid && (
               <span id="submit-hint" className="sr-only">
                 {isBrownFieldRequest
-                  ? "Fill in Subject, Quantity, and Description for all rows."
-                  : "Fill in Subject, Quantity, and Description for all rows. Add at least one complete vendor quote per line item."}
+                  ? "Fill in Sub Particular, Quantity, and Description for all rows."
+                  : "Fill in Sub Particular, Quantity, and Description for all rows. Add at least one complete vendor quote per line item."}
               </span>
             )}
             <Button
@@ -2114,7 +2108,7 @@ export default function NewCapexPage() {
                     <div className="flex items-start justify-between gap-3 flex-wrap">
                       <div>
                         <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Item {idx + 1}</p>
-                        <p className="font-semibold text-foreground mt-0.5">{row.description}</p>
+                        <p className="font-semibold text-foreground mt-0.5">{getRowDescription(row) || "—"}</p>
                         <p className="text-xs text-muted-foreground mt-1">
                           {row.masterHead || lockedRequestHead || "—"} · Qty {row.quantity} · {plantLabel}
                         </p>
@@ -2308,7 +2302,7 @@ export default function NewCapexPage() {
                   return (
                     <tr key={row.id} className={idx % 2 === 0 ? "bg-white" : "bg-slate-50"}>
                       <td className="px-3 py-2 text-slate-500">{idx + 1}</td>
-                      <td className="px-3 py-2 font-medium text-slate-800">{row.description}</td>
+                      <td className="px-3 py-2 font-medium text-slate-800">{getRowDescription(row) || "—"}</td>
                       <td className="px-3 py-2 text-slate-600">{row.quantity}</td>
                       <td className="px-3 py-2 text-slate-600">{budgetNum ? formatINR(budgetNum) : "—"}</td>
                       <td className="px-3 py-2 text-slate-600">{pLabel}</td>

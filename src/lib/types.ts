@@ -475,7 +475,7 @@ export interface Vendor {
   onboardedAt: string;
   /** True for one-time / not-yet-onboarded vendors whose terms aren't fetched from the onboarding portal. */
   oneTime?: boolean;
-  /** True for a foreign / international vendor — triggers the Incoterms agreement before quoting. */
+  /** True for a foreign / international vendor — triggers the Incoterms questionnaire at quote submit. */
   foreign?: boolean;
   /** Human-readable payment terms (mock: fetched from the external onboarding portal for onboarded vendors). */
   paymentTermsText?: string;
@@ -641,10 +641,12 @@ export interface ProformaInvoice extends LandDocument {
 }
 
 /**
- * INCO (Incoterms 2020) agreement state. Sourcing sends the 12-question form to a new/one-time
- * vendor; the vendor fills it (→ pending_sourcing); sourcing edits & resends (→ pending_vendor)
- * or approves; either side may approve/reject. A one-time vendor must reach `approved` before they
- * can submit a price quote. Mirrors the RFQ turn-taking.
+ * INCO (Incoterms 2020) agreement state. A FOREIGN vendor answers the 12-question form in a modal
+ * when they submit their quotation — the quote and the answers persist together (→ pending_sourcing).
+ * Sourcing then edits & sends back (→ pending_vendor) or approves; the vendor accepts, sends back
+ * their own corrections (→ pending_sourcing), or declines. The loop repeats until `approved`.
+ * `awaiting_vendor` means the questionnaire is queued and will be asked at quote submit. An
+ * unsettled agreement blocks the AWARD (see `canRequestPi`), not the quoting. Mirrors RFQ turn-taking.
  */
 export type IncoTermsStatus =
   | 'not_sent'
@@ -682,6 +684,63 @@ export interface IncoTermsMessage {
   action: 'sent' | 'filled' | 'revised' | 'approved' | 'rejected';
   message?: string;
   at: string;
+}
+
+/**
+ * Technical specification approval (pre-award gate, PER VENDOR).
+ *
+ * Before sourcing can finalize a vendor and request their Proforma Invoice, the machine's technical
+ * specification — including any spec sheet the VENDOR supplied — is sent to Amber's Technical team
+ * for sign-off. The Technical team has no portal account: they act through a tokenised public link
+ * at /tech-spec/<token> and can approve, send back for revision, or reject. Sourcing revises and
+ * re-sends; the loop repeats until approved. Kept per-vendor because different vendors supply
+ * different machines (and split awards hand different lines to different vendors).
+ */
+export type TechSpecStatus =
+  | 'not_sent'
+  | 'pending_technical'
+  | 'needs_revision'
+  | 'approved'
+  | 'rejected';
+
+/** A technical specification document (vendor-supplied datasheet, drawing, or an internal spec). */
+export interface TechSpecDocument {
+  id: string;
+  name: string;
+  /** Base64 payload — offloaded to IndexedDB (`techspec:<id>`), never kept in localStorage. */
+  base64: string;
+  mimeType: string;
+  uploadedAt: string;
+  uploadedBy?: string;
+  /** True when the file was provided by the vendor (vs. drafted internally by sourcing). */
+  fromVendor?: boolean;
+}
+
+export interface TechSpecMessage {
+  id: string;
+  by: 'sourcing' | 'technical';
+  senderName: string;
+  action: 'sent' | 'approved' | 'rejected' | 'revision_requested';
+  message?: string;
+  at: string;
+}
+
+/** Per-vendor technical specification approval package (lives on VendorInvite.techSpec). */
+export interface TechSpecApproval {
+  id: string;
+  status: TechSpecStatus;
+  /** Sourcing's notes to the Technical team (machine details, deviations to check, etc.). */
+  notes?: string;
+  documents: TechSpecDocument[];
+  /** Public approval link token (CSPRNG; minted on first send, rotated on each re-send). */
+  token?: string;
+  sentAt?: string;
+  sentBy?: string;
+  decidedAt?: string;
+  decidedBy?: string;
+  /** The Technical team's remark on approval / revision / rejection. */
+  decisionNote?: string;
+  thread: TechSpecMessage[];
 }
 
 /**
@@ -778,6 +837,11 @@ export interface VendorInvite {
   advancePaidAt?: string;
   /** Set when accounts re-open PI upload after PO issue (vendor re-uploads PI). */
   piReuploadAllowed?: boolean;
+  /**
+   * Technical-team sign-off on THIS vendor's machine specification. Must reach `approved` before
+   * the vendor can be awarded / their PI requested (see `techSpecBlocksAward`).
+   */
+  techSpec?: TechSpecApproval;
 }
 
 /**

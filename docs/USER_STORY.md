@@ -75,7 +75,7 @@ Full Brown-Field fulfillment lifecycle. **All scoped to `fieldType === 'brown_fi
 - **Acceptance criteria**
   - [x] Live Brown Field FY master is **read-only**; budget changes flow through a next-FY proposal (the only mid-FY change is an Adhoc transfer)
   - [x] `/capex/budget-proposals` authoring: seed from live FY, edit rows, **bulk upload** (Excel/CSV) with template download, submit for approval
-  - [x] `/capex/budget-approvals` (super_admin): per-head diff vs live FY; Approve **publishes** as a new live FY; Reject; double-publish guarded
+  - [x] `/capex/budget-approvals` (super_admin): full head → sub-particular breakdown of the proposal (no live-FY diff / delta columns); Approve **publishes** as a new live FY; Reject; double-publish guarded
   - [x] New requests pick up the published FY via field-scoped `getLatestMasterFyForField` (Green/Digitisation/IT FY unaffected)
 - **Files:** `src/lib/budgetProposalUtils.ts`, `src/lib/bulkMasterImport.ts`, `src/lib/capexContext.tsx`, `src/app/(internal)/capex/budget-proposals/page.tsx`, `src/app/(internal)/capex/budget-approvals/page.tsx`, `src/app/(internal)/capex/master/page.tsx`
 
@@ -156,7 +156,7 @@ Full Brown-Field fulfillment lifecycle. **All scoped to `fieldType === 'brown_fi
 - **Priority:** must · **Status:** done
 - **Acceptance criteria**
   - [x] Quick-add new vendor (name/email/phone) in the RFQ picker → one-time vendor (`inviteNewVendor`, `Vendor.contactPhone`)
-  - [x] One-time vendor must **approve the 12-question INCO Terms before quoting** (`incoTermsBlocksQuote`); two-sided fill/edit-resend/accept/reject loop (`proposeIncoTerms`/`respondToIncoTerms`); sent only to new/one-time vendors
+  - [x] Foreign vendor answers the **12-question INCO Terms in a modal at quote submit** (`needsIncoTermsWithQuote`) — quote + terms persist atomically; two-sided edit-resend/accept/reject loop (`proposeIncoTerms`/`respondToIncoTerms`) until agreed; an unsettled agreement blocks the **award** (`incoTermsBlocksAward` → `canRequestPi`), not the quoting
 - **Files:** `src/lib/incoTermsUtils.ts`, `src/lib/types.ts`, `src/lib/capexContext.tsx`, `src/components/RfqPanel.tsx`, `src/app/(public)/supplier/[token]/page.tsx`
 
 ### US-069 — Reverse auction converges to the PI flow exactly like RFQ
@@ -564,6 +564,15 @@ Full Brown-Field fulfillment lifecycle. **All scoped to `fieldType === 'brown_fi
 | US-078 | As a plant head, I want the **same edit + send-back-for-correction** ability on my approval link, not just approve/reject. | done |
 | US-079 | As the budget-upload user (maintenance), I want my **Requests screen to show my budget approval requests** (status + corrections), not the item requests. | done |
 
+| US-080 | As an approver (plant head, admin, Global Accounts), I want the budget approval screens to show **every sub particular** under its head — not a Live-vs-Proposed delta — so I approve on full visibility. | done |
+| US-081 | As a plant user raising a request, I don't want to retype a **Subject** — the **Sub Particular** I pick from the master *is* the item name, and it carries through to the plant head, sourcing, and admin. | done |
+
+| US-082 | As a foreign supplier, I want to fill in my quotation first and answer the INCO Terms in a popup when I hit Submit — with the quote only going through once I've answered them. | done |
+| US-083 | As sourcing, I want the vendor's submitted INCO Terms visible to me, editable, and sendable back with a note — looping with the vendor until we agree, reject, or accept. | done |
+
+| US-084 | As sourcing, before I finalise a vendor and request the PI, I want the machine's tech spec — including the spec document the vendor gave me — sent to Amber's Technical team for approval. | done |
+| US-085 | As the Technical team, I want to review a vendor's machine spec from an emailed link and approve it, send it back with remarks, or reject it — with the award blocked until I approve. | done |
+
 - **Notes / related files:** `src/app/(public)/approve/[token]/page.tsx`, `src/components/EmailPreviewModal.tsx`, `src/components/TrialCard.tsx`, `src/lib/currencyUtils.ts`, `src/lib/trialUtils.ts`, `src/lib/tokenUtils.ts`, `src/lib/capexContext.tsx`, `src/lib/rfqUtils.ts`, `src/lib/paymentUtils.ts`, `src/components/{RfqPanel,VendorGrid,FinalDecisionActions,AccountsPanel,VendorOnboardModal}.tsx`, `src/app/(internal)/capex/{[id],budget-proposals,budget-approvals}/page.tsx`, `src/app/(public)/supplier/[token]/page.tsx`, `src/components/{Sidebar,TopNav}.tsx`, `src/app/login/page.tsx`. `plant_head*`/`sourcing_head` roles removed. Built with frontend/backend engineers; reviewed by security-auditor + quality-challenger + ux-tester; verified via `tsc`/`build` + runtime (plant-head approval + budget publish). See **Workflow overhaul (2026-07)** in `CLAUDE.md`.
 
 ---
@@ -582,3 +591,48 @@ When a story needs acceptance criteria, the agent expands it below using this sh
 - **Acceptance criteria**
   - [ ] …
 - **Notes / related files:** …
+
+
+### US-080 / US-081 — Budget-approval visibility + Subject removal (2026-07-20)
+
+- **US-080 acceptance criteria**
+  - [x] `BudgetProposalBreakdown` (`src/components/BudgetProposalBreakdown.tsx`) renders the proposal grouped by head, listing **each sub particular** (department, qty, rate, budget) with a per-head subtotal + grand total
+  - [x] Used by `/capex/budget-approvals` (admin stage **and** Global Accounts stage) and the public plant-head link `/approve/[token]`
+  - [x] The **Live / Proposed / Δ** diff table is removed from all approval surfaces; `diffProposalAgainstLive`, `summarizeMasterByHead`, and `HeadDiffRow` deleted from `budgetProposalUtils.ts` (with the unused `liveDiff` prop on the proposals editor)
+- **US-081 acceptance criteria**
+  - [x] The free-text **Subject** column is gone from the `/capex/new` line grid on desktop, tablet, and mobile
+  - [x] **Sub Particular** is the required per-row field (asterisk + `aria-required`/`aria-invalid`); `formValid` requires `masterItemId`
+  - [x] The line `description` is derived from the selected sub particular (`getRowDescription`, resolved live from `capexMaster`) and clears when the head or sub particular changes
+  - [x] `CapexRequest.subject` derives from the first line's sub particular with a head → generic fallback, so it is never blank downstream (requests list, detail, plant-head link, sourcing, accounts queue)
+  - [x] Table `colSpan` maths, sr-only caption, and validation helper text updated for the removed column
+- **Notes / related files:** `src/components/BudgetProposalBreakdown.tsx`, `src/lib/budgetProposalUtils.ts`, `src/app/(internal)/capex/{budget-approvals,budget-proposals,new}/page.tsx`, `src/app/(public)/approve/[token]/page.tsx`. Verified via `npx tsc --noEmit`, `npm run build`, and a runtime pass on `/capex/new` (Brown Field + Green Field grids, submit → `pending_head_approval` with subject derived from the sub particular).
+
+
+### US-082 / US-083 — INCO Terms with the quotation (2026-07-20)
+
+- **Acceptance criteria**
+  - [x] The Incoterms questionnaire no longer gates the quote form; a foreign vendor prices their lines and clicks **Submit Quotation**
+  - [x] A modal (`IncoTermsModal`) presents the 12 questions; **Submit Terms & Quotation** is disabled until every required answer is filled
+  - [x] Quote + terms persist in **one** `proposeRfqQuote(..., incoDoc)` state pass (`rfqStatus` and `incoTermsStatus` both → `pending_sourcing`); closing the modal leaves the quotation unsent
+  - [x] The invariant is enforced in the context, not the UI: `proposeRfqQuote` returns false (persisting nothing) on a missing/incomplete/not-applicable `incoDoc`
+  - [x] Sourcing sees the answers in the RFQ panel's INCO tracker — viewable at every status, editable on their turn — and can **Approve**, **Edit & send back** (with a `revisionNote` to the vendor), or **Reject**
+  - [x] The vendor sees the revision inline (`IncoTermsNegotiationCard`) alongside their quotation and can **Accept**, **Send Back Corrections**, or **Decline**; the loop repeats until approved
+  - [x] An unsettled agreement blocks the **award**: `incoTermsBlocksAward` folded into `canRequestPi`
+  - [x] Fixed a pre-existing **Rules of Hooks** violation in the supplier portal (a `useCapex()` called after two early returns)
+- **Notes / related files:** `src/lib/incoTermsUtils.ts`, `src/lib/rfqUtils.ts`, `src/lib/capexContext.tsx` (`proposeRfqQuote`), `src/app/(public)/supplier/[token]/page.tsx`, `src/components/RfqPanel.tsx`. Verified via `npx tsc --noEmit`, `npm run build`, and a full runtime pass of the loop (submit with terms → sourcing revise + note → vendor counter → sourcing approve) with a clean console.
+
+
+### US-084 / US-085 — Technical specification approval before award (2026-07-20)
+
+- **Acceptance criteria**
+  - [x] A new step sits between sourcing's Final Decision and the award/PI request; it is **per vendor** (different vendors, different machines — fits split awards)
+  - [x] Sourcing uploads the **spec document(s) provided by the vendor** (≤6 files × 2 MB, flagged `From vendor`) plus notes, in `TechSpecPanel` above the Final-Decision bar in BOTH the RFQ and auction views
+  - [x] The Technical team reviews on a **public tokenised page** `/tech-spec/[token]` (no login) showing the request, vendor, line-item specs, sourcing's notes and downloadable documents — with copy-link + email preview on the sourcing side
+  - [x] They can **Approve**, **Send Back for Revision**, or **Reject**; a remark is required for the latter two, and it surfaces to sourcing
+  - [x] Sourcing revises and re-sends — the token is **rotated** and the previous decision stamps cleared; the loop repeats until approved
+  - [x] The token is **burned on decision**, so a stale link cannot re-decide; `decideTechSpec` is turn-guarded to `pending_technical`
+  - [x] The award is **blocked** until the spec is approved — enforced in `awardAndRequestPi`, `finalizeSplitAward` and `requestProformaInvoice` (not just the UI), with `FinalDecisionActions` disabling and explaining the block per vendor
+  - [x] `sendTechSpecForApproval` takes the pending notes so the save + send land in one state pass (a stale read would otherwise drop them)
+  - [x] Fixed a pre-existing **file-blob data-loss bug**: a persist running before IndexedDB hydration overwrote the file map with an empty object, destroying every stored blob (PIs, PO documents, trial uploads, attachments) on reload
+- **Notes / related files:** `src/lib/techSpecUtils.ts`, `src/lib/types.ts`, `src/lib/tokenUtils.ts`, `src/lib/constants.ts` (`TECHNICAL_TEAM_EMAIL`), `src/lib/capexContext.tsx`, `src/components/TechSpecPanel.tsx`, `src/components/FinalDecisionActions.tsx`, `src/app/(public)/tech-spec/[token]/page.tsx`, `src/components/RfqPanel.tsx`, `src/app/(internal)/capex/[id]/page.tsx`. Verified via `npx tsc --noEmit`, `npm run build`, and a full runtime pass (upload → reload-survives → send → send-back with remark → revise + re-send → approve → award unblocks → `pi_requested`).
+
