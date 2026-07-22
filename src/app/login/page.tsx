@@ -17,8 +17,8 @@ const ROLES = [
   { value: "buyer_jhajjar_p2",      label: "Buyer · Jhajjar Plant 2" },
   { value: "sourcing_member",       label: "Sourcing Member" },
   { value: "maintenance",           label: "Maintenance" },
-  { value: "plant_accounts",        label: "Plant Accounts (FA codes)" },
-  { value: "accounts",              label: "Global Accounts (PO & payments)" },
+  // Plant Accounts and Global Accounts have NO portal login — Plant Accounts run FA codes → PO →
+  // payments on the emailed /po/[token] link, Global Accounts sign off budgets on /approve/[token].
   { value: "super_admin",           label: "Super Admin" },
 ]
 

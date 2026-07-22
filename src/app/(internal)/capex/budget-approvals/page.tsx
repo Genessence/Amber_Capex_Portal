@@ -3,11 +3,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { ClipboardCheck, Check, X, ChevronDown, ChevronRight, RotateCcw, Landmark } from 'lucide-react'
+import { ClipboardCheck, Check, X, ChevronDown, ChevronRight, RotateCcw, Landmark, Copy, Mail, ExternalLink } from 'lucide-react'
 import { useCapex } from '@/lib/capexContext'
 import { BudgetCorrectionPanel } from '@/components/BudgetCorrectionPanel'
 import { BudgetProposalBreakdown } from '@/components/BudgetProposalBreakdown'
-import { PLANTS, ROLE_NAMES } from '@/lib/constants'
+import { EmailPreviewModal } from '@/components/EmailPreviewModal'
+import { buildApprovalLink } from '@/lib/tokenUtils'
+import { PLANTS, ROLE_NAMES, GLOBAL_ACCOUNTS_EMAIL } from '@/lib/constants'
 import type { BudgetProposal, BudgetProposalItem } from '@/lib/types'
 import { PROJECT_TYPE_LABELS } from '@/lib/greenFieldConstants'
 import {
@@ -27,14 +29,16 @@ function plantLabel(v: string, custom: { value: string; label: string }[]) {
 export default function BudgetApprovalsPage() {
   const router = useRouter()
   const {
-    capexMaster, customPlants, budgetProposals, decideBudgetProposal, decideBudgetAccounts,
+    capexMaster, customPlants, budgetProposals, decideBudgetProposal,
     adhocBudgetRequests, brownFieldHeadAllocations, usedAmountByMasterItemId, decideAdhocBudgetRequest,
   } = useCapex()
   const [role, setRole] = useState('')
   const [expanded, setExpanded] = useState<string | null>(null)
   const [correcting, setCorrecting] = useState<string | null>(null)
+  // Global Accounts have no portal login — the admin emails them the public sign-off link.
+  const [emailFor, setEmailFor] = useState<BudgetProposal | null>(null)
 
-  const isAllowed = (r: string) => r === 'super_admin' || r === 'accounts'
+  const isAllowed = (r: string) => r === 'super_admin'
 
   useEffect(() => {
     const r = localStorage.getItem('capex_role') ?? ''
@@ -50,7 +54,6 @@ export default function BudgetApprovalsPage() {
   }, [router])
 
   const isAdmin = role === 'super_admin'
-  const isAccounts = role === 'accounts' || role === 'super_admin'
 
   // Super-admin stage.
   const pending = useMemo(
@@ -78,7 +81,7 @@ export default function BudgetApprovalsPage() {
 
   function approve(p: BudgetProposal) {
     decideBudgetProposal(p.id, 'approved', role)
-    toast.success(`Approved — forwarded to Global Accounts for final sign-off`)
+    toast.success('Approved — send the Global Accounts sign-off link from the section below')
   }
   function sendBackWithEdits(p: BudgetProposal, items: BudgetProposalItem[], note: string) {
     decideBudgetProposal(p.id, 'needs_correction', role, note || undefined, items)
@@ -91,15 +94,35 @@ export default function BudgetApprovalsPage() {
     decideBudgetProposal(p.id, 'rejected', role, note || undefined)
     toast.success('Proposal rejected')
   }
-  function approveAccounts(p: BudgetProposal) {
-    decideBudgetAccounts(p.id, 'approved', role)
-    toast.success(`Approved — ${plantLabel(p.plant, customPlants)} FY ${p.targetFy} published as the new live budget`)
+  function accountsLink(p: BudgetProposal) {
+    return p.accountsToken && typeof window !== 'undefined' ? buildApprovalLink(p.accountsToken) : ''
   }
-  function rejectAccounts(p: BudgetProposal) {
-    const note = window.prompt('Reason for rejection (optional):')
-    if (note === null) return // cancelled
-    decideBudgetAccounts(p.id, 'rejected', role, note || undefined)
-    toast.success('Proposal rejected')
+  function copyAccountsLink(p: BudgetProposal) {
+    const link = accountsLink(p)
+    if (!link) { toast.error('Sign-off link is not ready yet'); return }
+    navigator.clipboard?.writeText(link)
+      .then(() => toast.success('Global Accounts sign-off link copied'))
+      .catch(() => toast.error('Could not copy link'))
+  }
+  function accountsEmailBody(p: BudgetProposal) {
+    return [
+      'Dear Global Accounts team,',
+      '',
+      `A next-FY CAPEX budget has cleared the plant head and admin approvals and needs your final sign-off. Approving it publishes the budget as the live FY ${p.targetFy} master.`,
+      '',
+      `Plant:    ${plantLabel(p.plant, customPlants)}`,
+      `Category: ${PROJECT_TYPE_LABELS[p.projectType]}`,
+      `Target FY: ${p.targetFy}${p.sourceFy ? ` (based on FY ${p.sourceFy})` : ''}`,
+      `Line items: ${p.items.length}`,
+      `Total: ${fmtCr(proposalTotalCr(p))}`,
+      p.adminDecidedBy ? `Admin approval: ${p.adminDecidedBy}` : '',
+      '',
+      'Please review and Approve / Reject using the secure link below (no portal login required):',
+      accountsLink(p) || '(link not ready yet)',
+      '',
+      'Regards,',
+      'Amber Enterprises CAPEX Portal',
+    ].filter(Boolean).join('\n')
   }
   const fmtCr = (n: number) => `₹${n.toFixed(2)} Cr`
 
@@ -173,8 +196,9 @@ export default function BudgetApprovalsPage() {
         </section>
         )}
 
-        {/* Global-accounts stage (final gate — approving publishes to the live master) */}
-        {isAccounts && (
+        {/* Global-accounts stage — they have NO portal login. The admin shares the public sign-off
+            link (copy / preview email); approving on that page publishes to the live master. */}
+        {isAdmin && (
         <section className="space-y-2">
           <h2 className="text-[12px] font-bold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
             <Landmark className="w-3.5 h-3.5" /> With Global Accounts ({pendingAccounts.length})
@@ -185,6 +209,7 @@ export default function BudgetApprovalsPage() {
             </p>
           ) : pendingAccounts.map(p => {
             const isOpen = expanded === p.id
+            const link = accountsLink(p)
             return (
               <div key={p.id} className="rounded-xl border border-border bg-card overflow-hidden">
                 <div className="flex items-center gap-3 px-4 py-3 flex-wrap">
@@ -199,14 +224,25 @@ export default function BudgetApprovalsPage() {
                       {p.items.length} lines · {fmtCr(proposalTotalCr(p))} · admin-approved by {p.adminDecidedBy ?? '—'}
                     </p>
                   </div>
-                  <button onClick={() => rejectAccounts(p)}
-                    className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-white hover:bg-red-50 text-red-600 border border-red-200 rounded-lg">
-                    <X className="w-3.5 h-3.5" /> Reject
+                  <button onClick={() => copyAccountsLink(p)} disabled={!link}
+                    className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-white hover:bg-muted/40 text-foreground border border-border rounded-lg disabled:opacity-50">
+                    <Copy className="w-3.5 h-3.5" /> Copy link
                   </button>
-                  <button onClick={() => approveAccounts(p)}
-                    className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-slate-600 hover:bg-slate-700 text-white rounded-lg">
-                    <Check className="w-3.5 h-3.5" /> Approve & Publish
+                  <button onClick={() => setEmailFor(p)} disabled={!link}
+                    className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-blue-700 hover:bg-blue-800 text-white rounded-lg disabled:opacity-50">
+                    <Mail className="w-3.5 h-3.5" /> Preview email
                   </button>
+                  {link && (
+                    <a href={link} target="_blank" rel="noreferrer"
+                      className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-white hover:bg-muted/40 text-blue-700 border border-border rounded-lg">
+                      <ExternalLink className="w-3.5 h-3.5" /> Open
+                    </a>
+                  )}
+                </div>
+                <div className="px-4 pb-3">
+                  <p className="text-[11px] text-muted-foreground">
+                    Global Accounts approve or reject on the secure link — approving publishes FY {p.targetFy} as the live budget.
+                  </p>
                 </div>
                 {isOpen && (
                   <div className="border-t border-border px-4 py-3 bg-muted/30">
@@ -288,6 +324,21 @@ export default function BudgetApprovalsPage() {
           </section>
         )}
       </div>
+
+      {emailFor && (
+        <EmailPreviewModal
+          open={!!emailFor}
+          onClose={() => setEmailFor(null)}
+          title="Global Accounts Sign-off — Email Preview"
+          defaultTo={GLOBAL_ACCOUNTS_EMAIL}
+          subject={`Budget Sign-off Needed — ${plantLabel(emailFor.plant, customPlants)} · FY ${emailFor.targetFy}`}
+          body={accountsEmailBody(emailFor)}
+          link={accountsLink(emailFor)}
+          linkLabel="Global Accounts sign-off link"
+          sendLabel="Send to Global Accounts"
+          onSend={to => { toast.success(`Sign-off email sent to ${to}`); setEmailFor(null) }}
+        />
+      )}
     </div>
   )
 }

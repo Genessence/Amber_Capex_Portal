@@ -4,7 +4,6 @@ import { Fragment, useMemo } from 'react'
 import type { BudgetProposal, BudgetProposalItem } from '@/lib/types'
 
 const cr = (n: number) => `₹${n.toFixed(2)} Cr`
-const rs = (n: number) => `₹${n.toLocaleString('en-IN')}`
 
 interface HeadGroup {
   head: string
@@ -38,8 +37,8 @@ export function BudgetProposalBreakdown({
   const groups = useMemo(() => groupByHead(proposal.items), [proposal.items])
   const total = useMemo(() => proposal.items.reduce((s, i) => s + (i.totalCost || 0), 0), [proposal.items])
   const showQty = proposal.items.some(i => i.qty != null)
-  const showRate = proposal.items.some(i => i.rateRs != null)
-  const cols = 2 + (showQty ? 1 : 0) + (showRate ? 1 : 0) + 1
+  // Rate was removed from the budget — approvers review Sub Particulars / Department / Qty / Budget.
+  const cols = 2 + (showQty ? 1 : 0) + 1
 
   if (!proposal.items.length) {
     return <p className={`text-sm text-muted-foreground ${className}`}>This proposal has no budget lines.</p>
@@ -53,7 +52,6 @@ export function BudgetProposalBreakdown({
             <th className="text-left px-3 py-2 font-semibold">Sub Particulars</th>
             <th className="text-left px-3 py-2 font-semibold">Department</th>
             {showQty && <th className="text-right px-3 py-2 font-semibold w-16">Qty</th>}
-            {showRate && <th className="text-right px-3 py-2 font-semibold w-28">Rate (₹)</th>}
             <th className="text-right px-3 py-2 font-semibold w-28">Budget (Cr)</th>
           </tr>
         </thead>
@@ -71,7 +69,6 @@ export function BudgetProposalBreakdown({
                   <td className="px-3 py-2 text-foreground">{it.subParticulars || '—'}</td>
                   <td className="px-3 py-2 text-muted-foreground">{it.department || '—'}</td>
                   {showQty && <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{it.qty ?? '—'}</td>}
-                  {showRate && <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{it.rateRs != null ? rs(it.rateRs) : '—'}</td>}
                   <td className="px-3 py-2 text-right font-mono font-semibold tabular-nums">{cr(it.totalCost || 0)}</td>
                 </tr>
               ))}

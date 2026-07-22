@@ -18,8 +18,8 @@ const ROLE_META: Record<string, { name: string; label: string; colorClass: strin
   buyer_jhajjar_p2:       { name: "Ravi Kumar",   label: "Buyer · Jhajjar P2",   colorClass: "bg-blue-600",   dot: "bg-blue-500",  plant: "jhajjar_p2" },
   sourcing_member:        { name: "Neha Kapoor",  label: "Sourcing Member",      colorClass: "bg-slate-600", dot: "bg-slate-500" },
   maintenance:            { name: "Sunil Verma",  label: "Maintenance",          colorClass: "bg-slate-600",  dot: "bg-slate-500"  },
-  plant_accounts:         { name: "Meera Iyer",   label: "Plant Accounts",       colorClass: "bg-neutral-600", dot: "bg-neutral-500" },
-  accounts:               { name: "Priya Nair",   label: "Global Accounts",      colorClass: "bg-neutral-800", dot: "bg-neutral-700" },
+  // NOTE: `plant_accounts` and `accounts` are NOT portal roles — both teams act on emailed public
+  // links (/po/[token] for Plant Accounts, /approve/[token] for the Global Accounts budget sign-off).
   super_admin:            { name: "Super Admin",  label: "Full Access",          colorClass: "bg-slate-600",  dot: "bg-slate-500"  },
 }
 
@@ -51,15 +51,15 @@ type NavLink = {
 }
 
 const NAV: NavLink[] = [
-  { href: '/capex/dashboard',  label: 'Dashboard',        icon: LayoutDashboard, roles: ['buyer', 'buyer_jhajjar_p1', 'buyer_jhajjar_p2', 'sourcing_member', 'maintenance', 'accounts', 'plant_accounts', 'super_admin'] },
+  { href: '/capex/dashboard',  label: 'Dashboard',        icon: LayoutDashboard, roles: ['buyer', 'buyer_jhajjar_p1', 'buyer_jhajjar_p2', 'sourcing_member', 'maintenance', 'super_admin'] },
   { href: '/capex/new',        label: 'New Request',       icon: FilePlus,        roles: ['buyer', 'buyer_jhajjar_p1', 'buyer_jhajjar_p2', 'super_admin'] },
-  { href: '/capex/requests',   label: 'Requests',          icon: List,            roles: ['buyer', 'buyer_jhajjar_p1', 'buyer_jhajjar_p2', 'sourcing_member', 'maintenance', 'accounts', 'plant_accounts', 'super_admin'] },
+  { href: '/capex/requests',   label: 'Requests',          icon: List,            roles: ['buyer', 'buyer_jhajjar_p1', 'buyer_jhajjar_p2', 'sourcing_member', 'maintenance', 'super_admin'] },
   { href: '/sourcing/vendors', label: 'Vendors',           icon: Users,           roles: ['sourcing_member', 'super_admin'] },
   { href: '/capex/master',     label: 'CAPEX Master',      icon: TableProperties, roles: ['sourcing_member', 'maintenance', 'super_admin'] },
   { href: '/capex/budget-proposals', label: 'Budget Planning', icon: ClipboardList, roles: ['sourcing_member', 'maintenance', 'super_admin'] },
   { href: '/capex/adhoc-budget', label: 'Adhoc Budget',    icon: ArrowLeftRight,  roles: ['sourcing_member', 'super_admin'] },
-  { href: '/capex/budget-approvals', label: 'Budget Approvals', icon: ClipboardCheck, roles: ['accounts', 'super_admin'] },
-  { href: '/accounts/queue',   label: 'Accounts',          icon: Wallet,          roles: ['accounts', 'plant_accounts', 'super_admin'] },
+  { href: '/capex/budget-approvals', label: 'Budget Approvals', icon: ClipboardCheck, roles: ['super_admin'] },
+  { href: '/accounts/queue',   label: 'Accounts',          icon: Wallet,          roles: ['sourcing_member', 'super_admin'] },
   { href: '/settings',         label: 'Configurations',    icon: Settings,        roles: ['super_admin'] },
 ]
 

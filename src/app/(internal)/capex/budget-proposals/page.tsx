@@ -20,7 +20,7 @@ import {
 import {
   BUDGET_PROPOSAL_STATUS_COLORS,
   BUDGET_PROPOSAL_STATUS_LABELS,
-  createProposalFromLiveFy,
+  createBlankProposal,
   emptyProposalItem,
   parsedRowToProposalItem,
   proposalTotalCr,
@@ -89,16 +89,11 @@ export default function BudgetProposalsPage() {
 
   function handleCreate() {
     if (!plant) return
-    const proposal = createProposalFromLiveFy({
-      capexMaster, plant, projectType, createdBy: role,
-    })
-    if (!proposal.items.length && !proposal.sourceFy) {
-      // No live Brown Field master for this scope — start blank with current FY guess.
-      proposal.items = []
-    }
+    // Always a BLANK draft — the previous FY's budget is never carried over.
+    const proposal = createBlankProposal({ capexMaster, plant, projectType, createdBy: role })
     createBudgetProposal(proposal)
     setEditingId(proposal.id)
-    toast.success(`Draft proposal created for ${plantLabel(plant)} · ${proposal.targetFy || 'new FY'}`)
+    toast.success(`Blank draft created for ${plantLabel(plant)} · ${proposal.targetFy || 'new FY'} — add your lines`)
   }
 
   if (editing) {
@@ -266,12 +261,9 @@ function BudgetProposalEditor({ proposal, plantLabel, onBack, onSave, onSubmit, 
   function patchItem(id: string, patch: Partial<BudgetProposalItem>) {
     setItems(prev => prev.map(it => {
       if (it.id !== id) return it
-      const next = { ...it, ...patch }
-      // Auto-derive totalCost (Cr) when qty & rateRs are present and totalCost wasn't directly edited.
-      if (('qty' in patch || 'rateRs' in patch) && next.qty != null && next.rateRs != null) {
-        next.totalCost = +(next.qty * next.rateRs / 1_00_00_000).toFixed(4)
-      }
-      return next
+      // Rate was removed from the budget, so Total (Cr) is always entered directly — never derived
+      // from a hidden rate (which would silently overwrite what the author typed).
+      return { ...it, ...patch }
     }))
   }
 
@@ -317,7 +309,7 @@ function BudgetProposalEditor({ proposal, plantLabel, onBack, onSave, onSubmit, 
             Budget Proposal · {plantLabel}
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Based on FY {proposal.sourceFy ?? '—'} · status{' '}
+            Blank draft · status{' '}
             <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${BUDGET_PROPOSAL_STATUS_COLORS[proposal.status]}`}>
               {BUDGET_PROPOSAL_STATUS_LABELS[proposal.status]}
             </span>
@@ -457,14 +449,13 @@ function BudgetProposalEditor({ proposal, plantLabel, onBack, onSave, onSubmit, 
               <th className="text-left px-3 py-2 font-semibold w-32">Department</th>
               <th className="text-left px-3 py-2 font-semibold">Sub Particulars</th>
               <th className="text-right px-3 py-2 font-semibold w-20">Qty</th>
-              <th className="text-right px-3 py-2 font-semibold w-32">Rate (₹)</th>
               <th className="text-right px-3 py-2 font-semibold w-28">Total (Cr)</th>
               {!readOnly && <th className="px-2 py-2 w-10"></th>}
             </tr>
           </thead>
           <tbody>
             {items.length === 0 ? (
-              <tr><td colSpan={readOnly ? 6 : 7} className="px-3 py-8 text-center text-muted-foreground text-xs">
+              <tr><td colSpan={readOnly ? 5 : 6} className="px-3 py-8 text-center text-muted-foreground text-xs">
                 No lines. Add a line or bulk-upload a workbook.
               </td></tr>
             ) : items.map((it) => (
@@ -487,11 +478,6 @@ function BudgetProposalEditor({ proposal, plantLabel, onBack, onSave, onSubmit, 
                 <td className="px-3 py-1.5">
                   <input type="number" value={it.qty ?? ''} disabled={readOnly}
                     onChange={e => patchItem(it.id, { qty: e.target.value === '' ? undefined : parseFloat(e.target.value) })}
-                    className="w-full text-[13px] text-right border border-transparent hover:border-border focus:border-primary rounded px-1.5 py-1 bg-transparent focus:outline-none disabled:opacity-70" />
-                </td>
-                <td className="px-3 py-1.5">
-                  <input type="number" value={it.rateRs ?? ''} disabled={readOnly}
-                    onChange={e => patchItem(it.id, { rateRs: e.target.value === '' ? undefined : parseFloat(e.target.value) })}
                     className="w-full text-[13px] text-right border border-transparent hover:border-border focus:border-primary rounded px-1.5 py-1 bg-transparent focus:outline-none disabled:opacity-70" />
                 </td>
                 <td className="px-3 py-1.5">

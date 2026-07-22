@@ -58,25 +58,6 @@ export function getLatestBrownFieldFy(
   return fys[0] ?? '';
 }
 
-function masterItemToProposalItem(item: CapexMasterItem): BudgetProposalItem {
-  return {
-    id: `bpi-${crypto.randomUUID()}`,
-    head: item.head,
-    department: item.department,
-    subParticulars: item.subParticulars,
-    rate: item.rate,
-    totalCost: item.totalCost,
-    division: item.division ?? FLAT_MASTER_DIVISION,
-    qty: item.qty,
-    rateRs: item.rateRs,
-    sNo: item.sNo,
-    reasonForRequirement: item.reasonForRequirement,
-    benefits: item.benefits,
-    roi: item.roi,
-    sourceMasterItemId: item.id,
-  };
-}
-
 /** A blank proposal item for manual add. */
 export function emptyProposalItem(head: string): BudgetProposalItem {
   return {
@@ -90,18 +71,17 @@ export function emptyProposalItem(head: string): BudgetProposalItem {
   };
 }
 
-/** Convert a parsed bulk row into a proposal item. */
+/** Convert a parsed bulk row into a proposal item. Rate is not part of the budget any more. */
 export function parsedRowToProposalItem(row: ParsedMasterRow): BudgetProposalItem {
   return {
     id: `bpi-${crypto.randomUUID()}`,
     head: row.head,
     department: row.department,
     subParticulars: row.subParticulars,
-    rate: row.rateRs != null && row.qty != null ? row.totalCost : 0,
+    rate: 0,
     totalCost: row.totalCost,
     division: FLAT_MASTER_DIVISION,
     qty: row.qty,
-    rateRs: row.rateRs,
     sNo: row.sNo,
     reasonForRequirement: row.reasonForRequirement,
     benefits: row.benefits,
@@ -118,27 +98,20 @@ export interface CreateProposalOpts {
   createdBy: string;
 }
 
-/** Seed a new proposal by cloning the live-FY Brown Field rows for a plant + project type. */
-export function createProposalFromLiveFy(opts: CreateProposalOpts): BudgetProposal {
-  const sourceFy = getLatestBrownFieldFy(opts.capexMaster, opts.plant, opts.projectType);
-  const items = opts.capexMaster
-    .filter(
-      (m) =>
-        (m.fieldType ?? 'brown_field') === 'brown_field' &&
-        m.plant === opts.plant &&
-        m.fy === sourceFy &&
-        resolveProjectType(m) === opts.projectType,
-    )
-    .map(masterItemToProposalItem);
-
+/**
+ * Start a new next-FY proposal. It is deliberately **BLANK** — the previous FY's budget is never
+ * pre-filled, so each year is authored from scratch (add lines manually or bulk-upload a workbook).
+ * The live FY is still read, but only to derive the default target FY.
+ */
+export function createBlankProposal(opts: CreateProposalOpts): BudgetProposal {
+  const latestFy = getLatestBrownFieldFy(opts.capexMaster, opts.plant, opts.projectType);
   return {
     id: `bp-${crypto.randomUUID()}`,
     plant: opts.plant,
     projectType: opts.projectType,
-    targetFy: opts.targetFy ?? (sourceFy ? nextFyCode(sourceFy) : ''),
-    sourceFy: sourceFy || undefined,
+    targetFy: opts.targetFy ?? (latestFy ? nextFyCode(latestFy) : ''),
     status: 'draft',
-    items,
+    items: [],
     createdBy: opts.createdBy,
     createdAt: new Date().toISOString(),
   };

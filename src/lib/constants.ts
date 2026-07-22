@@ -24,10 +24,15 @@ export const ROLE_NAMES: Record<string, string> = {
   buyer_jhajjar_p2:       "Ravi Kumar",
   sourcing_member:        "Neha Kapoor",
   maintenance:            "Sunil Verma",
-  plant_accounts:         "Meera Iyer",
-  accounts:               "Priya Nair",
   super_admin:            "Super Admin",
 }
+
+/**
+ * Roles that were retired when the Plant Accounts and Global Accounts teams moved off the portal
+ * onto emailed public links. A browser still holding one of these in `capex_role` is bounced back
+ * to /login by `LoginGate`.
+ */
+export const RETIRED_ROLES = ['plant_accounts', 'accounts', 'plant_head', 'sourcing_head'] as const
 
 export const ROLE_PLANT: Record<string, string> = {
   buyer_jhajjar_p1:      "jhajjar_p1",
@@ -127,11 +132,24 @@ export function getPlantForRole(role: string): string | null {
 export const FA_CODE_RECIPIENT_EMAIL = "asset.register@amber-enterprises.in"
 
 /**
- * Recipient for the PO handoff email — "Sandeep" on the Global Accounts team. After Plant Accounts
- * submit FA codes, this notifies Global Accounts via a **public** `/po/[token]` link (no login) to
- * raise the PO. Simulated send (preview + toast).
+ * Recipient for the Plant Accounts fulfillment handoff email. Plant Accounts have **no portal
+ * login** — once the vendor submits the Proforma Invoice they assign FA codes, issue the PO and
+ * tick payment milestones on the **public** `/po/[token]` link. Simulated send (preview + toast).
  */
-export const GLOBAL_ACCOUNTS_EMAIL = "sandeep.accounts@amber-enterprises.in"
+export const PLANT_ACCOUNTS_EMAIL = "plant.accounts@amber-enterprises.in"
+
+/**
+ * Recipient for both Global Accounts ("Satish") emails. Global Accounts have **no portal login**
+ * and act on two public links:
+ *  1. the final sign-off on a next-FY budget proposal — `/approve/[token]`;
+ *  2. issuing the Purchase Order — `/po-issue/[token]`, emailed by **Plant Accounts** from their own
+ *     public page the moment they submit the FA codes.
+ * Simulated send (preview + toast); the address is editable in the preview modal.
+ */
+export const GLOBAL_ACCOUNTS_EMAIL = "satish.accounts@amber-enterprises.in"
+
+/** Display name for the Global Accounts contact, used in email copy and stamped on the PO. */
+export const GLOBAL_ACCOUNTS_NAME = "Satish"
 
 /**
  * Recipient for the technical specification approval email. Amber's Technical team signs off a

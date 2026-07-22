@@ -40,7 +40,8 @@ export default function AccountsQueuePage() {
   const [role, setRole] = useState('')
 
   useEffect(() => {
-    const allowed = (rr: string) => rr === 'accounts' || rr === 'plant_accounts' || rr === 'super_admin'
+    // Plant/Global Accounts have no portal login — this is an internal read-only tracker.
+    const allowed = (rr: string) => rr === 'sourcing_member' || rr === 'super_admin'
     const r = localStorage.getItem('capex_role') ?? ''
     if (!allowed(r)) { router.replace('/capex/requests'); return }
     setRole(r)
@@ -74,7 +75,7 @@ export default function AccountsQueuePage() {
     return { active: activeRows, completed: completedRows }
   }, [requests, invites])
 
-  if (role !== 'accounts' && role !== 'plant_accounts' && role !== 'super_admin') return null
+  if (role !== 'sourcing_member' && role !== 'super_admin') return null
 
   const renderRow = ({ key, req, invite }: QueueRow) => {
     const ms: PaymentMilestone[] = (invite ? invite.paymentMilestones : req.paymentMilestones) ?? []
@@ -126,8 +127,9 @@ export default function AccountsQueuePage() {
           <Wallet className="w-5 h-5 text-blue-700" /> Accounts Queue
         </h1>
         <p className="text-sm text-muted-foreground mt-0.5">
-          Assign FA codes, raise purchase orders, and record milestone payments for finalized requests
-          (one row per awarded vendor on split reverse auctions).
+          Track FA codes, purchase orders and milestone payments (one row per awarded vendor on split
+          reverse auctions). Plant Accounts action these on their emailed link — open a request to
+          copy the link or preview the email.
         </p>
       </div>
 

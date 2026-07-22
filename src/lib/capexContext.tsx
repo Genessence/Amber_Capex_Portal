@@ -37,7 +37,7 @@ import {
   VendorInvite,
 } from './types';
 import { buildMasterItemsFromProposal } from './budgetProposalUtils';
-import { generateApprovalToken, generatePoToken, generateTechSpecToken } from './tokenUtils';
+import { generateApprovalToken, generatePoToken, generatePoIssueToken, generateTechSpecToken } from './tokenUtils';
 import { buildDocApprovalPackage, effectiveDocApprovalStatus } from './docPackageUtils';
 import { buildAwardGroups, deriveRequestStatus, isAwardBased, awardedInvites, finalPaymentBlockedByTrial } from './paymentUtils';
 import { effectiveRfqStatus, resolveSupplierItemHsn, rfqTotal } from './rfqUtils';
@@ -61,7 +61,15 @@ import {
 import { getAllFiles, putAllFiles, type FileMap } from './fileStore';
 import { effectiveHeadAllocationCr } from './adhocBudgetUtils';
 import { FLAT_MASTER_DIVISION } from './greenFieldConstants';
-import { mockCapexMaster, mockInvites, mockRequests, mockVendors } from './mockData';
+import {
+  mockCapexMaster,
+  mockInvites,
+  mockRequests,
+  mockVendors,
+  LEGACY_DEMO_REQUEST_IDS,
+  LEGACY_DEMO_INVITE_IDS,
+  DEMO_DATA_PURGE_V1,
+} from './mockData';
 import { PLANTS } from './constants';
 import { BROWNFIELD_SEED_VERSION, brownFieldSeedData } from './brownFieldSeedData';
 import {
@@ -293,10 +301,15 @@ function normalizeRequest(req: CapexRequest): CapexRequest {
     req.status === 'pending_head_approval'
       ? req.approvalToken ?? generateApprovalToken('request', req.id)
       : req.approvalToken;
-  // Backfill Sandeep's PO-issue token once Plant Accounts / Global Accounts are in the loop.
+  // Backfill the public Plant-Accounts token once the request reaches the fulfillment stages.
   const needsPoToken =
     req.status === 'pi_submitted' || req.status === 'accounts_processing';
   const poToken = needsPoToken ? req.poToken ?? generatePoToken('request', req.id) : req.poToken;
+  // Backfill Satish's PO-issue token once the FA codes are in (accounts_processing).
+  const poIssueToken =
+    req.status === 'accounts_processing'
+      ? req.poIssueToken ?? generatePoIssueToken('request', req.id)
+      : req.poIssueToken;
   return {
     ...req,
     fieldType,
@@ -304,6 +317,7 @@ function normalizeRequest(req: CapexRequest): CapexRequest {
     greenFieldProjectType: projectType,
     approvalToken,
     poToken,
+    poIssueToken,
   };
 }
 
@@ -335,11 +349,49 @@ function applyMasterMigrations(
   return migrated;
 }
 
+/**
+ * Backfill the public Global-Accounts sign-off token for proposals already sitting at the
+ * accounts stage (data written before Global Accounts moved off a portal role).
+ */
+function normalizeBudgetProposal(p: BudgetProposal): BudgetProposal {
+  if (p.status !== 'pending_accounts') return p;
+  return { ...p, accountsToken: p.accountsToken ?? generateApprovalToken('budget_accounts', p.id) };
+}
+
 function normalizeInvite(inv: VendorInvite): VendorInvite {
   const needsPoToken =
     inv.awarded && (inv.awardStatus === 'pi_submitted' || inv.awardStatus === 'accounts_processing');
   const poToken = needsPoToken ? inv.poToken ?? generatePoToken('award', inv.id) : inv.poToken;
-  return { ...inv, auctionApprovalStatus: inv.auctionApprovalStatus ?? 'not_sent', poToken };
+  const poIssueToken =
+    inv.awarded && inv.awardStatus === 'accounts_processing'
+      ? inv.poIssueToken ?? generatePoIssueToken('award', inv.id)
+      : inv.poIssueToken;
+  return {
+    ...inv,
+    auctionApprovalStatus: inv.auctionApprovalStatus ?? 'not_sent',
+    poToken,
+    poIssueToken,
+  };
+}
+
+/**
+ * One-time purge of the old seeded demo requests (and everything hanging off them) from a browser
+ * that loaded the portal before the seed was emptied. Only the exact legacy demo ids are dropped —
+ * anything the user created is untouched, and the purge is idempotent via `DEMO_DATA_PURGE_V1`.
+ */
+function purgeLegacyDemoData(data: { requests: CapexRequest[]; invites: VendorInvite[] }): {
+  requests: CapexRequest[];
+  invites: VendorInvite[];
+} {
+  const demoRequestIds = new Set<string>(LEGACY_DEMO_REQUEST_IDS);
+  const demoInviteIds = new Set<string>(LEGACY_DEMO_INVITE_IDS);
+  return {
+    requests: data.requests.filter((r) => !demoRequestIds.has(r.id)),
+    // Drop the demo invites *and* any invite pointing at a demo request, so no orphans survive.
+    invites: data.invites.filter(
+      (i) => !demoInviteIds.has(i.id) && !demoRequestIds.has(i.requestId),
+    ),
+  };
 }
 
 function dedupeById<T extends { id: string }>(items: T[]): T[] {
@@ -659,6 +711,7 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
   const [masterHeads, setMasterHeads] = useState<string[]>([]);
   const [customPlants, setCustomPlants] = useState<PlantMeta[]>([]);
   const [brownfieldSeedVersion, setBrownfieldSeedVersion] = useState(BROWNFIELD_SEED_VERSION);
+  const [demoDataPurgeVersion, setDemoDataPurgeVersion] = useState(DEMO_DATA_PURGE_V1);
   const [digitisationMigrationVersion, setDigitisationMigrationVersion] =
     useState(DIGITISATION_MIGRATION_V1);
   const [flatMasterMigrationVersion, setFlatMasterMigrationVersion] =
@@ -690,18 +743,25 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
-        const storedRequests = dedupeById<CapexRequest>(parsed.requests ?? []);
+        // Strip the old seeded demo requests/invites exactly once (see purgeLegacyDemoData).
+        const purged = purgeLegacyDemoData({
+          requests: dedupeById<CapexRequest>(parsed.requests ?? []),
+          invites: dedupeById<VendorInvite>(parsed.invites ?? []),
+        });
+        const alreadyPurged = parsed.demoDataPurgeVersion === DEMO_DATA_PURGE_V1;
+        const storedRequests = alreadyPurged
+          ? dedupeById<CapexRequest>(parsed.requests ?? [])
+          : purged.requests;
+        const storedInvites = alreadyPurged
+          ? dedupeById<VendorInvite>(parsed.invites ?? [])
+          : purged.invites;
         const storedVendors = dedupeById<Vendor>(parsed.vendors ?? []);
-        const storedInvites = dedupeById<VendorInvite>(parsed.invites ?? []);
-        setRequests(
-          storedRequests.length
-            ? storedRequests.map(normalizeRequest)
-            : mockRequests.map(normalizeRequest),
-        );
+        // The seed is a clean slate now — mockRequests/mockInvites are empty, so an empty stored
+        // list simply stays empty rather than re-seeding demo data.
+        setRequests(storedRequests.map(normalizeRequest));
         setVendors(storedVendors.length ? storedVendors : mockVendors);
-        setInvites(
-          (storedInvites.length ? storedInvites : mockInvites).map(normalizeInvite)
-        );
+        setInvites(storedInvites.map(normalizeInvite));
+        setDemoDataPurgeVersion(DEMO_DATA_PURGE_V1);
         if (parsed.chatMessages?.length) setChatMessages(parsed.chatMessages);
         if (parsed.plants?.length) setPlants(parsed.plants);
         if (parsed.categories?.length) setCategories(parsed.categories);
@@ -738,7 +798,8 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
             headBudgets: parsed.greenFieldBudgetAllocations.headBudgets ?? [],
           });
         }
-        if (Array.isArray(parsed.budgetProposals)) setBudgetProposals(parsed.budgetProposals);
+        if (Array.isArray(parsed.budgetProposals))
+          setBudgetProposals(parsed.budgetProposals.map(normalizeBudgetProposal));
         if (Array.isArray(parsed.adhocBudgetRequests)) setAdhocBudgetRequests(parsed.adhocBudgetRequests);
         if (Array.isArray(parsed.brownFieldHeadAllocations)) setBrownFieldHeadAllocations(parsed.brownFieldHeadAllocations);
       } else {
@@ -785,6 +846,7 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
           adhocBudgetRequests,
           brownFieldHeadAllocations,
           brownfieldSeedVersion,
+          demoDataPurgeVersion,
           digitisationMigrationVersion,
           flatMasterMigrationVersion,
           greenFieldSectionMigrationVersion,
@@ -797,7 +859,7 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
     // File blobs go to IndexedDB (much larger quota); fire-and-forget. Skipped until hydration
     // has merged the stored blobs back into state — writing the lean map first would wipe them.
     if (filesHydrated.current) void putAllFiles(files);
-  }, [requests, vendors, invites, chatMessages, plants, categories, capexMaster, masterHeads, customPlants, greenFieldBudgetAllocations, budgetProposals, adhocBudgetRequests, brownFieldHeadAllocations, brownfieldSeedVersion, digitisationMigrationVersion, flatMasterMigrationVersion, greenFieldSectionMigrationVersion, brownFieldNestedMigrationVersion]);
+  }, [requests, vendors, invites, chatMessages, plants, categories, capexMaster, masterHeads, customPlants, greenFieldBudgetAllocations, budgetProposals, adhocBudgetRequests, brownFieldHeadAllocations, brownfieldSeedVersion, demoDataPurgeVersion, digitisationMigrationVersion, flatMasterMigrationVersion, greenFieldSectionMigrationVersion, brownFieldNestedMigrationVersion]);
 
   // Hydrate file blobs from IndexedDB after the initial (lean) load — metadata renders
   // immediately; download links light up once base64 is merged back in.
@@ -830,13 +892,19 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
         // Budget proposals must sync too so a plant-head budget approval done in the public tab
         // reflects internally (and vice-versa).
         const freshBudgetProposals: BudgetProposal[] | null = Array.isArray(parsed.budgetProposals)
-          ? parsed.budgetProposals
+          ? (parsed.budgetProposals as BudgetProposal[]).map(normalizeBudgetProposal)
           : null;
-        if (freshInvites.length || freshRequests.length || freshBudgetProposals) {
+        // The Global-Accounts budget sign-off happens on a PUBLIC tab and publishes new master rows,
+        // so capexMaster must cross-sync too or the internal tab shows a stale FY until reload.
+        const freshMaster: CapexMasterItem[] | null = Array.isArray(parsed.capexMaster)
+          ? (parsed.capexMaster as CapexMasterItem[]).map(normalizeMasterItem)
+          : null;
+        if (freshInvites.length || freshRequests.length || freshBudgetProposals || freshMaster) {
           skipNextPersist.current = true; // data came FROM localStorage — don't write it back
           if (freshRequests.length) setRequests(freshRequests);
           if (freshInvites.length) setInvites(freshInvites);
           if (freshBudgetProposals) setBudgetProposals(freshBudgetProposals);
+          if (freshMaster) setCapexMaster(freshMaster);
           // The cross-tab payload is lean (no base64); re-attach file blobs from IndexedDB.
           getAllFiles().then((files) => {
             if (!files || !Object.keys(files).length) return;
@@ -1844,7 +1912,7 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
                 ? {
                     awardStatus: 'pi_submitted' as const,
                     piSubmittedAt: now,
-                    // Mint Sandeep's public PO-issue token once the award reaches Plant Accounts.
+                    // Mint the public Plant-Accounts token once the award reaches fulfillment.
                     poToken: inv.poToken ?? generatePoToken('award', inv.id),
                   }
                 : {}),
@@ -1853,7 +1921,7 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
       ),
     );
     if (invite && !awardBased) {
-      // Mint the request-level PO token for the eventual Sandeep handoff.
+      // Mint the request-level token for the Plant-Accounts handoff.
       const req = requests.find((r) => r.id === invite.requestId);
       updateRequest(
         invite.requestId,
@@ -1956,7 +2024,11 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
     );
   }
 
-  /** Plant Accounts: FA codes are assigned (assignFaCode); submitting hands the award/request to Global Accounts. */
+  /**
+   * Plant Accounts (public /po/[token] link): FA codes are assigned (assignFaCode); submitting
+   * hands the award/request to Global Accounts ("Satish") for the PO — so this also mints the
+   * public PO-issue token that Plant Accounts email him straight from their own page.
+   */
   function submitFaCodes(requestId: string, actor: string, inviteId?: string) {
     if (inviteId) {
       setInvites((prev) =>
@@ -1965,8 +2037,10 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
             ? {
                 ...inv,
                 awardStatus: 'accounts_processing' as const,
-                // Ensure Sandeep has a public PO link (mint if PI path somehow skipped it).
+                // Ensure the Plant-Accounts link exists (mint if the PI path somehow skipped it).
                 poToken: inv.poToken ?? generatePoToken('award', inv.id),
+                // Satish's PO-issue link — emailed from the Plant-Accounts page on submit.
+                poIssueToken: inv.poIssueToken ?? generatePoIssueToken('award', inv.id),
               }
             : inv,
         ),
@@ -1979,13 +2053,15 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
       {
         status: 'accounts_processing',
         poToken: req?.poToken ?? generatePoToken('request', requestId),
+        poIssueToken: req?.poIssueToken ?? generatePoIssueToken('request', requestId),
       },
       actor,
     );
   }
 
   /**
-   * Global Accounts: assign the PO number, upload the PO document, and ISSUE it to the vendor —
+   * Global Accounts ("Satish", public /po-issue/[token] link): assign the PO number, upload the PO
+   * document, and ISSUE it to the vendor —
    * the vendor is notified and sees/downloads the PO on the supplier portal. Builds payment
    * milestones and moves the request into payment_in_progress.
    */
@@ -2000,7 +2076,9 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
     if (inviteId) {
       setInvites((prev) =>
         prev.map((inv) =>
-          inv.id === inviteId && inv.awarded
+          // Turn-guarded: only an award awaiting its PO can be issued, so a stale link can never
+          // overwrite an issued PO (and reset its milestones).
+          inv.id === inviteId && inv.awarded && inv.awardStatus === 'accounts_processing'
             ? {
                 ...inv,
                 purchaseOrder: { ...po, issuedAt: now, issuedBy: actor, submittedAt: po.submittedAt ?? now },
@@ -2415,6 +2493,8 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
           status: 'pending_plant_head',
           submittedAt: now,
           approvalToken: generateApprovalToken('budget', p.id),
+          // A fresh cycle invalidates any previously issued Global-Accounts link.
+          accountsToken: undefined,
           resubmitCount: (p.resubmitCount ?? 0) + (wasRework ? 1 : 0),
           // Clear ALL prior-stage decisions/notes on (re)submit so a fresh cycle starts clean.
           correctionNote: undefined,
@@ -2488,7 +2568,14 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
         // Guard: only an admin-pending proposal can be decided at this stage.
         if (p.id !== id || p.status !== 'pending_admin') return p;
         if (decision === 'approved') {
-          return { ...p, status: 'pending_accounts', adminDecidedAt: now, adminDecidedBy: actor };
+          return {
+            ...p,
+            status: 'pending_accounts',
+            adminDecidedAt: now,
+            adminDecidedBy: actor,
+            // Mint the public Global-Accounts sign-off link (they have no portal login).
+            accountsToken: generateApprovalToken('budget_accounts', p.id),
+          };
         }
         if (decision === 'needs_correction') {
           return {
@@ -2496,11 +2583,19 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
             status: 'needs_correction',
             adminDecidedAt: now,
             adminDecidedBy: actor,
+            accountsToken: undefined,
             correctionNote: note,
             ...(editedItems ? { items: editedItems } : {}),
           };
         }
-        return { ...p, status: 'rejected', adminDecidedAt: now, adminDecidedBy: actor, decisionNote: note };
+        return {
+          ...p,
+          status: 'rejected',
+          adminDecidedAt: now,
+          adminDecidedBy: actor,
+          decisionNote: note,
+          accountsToken: undefined,
+        };
       }),
     );
   }
@@ -2532,6 +2627,8 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
               decidedBy: actor,
               decisionNote: note ?? p.decisionNote,
               publishedAt: decision === 'approved' ? now : p.publishedAt,
+              // Burn the public link so a stale email cannot re-decide.
+              accountsToken: undefined,
             }
           : p,
       ),

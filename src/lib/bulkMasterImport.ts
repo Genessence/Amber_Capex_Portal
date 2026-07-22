@@ -12,8 +12,7 @@ export interface ParsedMasterRow {
   department: string;
   subParticulars: string;
   qty?: number;
-  rateRs?: number;
-  /** Total cost in Crore — the budget figure. Derived from qty × rateRs when not supplied. */
+  /** Total cost in Crore — the budget figure, entered directly (Rate was removed from the budget). */
   totalCost: number;
   sNo?: string;
   reasonForRequirement?: string;
@@ -33,12 +32,21 @@ const COLUMN_ALIASES: Record<string, string[]> = {
   department: ['department', 'dept'],
   subParticulars: ['sub particulars', 'subparticulars', 'sub particular', 'particulars', 'item', 'description'],
   qty: ['qty', 'quantity', 'nos'],
-  rateRs: ['rate (rs)', 'rate rs', 'rate (inr)', 'rate inr', 'unit rate', 'rate'],
   totalCost: ['total cost (cr)', 'total cost cr', 'total (cr)', 'budget (cr)', 'amount (cr)', 'total cost', 'budget'],
   reasonForRequirement: ['reason for requirement', 'reason', 'justification'],
   benefits: ['benefits', 'benefit'],
   roi: ['roi', 'payback'],
 };
+
+// Legacy Rate column — no longer part of the budget, but still read so an OLD workbook that only
+// carries qty + rate (no Total Cost) can derive its total instead of importing as ₹0. Never stored.
+const LEGACY_RATE_ALIASES = ['rate (rs)', 'rate rs', 'rate (inr)', 'rate inr', 'unit rate', 'rate'];
+
+/** Column index of a legacy Rate (Rs) header, if present — used only to derive a missing total. */
+function findLegacyRateCol(headerCells: string[]): number | undefined {
+  const idx = headerCells.findIndex((c) => LEGACY_RATE_ALIASES.includes(normalizeHeader(c)));
+  return idx === -1 ? undefined : idx;
+}
 
 function normalizeHeader(raw: string): string {
   return raw.toLowerCase().replace(/\s+/g, ' ').trim();
@@ -68,20 +76,25 @@ function str(v: unknown): string {
 }
 
 /** Build a ParsedMasterRow from a raw cell array + header map. Returns null if it's an empty row. */
-function rowFromCells(cells: unknown[], hm: Record<string, number>): ParsedMasterRow | null {
+function rowFromCells(
+  cells: unknown[],
+  hm: Record<string, number>,
+  legacyRateCol?: number,
+): ParsedMasterRow | null {
   const head = hm.head != null ? str(cells[hm.head]) : '';
   const subParticulars = hm.subParticulars != null ? str(cells[hm.subParticulars]) : '';
   const department = hm.department != null ? str(cells[hm.department]) : '';
   const qty = hm.qty != null ? toNumber(cells[hm.qty]) : undefined;
-  const rateRs = hm.rateRs != null ? toNumber(cells[hm.rateRs]) : undefined;
+  const legacyRate = legacyRateCol != null ? toNumber(cells[legacyRateCol]) : undefined;
   let totalCost = hm.totalCost != null ? toNumber(cells[hm.totalCost]) : undefined;
 
   // Skip fully empty rows.
-  if (!head && !subParticulars && totalCost == null && rateRs == null) return null;
+  if (!head && !subParticulars && totalCost == null && legacyRate == null) return null;
 
-  // Derive total cost (Cr) from qty × unit rate (INR) when not provided directly.
-  if (totalCost == null && qty != null && rateRs != null) {
-    totalCost = (qty * rateRs) / CR_TO_INR;
+  // Back-compat only: derive Total Cost (Cr) from qty × a legacy Rate column when it's the sole
+  // source of the figure. Rate itself is not part of the budget and is never stored on the row.
+  if (totalCost == null && qty != null && legacyRate != null) {
+    totalCost = (qty * legacyRate) / CR_TO_INR;
   }
 
   return {
@@ -89,7 +102,6 @@ function rowFromCells(cells: unknown[], hm: Record<string, number>): ParsedMaste
     department,
     subParticulars,
     qty,
-    rateRs,
     totalCost: totalCost ?? 0,
     sNo: hm.sNo != null ? str(cells[hm.sNo]) : undefined,
     reasonForRequirement: hm.reasonForRequirement != null ? str(cells[hm.reasonForRequirement]) : undefined,
@@ -130,14 +142,16 @@ export async function parseMasterWorkbook(file: File): Promise<ParseResult> {
 
   if (!matrix.length) return { rows: [], errors: ['The file is empty.'] };
 
-  const hm = buildHeaderMap(matrix[0].map(str));
+  const headerCells = matrix[0].map(str);
+  const hm = buildHeaderMap(headerCells);
   if (hm.subParticulars == null && hm.head == null) {
     return { rows: [], errors: ['Could not find expected columns. Use the downloadable template headers.'] };
   }
+  const legacyRateCol = findLegacyRateCol(headerCells);
 
   const rows = matrix
     .slice(1)
-    .map((cells) => rowFromCells(cells, hm))
+    .map((cells) => rowFromCells(cells, hm, legacyRateCol))
     .filter((r): r is ParsedMasterRow => r != null);
 
   return { rows, errors: validateRows(rows) };
@@ -167,21 +181,23 @@ export function parseCsvText(text: string): ParseResult {
     return out;
   };
 
-  const hm = buildHeaderMap(parseLine(lines[0]).map(str));
+  const headerCells = parseLine(lines[0]).map(str);
+  const hm = buildHeaderMap(headerCells);
   if (hm.subParticulars == null && hm.head == null) {
     return { rows: [], errors: ['Could not find expected columns. Use the downloadable template headers.'] };
   }
+  const legacyRateCol = findLegacyRateCol(headerCells);
 
   const rows = lines
     .slice(1)
-    .map((line) => rowFromCells(parseLine(line), hm))
+    .map((line) => rowFromCells(parseLine(line), hm, legacyRateCol))
     .filter((r): r is ParsedMasterRow => r != null);
 
   return { rows, errors: validateRows(rows) };
 }
 
 const TEMPLATE_HEADERS = [
-  'S.No', 'Head', 'Department', 'Sub Particulars', 'Qty', 'Rate (Rs)', 'Total Cost (Cr)',
+  'S.No', 'Head', 'Department', 'Sub Particulars', 'Qty', 'Total Cost (Cr)',
   'Reason for Requirement', 'Benefits', 'ROI',
 ];
 
@@ -195,7 +211,7 @@ export async function downloadImportTemplate(): Promise<void> {
     cell.font = { bold: true };
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFBBF24' } };
   });
-  ws.addRow(['1', 'Automation', 'Press Shop', '6 Axis Robot on line 1', 6, 2100000, 1.26, 'Manpower Elimination', '8 MP removed', '7 Years']);
+  ws.addRow(['1', 'Automation', 'Press Shop', '6 Axis Robot on line 1', 6, 1.26, 'Manpower Elimination', '8 MP removed', '7 Years']);
   ws.columns.forEach((col) => { col.width = 22; });
   const buffer = await workbook.xlsx.writeBuffer();
   const blob = new Blob([buffer], {

@@ -120,7 +120,7 @@ Full Brown-Field fulfillment lifecycle. **All scoped to `fieldType === 'brown_fi
   - [x] Sourcing or accounts can record payments; both RFQ and auction winners converge into this chain
 - **Files:** `src/lib/paymentUtils.ts`, `src/lib/tatUtils.ts`, `src/components/AccountsPanel.tsx`, `src/components/TatBanner.tsx`, `src/app/(internal)/accounts/queue/page.tsx`, `src/lib/capexContext.tsx`
 
-### US-064 — Accounts split: Plant Accounts (FA) → Global Accounts (PO upload + payments)
+### US-064 — Accounts split: Plant Accounts (FA) → Global Accounts (PO upload + payments) *(superseded by US-086/US-087 — both teams moved off portal roles onto emailed links, and PO issue + payments are now Plant Accounts' work)*
 - **As an** accounts organisation, **I want** Plant Accounts to assign FA codes and Global Accounts to issue the PO (with an uploaded PO document the vendor receives) **so that** FA coding and PO issuance are separated and the vendor gets the official PO.
 - **Priority:** must · **Status:** done
 - **Acceptance criteria**
@@ -555,7 +555,7 @@ Full Brown-Field fulfillment lifecycle. **All scoped to `fieldType === 'brown_fi
 | US-069 | As sourcing, I want approving a vendor (RFQ or auction) to go **straight to the vendor's PI upload** with no head gate. | done |
 | US-070 | As sourcing, I want starting a reverse auction to **cut the best price 5%** and **reset ranks** until vendors re-bid. | done |
 | US-071 | As sourcing, I want to **require an item trial** before awarding; the vendor uploads a video/photo/report after the advance, I approve/reject (loop), and the **final payment is blocked** until approved. | done |
-| US-072 | As global accounts ("Sandeep"), I want a **public emailed PO link** (`/po/[token]`) to **upload PO docs and issue the PO** (no login); then the **vendor re-uploads the PI**, **Accounts pays milestones**, and if a **trial** is required it runs after the advance (final payment gated). | done |
+| US-072 | As global accounts ("Satish", formerly "Sandeep"), I want a **public emailed PO link** (`/po/[token]`) to **upload PO docs and issue the PO** (no login); then the **vendor re-uploads the PI**, **Accounts pays milestones**, and if a **trial** is required it runs after the advance (final payment gated). | done — **reshaped by US-086/US-089**: FA codes + payments are Plant Accounts' (`/po/[token]`); the PO issue is Satish's own link (`/po-issue/[token]`), emailed to him by Plant Accounts |
 | US-073 | As plant accounts, I want the **final-payment date computed** from the supplier's delivery lead time (days) starting at the advance tick. | done |
 | US-074 | As sourcing, I want **foreign vendors** to accept Incoterms before quoting, and to see **INR values with the original foreign amount below**. | done |
 | US-075 | As anyone, I want the **currency I pick to actually change the displayed currency/amount** (bug fix). | done |
@@ -569,6 +569,19 @@ Full Brown-Field fulfillment lifecycle. **All scoped to `fieldType === 'brown_fi
 
 | US-082 | As a foreign supplier, I want to fill in my quotation first and answer the INCO Terms in a popup when I hit Submit — with the quote only going through once I've answered them. | done |
 | US-083 | As sourcing, I want the vendor's submitted INCO Terms visible to me, editable, and sendable back with a note — looping with the vendor until we agree, reject, or accept. | done |
+
+| US-094 | As a budget author, I want the **Rate column gone from the bulk-upload template and importer** too — I fill in Total Cost (Cr) directly; an old workbook that still has a Rate column keeps working (its total is derived, but rate is not stored). | done |
+| US-095 | As sourcing, I want the redundant **Import / Add Vendor** button on the request detail removed — vendors are already added via the **Invite vendors / Invite new vendor** options (RFQ) and **Select Vendors** (auction). | done |
+
+| US-091 | As the business, I want the portal to ship on a **clean slate** — no demo requests or invites seeded, and any demo rows already sitting in a browser purged once (without touching anything I created). | done |
+| US-092 | As a budget author, I want a new next-FY proposal to open **blank** — the previous year's budget must never be pre-filled — so every line is deliberately re-justified. | done |
+| US-093 | As a budget author/approver, I don't want a **Rate** column in the budget — I enter the Total (Cr) per line directly. | done |
+
+| US-086 | As the Plant Accounts team, I want **no portal login** — an emailed link (`/po/[token]`) where I assign the **FA codes** and, once the PO is out, tick the **payment milestones**. | done |
+| US-087 | As the Global Accounts team ("Satish"), I want **no portal login** — the **final budget sign-off** from an emailed link (`/approve/<accountsToken>`) that publishes the FY when I approve, and the **PO issue** from a second emailed link (`/po-issue/[token]`). | done |
+| US-089 | As Plant Accounts, the moment I submit the FA codes I want the **email to Satish to open straight from my own link**, carrying the items, their FA codes and his PO link — so the handoff needs no one inside the portal. | done |
+| US-090 | As the business, after Satish issues the PO I want the flow to continue as before: the **vendor re-uploads the PI**, Plant Accounts tick the **advance**, and where a **trial** is required it runs after the advance and blocks the final payment until sourcing approves. | done |
+| US-088 | As an internal user, at every handoff to an off-portal team I want the **same copy-link + preview-email** affordance the plant-head approval has, so I can send the link (or open it myself to act in that role). | done |
 
 | US-084 | As sourcing, before I finalise a vendor and request the PI, I want the machine's tech spec — including the spec document the vendor gave me — sent to Amber's Technical team for approval. | done |
 | US-085 | As the Technical team, I want to review a vendor's machine spec from an emailed link and approve it, send it back with remarks, or reject it — with the award blocked until I approve. | done |

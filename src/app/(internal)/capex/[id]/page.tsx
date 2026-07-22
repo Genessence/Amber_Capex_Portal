@@ -13,7 +13,6 @@ import { TatBanner } from "@/components/TatBanner"
 import { ClampText } from "@/components/ClampText"
 import { TrialCard } from "@/components/TrialCard"
 import { EmailPreviewModal } from "@/components/EmailPreviewModal"
-import { VendorOnboardModal } from "@/components/VendorOnboardModal"
 import { isFulfillmentStatus, resolveFinalVendor, isAwardBased, awardedInvites, awardSummary } from "@/lib/paymentUtils"
 import { lowestRfqTotal } from "@/lib/rfqUtils"
 import { effectiveDocApprovalStatus } from "@/lib/docPackageUtils"
@@ -1758,7 +1757,6 @@ export default function CapexDetailPage() {
   const { requests, invites, vendors, updateRequest, setSourcingMode, requestProformaInvoice, sendDocApprovalPackage, resendDocApprovalPackage, decideRequestPlantHead, respondToTrial, setTrialRequired } = useCapex()
   const [currentRole, setCurrentRole] = useState("buyer")
   const [phEmailOpen, setPhEmailOpen] = useState(false)
-  const [vendorModalOpen, setVendorModalOpen] = useState(false)
 
   useEffect(() => {
     setCurrentRole(localStorage.getItem("capex_role") ?? "buyer")
@@ -1994,18 +1992,10 @@ export default function CapexDetailPage() {
               the sourcing team while the request is pre-award (sourcing / negotiation), for BOTH the
               RFQ and reverse-auction paths. */}
           {canManageSourcing && (request.status === "sourcing" || request.status === "negotiation") && (
-            <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
-              <div className="flex items-center justify-between gap-3 flex-wrap">
-                <div>
-                  <p className="text-sm font-bold text-slate-900">Sourcing setup</p>
-                  <p className="text-xs text-slate-500">Add / import vendors to this request, and optionally require an item trial before you approve a vendor.</p>
-                </div>
-                <button
-                  onClick={() => setVendorModalOpen(true)}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-[#171717] hover:bg-black text-white rounded-lg"
-                >
-                  <Users className="w-4 h-4" /> Import / Add Vendor
-                </button>
+            <div className="rounded-xl border border-slate-200 bg-white p-4">
+              <div className="mb-2">
+                <p className="text-sm font-bold text-slate-900">Sourcing setup</p>
+                <p className="text-xs text-slate-500">Optionally require an item trial before you approve a vendor. Add vendors from the invite options below.</p>
               </div>
               <label className="flex items-start gap-2.5 cursor-pointer border-t border-slate-100 pt-3">
                 <input
@@ -2022,8 +2012,6 @@ export default function CapexDetailPage() {
               </label>
             </div>
           )}
-
-          <VendorOnboardModal open={vendorModalOpen} onClose={() => setVendorModalOpen(false)} requestId={id} />
 
           {/* RFQ path (Brown Field default) */}
           {isRfqMode && (

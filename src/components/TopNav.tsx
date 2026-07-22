@@ -19,11 +19,10 @@ const ROLE_GROUPS = [
     ],
   },
   {
-    label: "Maintenance & Accounts",
+    // Plant Accounts + Global Accounts are NOT portal roles — both act on emailed public links.
+    label: "Maintenance",
     roles: [
       { value: "maintenance",    name: "Sunil Verma", area: "CAPEX Master / Budget" },
-      { value: "plant_accounts", name: "Meera Iyer",  area: "FA Codes" },
-      { value: "accounts",       name: "Priya Nair",  area: "PO & Payments" },
     ],
   },
   {
@@ -41,8 +40,6 @@ function getRoleBg(value: string): string {
   if (value.startsWith("buyer"))        return "bg-blue-600"
   if (value === "sourcing_member") return "bg-slate-600"
   if (value === "maintenance")     return "bg-slate-600"
-  if (value === "accounts")        return "bg-neutral-800"
-  if (value === "plant_accounts")  return "bg-neutral-600"
   return "bg-slate-700"
 }
 

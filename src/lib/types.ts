@@ -328,9 +328,18 @@ export interface CapexRequest {
   approvalToken?: string;
   /** When the plant head approved via the public email link. */
   plantHeadDecidedAt?: string;
-  // ── Global Accounts (Sandeep) PO handoff via public email link ──
-  /** Public PO-issue link token (minted when the vendor submits the PI; used at /po/[token]). */
+  // ── Plant Accounts fulfillment handoff via public email link ──
+  /**
+   * Public **Plant Accounts** link token (minted when the vendor submits the PI; used at
+   * /po/[token]). Plant Accounts have no portal login — FA codes and, after the PO is issued,
+   * the payment milestones happen on that page.
+   */
   poToken?: string;
+  /**
+   * Public **Global Accounts ("Satish") PO-issue** token (minted when Plant Accounts submit the FA
+   * codes; used at /po-issue/[token]). Plant Accounts email this link to Satish from their own page.
+   */
+  poIssueToken?: string;
   // ── Trials (optional QA loop gated before final payment) ──
   trialRequired?: boolean;
   trialStatus?: TrialStatus;
@@ -416,6 +425,12 @@ export interface BudgetProposal {
   // ── Multi-stage approval (plant head → super admin → global accounts) ──
   /** Public plant-head approval link token (minted/rotated on each submit). */
   approvalToken?: string;
+  /**
+   * Public **Global Accounts** sign-off link token (minted when the super admin approves at the
+   * admin stage; burned on decision). Global Accounts have no portal login — they approve the
+   * budget at /approve/<accountsToken>.
+   */
+  accountsToken?: string;
   plantHeadDecidedAt?: string;
   plantHeadDecidedBy?: string;
   adminDecidedAt?: string;
@@ -817,8 +832,10 @@ export interface VendorInvite {
   awardStatus?: AwardStatus;
   /** FA codes for this award's items, keyed by line-item id. */
   faCodes?: Record<string, string>;
-  /** Public PO-issue link token for this award (Sandeep handoff at /po/[token]). */
+  /** Public Plant-Accounts link token for this award (FA codes + payments at /po/[token]). */
   poToken?: string;
+  /** Public Global-Accounts PO-issue token for this award (/po-issue/[token]). */
+  poIssueToken?: string;
   /** This award's own Purchase Order + payment milestones (per-vendor). */
   purchaseOrder?: PurchaseOrder;
   paymentMilestones?: PaymentMilestone[];
