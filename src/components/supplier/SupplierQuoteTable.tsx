@@ -37,8 +37,6 @@ export interface SupplierQuoteTableProps {
   onHsnChange?: (itemId: string, value: string) => void;
   /** Whether to render the read-mode attribute rows + grand-total footer (default true). */
   showFooter?: boolean;
-  /** Optional per-line slot under the description (auction uses it for the cross-vendor best-price hint). */
-  renderLineExtra?: (item: CapexLineItem) => React.ReactNode;
 }
 
 /** Read-mode attribute rows beneath the line items (freight/packing/service/etc.). */
@@ -69,7 +67,6 @@ export function SupplierQuoteTable({
   hsnByItem,
   onHsnChange,
   showFooter = true,
-  renderLineExtra,
 }: SupplierQuoteTableProps) {
   const isRead = variant === "read";
 
@@ -141,7 +138,6 @@ export function SupplierQuoteTable({
                   {item.machineCapacity && <p className="text-[11px] text-slate-700 mt-0.5">Capacity: {item.machineCapacity}</p>}
                   {item.specs && <p className="text-[11px] text-slate-500 mt-0.5">{item.specs}</p>}
                   {item.remarks && <p className="text-[11px] text-slate-500 mt-0.5">{item.remarks}</p>}
-                  {renderLineExtra?.(item)}
                 </td>
                 <td className="px-3 py-3 text-center font-semibold text-slate-700 align-top">{item.quantity}</td>
                 <td className="px-3 py-3 text-center text-slate-500 text-xs align-top">{item.uom ?? "EA"}</td>

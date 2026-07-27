@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { CheckCircle2, XCircle, ShieldCheck, FileText, Building2, Landmark, Clock, RotateCcw } from 'lucide-react'
 import { useCapex } from '@/lib/capexContext'
@@ -62,10 +62,12 @@ export default function ApprovePage() {
   )
 
   // The header label tracks who the link was issued to — plant head or Global Accounts.
-  const shellLabel =
-    target?.kind === 'budget' && target.stage === 'accounts'
-      ? 'Global Accounts Sign-off'
-      : 'Plant Head Approval'
+  const isAccountsLink = target?.kind === 'budget' && target.stage === 'accounts'
+  const shellLabel = isAccountsLink ? 'Global Accounts Sign-off' : 'Plant Head Approval'
+  // A decision BURNS the token, so `target` goes null the instant it lands. Remember who the link
+  // was issued to while it still resolves, so the confirmation screen keeps the right wording.
+  const issuedTo = useRef({ label: shellLabel, accounts: isAccountsLink })
+  if (target) issuedTo.current = { label: shellLabel, accounts: isAccountsLink }
 
   if (!loaded) {
     return (
@@ -73,6 +75,24 @@ export default function ApprovePage() {
         <Terminal icon={<Clock className="w-10 h-10 text-muted-foreground" />} title="Loading…" note="Fetching the approval details." />
       </Shell>
     )
+  }
+
+  // Checked BEFORE `!target`: every decision burns the token, so by the time this renders the
+  // target no longer resolves — showing "Link Invalid or Expired" on top of a successful approval
+  // was the bug. A decision made in this session is authoritative, token or not.
+  if (done) {
+    const cfg = {
+      approved: {
+        icon: <CheckCircle2 className="w-10 h-10 text-emerald-500" />,
+        title: 'Approved',
+        note: issuedTo.current.accounts
+          ? 'Your sign-off has been recorded and this proposal is now published as the live FY budget.'
+          : 'Your approval has been recorded and the workflow has moved forward.',
+      },
+      rejected: { icon: <XCircle className="w-10 h-10 text-red-500" />, title: 'Rejected', note: 'Your rejection has been recorded.' },
+      sent_back: { icon: <RotateCcw className="w-10 h-10 text-orange-500" />, title: 'Sent Back for Correction', note: 'Your edits and remark were sent to the budget author to revise and resubmit.' },
+    }[done]
+    return <Shell label={issuedTo.current.label}><Terminal icon={cfg.icon} title={cfg.title} note={cfg.note} /></Shell>
   }
 
   if (!target) {
@@ -85,15 +105,6 @@ export default function ApprovePage() {
         />
       </Shell>
     )
-  }
-
-  if (done) {
-    const cfg = {
-      approved: { icon: <CheckCircle2 className="w-10 h-10 text-emerald-500" />, title: 'Approved', note: 'Your approval has been recorded and the workflow has moved forward.' },
-      rejected: { icon: <XCircle className="w-10 h-10 text-red-500" />, title: 'Rejected', note: 'Your rejection has been recorded.' },
-      sent_back: { icon: <RotateCcw className="w-10 h-10 text-orange-500" />, title: 'Sent Back for Correction', note: 'Your edits and remark were sent to the budget author to revise and resubmit.' },
-    }[done]
-    return <Shell label={shellLabel}><Terminal icon={cfg.icon} title={cfg.title} note={cfg.note} /></Shell>
   }
 
   // ── Request approval ──

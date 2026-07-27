@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { useCapex } from "@/lib/capexContext"
 import { buildSupplierLink } from "@/lib/tokenUtils"
 import { isAuctionExpired } from "@/lib/auctionUtils"
+import { isAwardBased } from "@/lib/paymentUtils"
 import { toInr } from "@/lib/currencyUtils"
 import { INVITE_STATUS_COLORS, INVITE_STATUS_ICONS, SOURCING_ENGINEERS, ROLE_NAMES } from "@/lib/constants"
 import type { CapexRequest, CapexLineItem, VendorInvite, Vendor, Quote, SourcingDecision } from "@/lib/types"
@@ -345,14 +346,33 @@ function ItemRowGrid({ request, invites, vendors, currentRole, onSelectFinal, au
   // finalizes via the split-award "Approve Final Decision & Award" footer (per-line vendor + price),
   // not the legacy single "✓ OK" / "✓ Approve → buyer" controls.
   const ranAuction = !!request.auctionConfig?.endsAt
-  const auctionEnded = ranAuction && isAuctionExpired(request.auctionConfig)
+  // Matches the request-detail page: a request escalated to auction mode but never actually
+  // configured (no `auctionConfig`) has nothing left to wait for, so it counts as ended.
+  const auctionEnded = !ranAuction || isAuctionExpired(request.auctionConfig)
+  // Escalated to a reverse auction — true even before the auction is configured, so the grid keeps
+  // the split-award footer instead of falling back to the legacy "Approve → buyer" controls (which
+  // pushed the request into `sourcing_approved` and stranded it).
+  const isAuctionMode = request.sourcingMode === "auction" || ranAuction
   // Sourcing team can award directly — no sourcing-head gate.
   const canFinalize = ["sourcing_member", "super_admin"].includes(currentRole)
 
   // Lock the editable offer / final-decision cells once a final vendor is chosen. The auction
   // path now stays in `sourcing` after finalize (mirrors RFQ), so key off the approved invite
   // rather than the old sourcing_approved/buyer_approved statuses (kept for legacy safety).
-  const isLocked = !!approvedInviteId || request.status === "sourcing_approved" || request.status === "buyer_approved"
+  //
+  // A SPLIT AWARD is the exception: awarding one vendor stamps their invite `approved`, which
+  // would otherwise lock the whole column (and hide the Save footer) while the other lines are
+  // still unawarded — stranding sourcing mid-award. The RFQ path never locks this column, so an
+  // award-based request stays editable here too; each awarded vendor shows as awarded in the
+  // Final Decision bar below the grid.
+  //
+  // The legacy `sourcing_approved`/`buyer_approved` lock likewise does not apply in auction mode:
+  // those states are reachable from the old footer, and locking there left sourcing with a
+  // read-only column, no Save footer and no way to award.
+  const isLocked =
+    (!!approvedInviteId && !isAwardBased(invites)) ||
+    (!isAuctionMode &&
+      (request.status === "sourcing_approved" || request.status === "buyer_approved"))
 
   const saved = request.sourcingDecision
 
@@ -441,6 +461,25 @@ function ItemRowGrid({ request, invites, vendors, currentRole, onSelectFinal, au
     updateRequest(request.id, { sourcingDecision: buildDecision() })
     toast.success("Changes saved")
   }
+
+  // Persist the Final Decision AS IT IS EDITED, mirroring `RfqPanel.persistDecision`. The shared
+  // Approve & Request-PI bar renders below the grid and reads `request.sourcingDecision`, so
+  // while this lived only in local state the auction path dead-ended: sourcing picked a vendor +
+  // price per line, saw no award button (the bar had nothing to group), and the flow stopped.
+  // Saving explicitly still works — this just removes it as a hidden prerequisite.
+  const buildDecisionRef = useRef(buildDecision)
+  buildDecisionRef.current = buildDecision
+  // Guarded by a snapshot of what was last written, so persisting can't re-trigger this effect.
+  const persistedRef = useRef(
+    JSON.stringify({ p: saved?.finalPrices ?? {}, v: saved?.finalVendorPerItem ?? {} }),
+  )
+  useEffect(() => {
+    if (!isSourcing) return
+    const snapshot = JSON.stringify({ p: finalPrices, v: finalVendorPerItem })
+    if (snapshot === persistedRef.current) return
+    persistedRef.current = snapshot
+    updateRequest(request.id, { sourcingDecision: buildDecisionRef.current() })
+  }, [finalPrices, finalVendorPerItem, isSourcing, request.id, updateRequest])
 
   function handleSendQuoteToSupplier(col: OfferCol) {
     if (!col.vendorId) { toast.error("Select a vendor first"); return }
@@ -871,13 +910,13 @@ function ItemRowGrid({ request, invites, vendors, currentRole, onSelectFinal, au
       </div>
 
       {/* ── Auction: split-award finalize footer — pick a vendor + final price per line, then award ── */}
-      {isSourcing && !isLocked && ranAuction && (
+      {isSourcing && !isLocked && isAuctionMode && (
         <div className="border-t border-slate-200 px-5 py-4 flex items-center justify-between gap-4 bg-white">
           <div>
             <p className="text-sm font-bold text-slate-800">Final Decision</p>
             <p className="text-xs text-slate-500 mt-0.5">
               {auctionEnded
-                ? "Pick a winning vendor + final price for every line and Save, then approve & request PIs below — all at once or each vendor separately."
+                ? "Pick a winning vendor + final price for every line, then approve & request PIs below — all at once or each vendor separately."
                 : "Close the auction first — vendors can still revise their bids."}
             </p>
           </div>
@@ -891,7 +930,7 @@ function ItemRowGrid({ request, invites, vendors, currentRole, onSelectFinal, au
       )}
 
       {/* ── Legacy non-auction (seeded comparison) footer — Reject / Save / Approve → buyer ── */}
-      {isSourcing && !isLocked && !ranAuction && (
+      {isSourcing && !isLocked && !isAuctionMode && (
         <div className="border-t border-slate-200 px-5 py-4 flex items-center justify-between gap-4 bg-white">
           <div>
             <p className="text-sm font-bold text-slate-800">Review Request</p>

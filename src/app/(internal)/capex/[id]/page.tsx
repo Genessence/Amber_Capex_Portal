@@ -2165,8 +2165,11 @@ export default function CapexDetailPage() {
                 onAuctionSelectionChange={setAuctionSelectedVendorIds}
               />
 
-              {/* Technical spec sign-off — the gate that must clear BEFORE the award below */}
-              {(request.status === "sourcing" || awardBased) && (
+              {/* Technical spec sign-off — the gate that must clear BEFORE the award below.
+                  Every pre-PI status, not just `sourcing`: an escalated RFQ can be parked at the
+                  legacy sourcing_approved/negotiation states, and gating on `sourcing` alone hid
+                  the spec panel + award bar there and dead-ended the flow. */}
+              {(PRE_PI_STATUSES.includes(request.status) || awardBased) && (
                 <TechSpecPanel
                   request={request}
                   invites={reqInvites}
@@ -2177,7 +2180,7 @@ export default function CapexDetailPage() {
               )}
 
               {/* Unified Final-Decision approve + Request-PI (split award; bulk or per-vendor) */}
-              {canManageSourcing && (request.status === "sourcing" || awardBased) && (
+              {canManageSourcing && (PRE_PI_STATUSES.includes(request.status) || awardBased) && (
                 <FinalDecisionActions
                   request={request}
                   invites={reqInvites}

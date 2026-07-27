@@ -83,21 +83,15 @@ export const mockVendors: Vendor[] = [
 /**
  * Demo requests/invites were removed so the portal seeds a **clean slate** — vendors, plants and the
  * CAPEX master still seed (they are reference data), but there are no pre-made requests.
- * `LEGACY_DEMO_REQUEST_IDS` / `LEGACY_DEMO_INVITE_IDS` are the ids the old seed used; the provider
- * purges exactly those from existing localStorage once (see `DEMO_DATA_PURGE_V1`), so a browser that
- * already holds the demo data gets the same clean slate without touching anything the user created.
+ *
+ * `CLEAN_SLATE_PURGE_V1` drives a **one-time wipe of all workflow data** in a browser that already
+ * holds it (see `applyCleanSlatePurge` in `capexContext.tsx`): requests, vendor invites, chat
+ * threads, adhoc budget requests, and every stored file blob. **Budget data is deliberately kept** —
+ * the CAPEX master rows, the Green Field plant/section/head envelopes, the Brown Field head
+ * allocation overrides and the budget proposals all survive, so the plant budget is untouched.
+ * Bump this value to re-run the wipe on every browser.
  */
-export const LEGACY_DEMO_REQUEST_IDS = [
-  'REQ-001', 'REQ-002', 'REQ-003', 'REQ-004', 'REQ-005',
-  'REQ-006', 'REQ-007', 'REQ-008', 'REQ-009', 'REQ-010',
-] as const;
-
-export const LEGACY_DEMO_INVITE_IDS = [
-  'inv-001', 'inv-002', 'inv-003', 'inv-004', 'inv-005', 'inv-006',
-] as const;
-
-/** Bump to re-run the one-time purge of the legacy demo requests/invites. */
-export const DEMO_DATA_PURGE_V1 = 'demo_purge_v1';
+export const CLEAN_SLATE_PURGE_V1 = 'clean_slate_v2';
 
 export const mockRequests: CapexRequest[] = [];
 

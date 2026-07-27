@@ -66,9 +66,7 @@ import {
   mockInvites,
   mockRequests,
   mockVendors,
-  LEGACY_DEMO_REQUEST_IDS,
-  LEGACY_DEMO_INVITE_IDS,
-  DEMO_DATA_PURGE_V1,
+  CLEAN_SLATE_PURGE_V1,
 } from './mockData';
 import { PLANTS } from './constants';
 import { BROWNFIELD_SEED_VERSION, brownFieldSeedData } from './brownFieldSeedData';
@@ -115,6 +113,19 @@ const ALLOWED_TRANSITIONS: Record<CapexStatus, CapexStatus[]> = {
   completed:              [],
   rejected:               [],
 };
+
+/**
+ * Pre-PI states a request can sit in when its award is finalized. `sourcing` is the normal one;
+ * the rest are legacy/in-flight states an escalated RFQ can be parked at (the old buyer-approval
+ * detour). Awarding from any of them must carry the request into `pi_requested` — every entry has
+ * that target in `ALLOWED_TRANSITIONS`.
+ */
+const PRE_PI_REQUEST_STATUSES: CapexStatus[] = [
+  'sourcing',
+  'negotiation',
+  'sourcing_approved',
+  'buyer_approved',
+];
 
 interface CapexContextValue {
   loaded: boolean;
@@ -375,23 +386,23 @@ function normalizeInvite(inv: VendorInvite): VendorInvite {
 }
 
 /**
- * One-time purge of the old seeded demo requests (and everything hanging off them) from a browser
- * that loaded the portal before the seed was emptied. Only the exact legacy demo ids are dropped —
- * anything the user created is untouched, and the purge is idempotent via `DEMO_DATA_PURGE_V1`.
+ * One-time clean slate for a browser that already holds workflow data: every request, vendor
+ * invite, chat thread and adhoc budget request is dropped, and the IndexedDB blob store is emptied
+ * (PIs, PO documents, trial uploads, spec sheets, attachments all hang off those records).
+ *
+ * **The plant budget is deliberately untouched** — `capexMaster`, the Green Field plant/section/head
+ * envelopes, the Brown Field head allocation overrides, the budget proposals, the vendor master and
+ * the custom plants/heads all survive. Idempotent via `CLEAN_SLATE_PURGE_V1`; bump that to re-run.
  */
-function purgeLegacyDemoData(data: { requests: CapexRequest[]; invites: VendorInvite[] }): {
+function applyCleanSlatePurge(): {
   requests: CapexRequest[];
   invites: VendorInvite[];
+  chatMessages: ChatMessage[];
+  adhocBudgetRequests: AdhocBudgetRequest[];
 } {
-  const demoRequestIds = new Set<string>(LEGACY_DEMO_REQUEST_IDS);
-  const demoInviteIds = new Set<string>(LEGACY_DEMO_INVITE_IDS);
-  return {
-    requests: data.requests.filter((r) => !demoRequestIds.has(r.id)),
-    // Drop the demo invites *and* any invite pointing at a demo request, so no orphans survive.
-    invites: data.invites.filter(
-      (i) => !demoInviteIds.has(i.id) && !demoRequestIds.has(i.requestId),
-    ),
-  };
+  // Blobs are keyed off requests/invites, so with those gone the whole map is orphaned.
+  void putAllFiles({});
+  return { requests: [], invites: [], chatMessages: [], adhocBudgetRequests: [] };
 }
 
 function dedupeById<T extends { id: string }>(items: T[]): T[] {
@@ -711,7 +722,7 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
   const [masterHeads, setMasterHeads] = useState<string[]>([]);
   const [customPlants, setCustomPlants] = useState<PlantMeta[]>([]);
   const [brownfieldSeedVersion, setBrownfieldSeedVersion] = useState(BROWNFIELD_SEED_VERSION);
-  const [demoDataPurgeVersion, setDemoDataPurgeVersion] = useState(DEMO_DATA_PURGE_V1);
+  const [cleanSlatePurgeVersion, setCleanSlatePurgeVersion] = useState(CLEAN_SLATE_PURGE_V1);
   const [digitisationMigrationVersion, setDigitisationMigrationVersion] =
     useState(DIGITISATION_MIGRATION_V1);
   const [flatMasterMigrationVersion, setFlatMasterMigrationVersion] =
@@ -743,26 +754,20 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
-        // Strip the old seeded demo requests/invites exactly once (see purgeLegacyDemoData).
-        const purged = purgeLegacyDemoData({
-          requests: dedupeById<CapexRequest>(parsed.requests ?? []),
-          invites: dedupeById<VendorInvite>(parsed.invites ?? []),
-        });
-        const alreadyPurged = parsed.demoDataPurgeVersion === DEMO_DATA_PURGE_V1;
-        const storedRequests = alreadyPurged
-          ? dedupeById<CapexRequest>(parsed.requests ?? [])
-          : purged.requests;
-        const storedInvites = alreadyPurged
-          ? dedupeById<VendorInvite>(parsed.invites ?? [])
-          : purged.invites;
+        // Wipe every stored workflow record exactly once (see applyCleanSlatePurge). Budget data
+        // is not part of the purge and is loaded normally below.
+        const purged =
+          parsed.cleanSlatePurgeVersion === CLEAN_SLATE_PURGE_V1 ? null : applyCleanSlatePurge();
+        const storedRequests = purged?.requests ?? dedupeById<CapexRequest>(parsed.requests ?? []);
+        const storedInvites = purged?.invites ?? dedupeById<VendorInvite>(parsed.invites ?? []);
         const storedVendors = dedupeById<Vendor>(parsed.vendors ?? []);
         // The seed is a clean slate now — mockRequests/mockInvites are empty, so an empty stored
         // list simply stays empty rather than re-seeding demo data.
         setRequests(storedRequests.map(normalizeRequest));
         setVendors(storedVendors.length ? storedVendors : mockVendors);
         setInvites(storedInvites.map(normalizeInvite));
-        setDemoDataPurgeVersion(DEMO_DATA_PURGE_V1);
-        if (parsed.chatMessages?.length) setChatMessages(parsed.chatMessages);
+        setCleanSlatePurgeVersion(CLEAN_SLATE_PURGE_V1);
+        if (!purged && parsed.chatMessages?.length) setChatMessages(parsed.chatMessages);
         if (parsed.plants?.length) setPlants(parsed.plants);
         if (parsed.categories?.length) setCategories(parsed.categories);
         // Backfill Green Field seed rows; replace Brown Field when seed version changes
@@ -800,7 +805,7 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
         }
         if (Array.isArray(parsed.budgetProposals))
           setBudgetProposals(parsed.budgetProposals.map(normalizeBudgetProposal));
-        if (Array.isArray(parsed.adhocBudgetRequests)) setAdhocBudgetRequests(parsed.adhocBudgetRequests);
+        if (!purged && Array.isArray(parsed.adhocBudgetRequests)) setAdhocBudgetRequests(parsed.adhocBudgetRequests);
         if (Array.isArray(parsed.brownFieldHeadAllocations)) setBrownFieldHeadAllocations(parsed.brownFieldHeadAllocations);
       } else {
         setRequests(mockRequests.map(normalizeRequest));
@@ -846,7 +851,7 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
           adhocBudgetRequests,
           brownFieldHeadAllocations,
           brownfieldSeedVersion,
-          demoDataPurgeVersion,
+          cleanSlatePurgeVersion,
           digitisationMigrationVersion,
           flatMasterMigrationVersion,
           greenFieldSectionMigrationVersion,
@@ -859,7 +864,7 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
     // File blobs go to IndexedDB (much larger quota); fire-and-forget. Skipped until hydration
     // has merged the stored blobs back into state — writing the lean map first would wipe them.
     if (filesHydrated.current) void putAllFiles(files);
-  }, [requests, vendors, invites, chatMessages, plants, categories, capexMaster, masterHeads, customPlants, greenFieldBudgetAllocations, budgetProposals, adhocBudgetRequests, brownFieldHeadAllocations, brownfieldSeedVersion, demoDataPurgeVersion, digitisationMigrationVersion, flatMasterMigrationVersion, greenFieldSectionMigrationVersion, brownFieldNestedMigrationVersion]);
+  }, [requests, vendors, invites, chatMessages, plants, categories, capexMaster, masterHeads, customPlants, greenFieldBudgetAllocations, budgetProposals, adhocBudgetRequests, brownFieldHeadAllocations, brownfieldSeedVersion, cleanSlatePurgeVersion, digitisationMigrationVersion, flatMasterMigrationVersion, greenFieldSectionMigrationVersion, brownFieldNestedMigrationVersion]);
 
   // Hydrate file blobs from IndexedDB after the initial (lean) load — metadata renders
   // immediately; download links light up once base64 is merged back in.
@@ -1824,7 +1829,7 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
       );
       const derived = deriveRequestStatus(nextInvites);
       const req = requests.find((r) => r.id === requestId);
-      if (derived === 'pi_requested' && req && req.status === 'sourcing') {
+      if (derived === 'pi_requested' && req && PRE_PI_REQUEST_STATUSES.includes(req.status)) {
         updateRequest(requestId, { status: 'pi_requested' }, actor);
       }
       return;
@@ -1886,8 +1891,11 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
         };
       }),
     );
-    // Coarse request status follows the awards into fulfillment.
-    if (request.status === 'sourcing') {
+    // Coarse request status follows the awards into fulfillment. Every pre-PI status is bumped,
+    // not just `sourcing` — an escalated RFQ can sit at the legacy negotiation/sourcing_approved/
+    // buyer_approved states, and leaving the request there stranded the awards (the fulfillment
+    // surfaces key off the request status). `ALLOWED_TRANSITIONS` permits all of these → pi_requested.
+    if (PRE_PI_REQUEST_STATUSES.includes(request.status)) {
       updateRequest(requestId, { status: 'pi_requested' }, actor);
     }
   }
@@ -2130,6 +2138,9 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
           ? {
               ...i,
               paymentMilestones: updated,
+              // Money has moved against the submitted PI, so the vendor can no longer revise it —
+              // the first payment closes the post-PO re-upload window for good.
+              piReuploadAllowed: false,
               ...(isAdvance && !i.advancePaidAt ? { advancePaidAt: now } : {}),
               ...(finalDone && i.awardStatus === 'payment_in_progress'
                 ? { awardStatus: 'completed' as const, tatStoppedAt: now }
@@ -2165,6 +2176,8 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
       requestId,
       {
         paymentMilestones: updated,
+        // First payment closes the post-PO PI re-upload window (see the award branch above).
+        piReuploadAllowed: false,
         ...(isAdvance && !req.advancePaidAt ? { advancePaidAt: now } : {}),
         ...(finalDone && req.status === 'payment_in_progress'
           ? { status: 'completed', tatStoppedAt: now }

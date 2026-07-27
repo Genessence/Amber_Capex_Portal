@@ -258,6 +258,22 @@ function BudgetProposalEditor({ proposal, plantLabel, onBack, onSave, onSubmit, 
   const headSummary = useMemo(() => summarizeProposalByHead(items), [items])
   const total = useMemo(() => items.reduce((s, i) => s + (i.totalCost || 0), 0), [items])
 
+  // The downloadable template is pre-filled from THIS plant's existing budget, so authors see real
+  // sub-particulars across their own heads rather than one invented row. Falls back to the wider
+  // Brown Field master when the plant itself has no rows yet.
+  const { capexMaster } = useCapex()
+  const templateSource = useMemo(() => {
+    const brownField = capexMaster.filter(m => (m.fieldType ?? 'brown_field') === 'brown_field')
+    const scoped = brownField.filter(
+      m => m.plant === proposal.plant && (m.projectType ?? 'rac') === (proposal.projectType ?? 'rac'),
+    )
+    // Deliberately NOT filtered to one FY. Picking the "latest" FY sampled whatever next-FY
+    // proposal was published most recently — often a line or two — instead of the real multi-crore
+    // budget, producing a thin template. The sheet has no FY column, so pooling every FY for the
+    // plant is invisible to the author and always gives the richest, widest sample.
+    return scoped.length ? scoped : brownField
+  }, [capexMaster, proposal.plant, proposal.projectType])
+
   function patchItem(id: string, patch: Partial<BudgetProposalItem>) {
     setItems(prev => prev.map(it => {
       if (it.id !== id) return it
@@ -411,7 +427,7 @@ function BudgetProposalEditor({ proposal, plantLabel, onBack, onSave, onSubmit, 
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-white hover:bg-slate-50 text-slate-600 border border-border rounded-lg">
             <Upload className="w-3.5 h-3.5" /> Bulk Upload
           </button>
-          <button onClick={() => downloadImportTemplate()}
+          <button onClick={() => downloadImportTemplate(templateSource)}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-white hover:bg-slate-50 text-slate-600 border border-border rounded-lg">
             <Download className="w-3.5 h-3.5" /> Template
           </button>

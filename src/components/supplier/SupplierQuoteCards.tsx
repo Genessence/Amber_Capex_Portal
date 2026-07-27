@@ -29,8 +29,6 @@ export interface SupplierQuoteCardsProps {
   onHsnChange?: (itemId: string, value: string) => void;
   /** Read-mode only: render the charges block + grand-total summary below the cards (default true). */
   showFooter?: boolean;
-  /** Optional per-line slot under the description (auction uses it for the cross-vendor best-price hint). */
-  renderLineExtra?: (item: CapexLineItem) => React.ReactNode;
 }
 
 const ATTR_ROWS: Array<{ label: string; value: (q?: RfqQuote, gst?: number) => string }> = [
@@ -58,7 +56,6 @@ export function SupplierQuoteCards({
   hsnByItem,
   onHsnChange,
   showFooter = true,
-  renderLineExtra,
 }: SupplierQuoteCardsProps) {
   const isRead = variant === "read";
   const hasLinePrices = !!quote?.linePrices && Object.keys(quote.linePrices).length > 0;
@@ -108,7 +105,6 @@ export function SupplierQuoteCards({
                 {item.machineCapacity && <p className="text-[11px] text-slate-700 mt-0.5">Capacity: {item.machineCapacity}</p>}
                 {item.specs && <p className="text-[11px] text-slate-500 mt-0.5">{item.specs}</p>}
                 {item.remarks && <p className="text-[11px] text-slate-500 mt-0.5">{item.remarks}</p>}
-                {renderLineExtra?.(item)}
               </div>
               <span className="text-sm font-bold text-slate-600 shrink-0">×{item.quantity}{item.uom ? ` ${item.uom}` : ""}</span>
             </div>

@@ -4,6 +4,8 @@
  * mirroring `exportUtils.ts`.
  */
 
+import type { CapexMasterItem } from './types';
+
 const CR_TO_INR = 1_00_00_000;
 
 /** A normalized master row parsed from an uploaded workbook/CSV. */
@@ -201,8 +203,91 @@ const TEMPLATE_HEADERS = [
   'Reason for Requirement', 'Benefits', 'ROI',
 ];
 
-/** Download a blank Excel template with the expected column headers. */
-export async function downloadImportTemplate(): Promise<void> {
+/** The template ships with worked examples, so the expected shape is never ambiguous. */
+export const TEMPLATE_MIN_ROWS = 10;
+export const TEMPLATE_MIN_HEADS = 3;
+
+/**
+ * Last-resort examples, used only when the app holds no master rows to sample (a brand-new browser
+ * before the seed lands). Spans three heads so the template keeps its promise either way.
+ */
+const FALLBACK_SAMPLES: ParsedMasterRow[] = [
+  { head: 'Automation', department: 'Press Shop',  subParticulars: '6 Axis Robot (with Accessories) on line 1', qty: 6, totalCost: 1.26, reasonForRequirement: 'Manpower Elimination', benefits: '8 MP removed from line No. 1', roi: '7 Years' },
+  { head: 'Automation', department: 'Production',  subParticulars: 'Vision Camera on Hair pin bender',          qty: 4, totalCost: 0.47, reasonForRequirement: 'Quality impact', benefits: 'COPQ improved / field failure reduced' },
+  { head: 'Automation', department: 'Production',  subParticulars: 'Auto Sleeve cutting machine',               qty: 1, totalCost: 0.03, reasonForRequirement: 'Sleeve cutting for capillary', benefits: 'Cycle time reduced' },
+  { head: 'Machinery',  department: 'Press Shop',  subParticulars: 'Press machine',                             qty: 4, totalCost: 1.4,  reasonForRequirement: "Existing machine's life over (2007, 160T/200T)", benefits: 'Repair & maintenance cost reduced' },
+  { head: 'Machinery',  department: 'Paint Shop',  subParticulars: 'Paint oven (HE)',                           qty: 1, totalCost: 0.2,  reasonForRequirement: 'Capacity enhancement', benefits: 'Productivity increase' },
+  { head: 'Machinery',  department: 'Quality',     subParticulars: 'Vacuum Leak Testing Machine',               qty: 2, totalCost: 0.2,  reasonForRequirement: 'Existing machines life over (2008)', benefits: 'Breakdown reduced' },
+  { head: 'Machinery',  department: 'Utility',     subParticulars: '450 CFM compressor',                        qty: 1, totalCost: 0.2,  reasonForRequirement: 'Existing compressors life over', benefits: 'Energy efficiency increased' },
+  { head: 'General',    department: 'Utility',     subParticulars: 'Magnetic Resonator',                        qty: 1, totalCost: 0.1,  reasonForRequirement: 'LPG saving', benefits: 'LPG consumption reduced' },
+  { head: 'General',    department: 'Maintenance', subParticulars: 'Electrical wiring & panel',                 qty: 1, totalCost: 0.15, reasonForRequirement: 'Additional cable + distribution panel required', benefits: 'Electrical safety improved' },
+  { head: 'General',    department: 'Quality',     subParticulars: 'Delta meter',                               qty: 1, totalCost: 0.03, reasonForRequirement: 'Inspection for painted parts', benefits: 'Quality improvement' },
+];
+
+/**
+ * Pick worked example rows for the template out of the budget that already exists.
+ *
+ * Rows are taken **round-robin across heads** — one from each head, then a second from each, and so
+ * on — so the sample spans as many heads as the data allows rather than filling up from whichever
+ * head happens to be listed first. It stops at the end of the round that satisfies BOTH minimums
+ * (so a slight overshoot is normal and fine — the ask is "at least"), and pads from
+ * `FALLBACK_SAMPLES` only if the source could not supply enough.
+ */
+export function buildTemplateSampleRows(
+  source: CapexMasterItem[],
+  minRows: number = TEMPLATE_MIN_ROWS,
+  minHeads: number = TEMPLATE_MIN_HEADS,
+): ParsedMasterRow[] {
+  const byHead = new Map<string, CapexMasterItem[]>();
+  for (const item of source) {
+    // Only rows that would survive `validateRows` are worth showing as an example.
+    if (!item.subParticulars?.trim() || !(item.totalCost > 0)) continue;
+    const head = item.head?.trim() || 'Misc.';
+    const list = byHead.get(head) ?? [];
+    list.push(item);
+    byHead.set(head, list);
+  }
+
+  const heads = [...byHead.keys()];
+  const picked: CapexMasterItem[] = [];
+  for (let round = 0; heads.length; round++) {
+    const before = picked.length;
+    for (const head of heads) {
+      const list = byHead.get(head)!;
+      if (round < list.length) picked.push(list[round]);
+    }
+    if (picked.length === before) break; // source exhausted
+    const distinctHeads = new Set(picked.map((p) => p.head?.trim() || 'Misc.')).size;
+    if (picked.length >= minRows && distinctHeads >= Math.min(minHeads, heads.length)) break;
+  }
+
+  const rows: ParsedMasterRow[] = picked.map((item) => ({
+    head: item.head?.trim() || 'Misc.',
+    department: item.department ?? '',
+    subParticulars: item.subParticulars,
+    qty: item.qty,
+    totalCost: item.totalCost,
+    reasonForRequirement: item.reasonForRequirement,
+    benefits: item.benefits,
+    roi: item.roi,
+  }));
+
+  // Top up from the built-in examples when the live budget was too thin to meet the minimums.
+  for (const sample of FALLBACK_SAMPLES) {
+    const enoughRows = rows.length >= minRows;
+    const enoughHeads = new Set(rows.map((r) => r.head)).size >= minHeads;
+    if (enoughRows && enoughHeads) break;
+    rows.push(sample);
+  }
+  return rows;
+}
+
+/**
+ * Download the Excel import template, pre-filled with worked examples drawn from `source` (the
+ * plant's existing budget) — at least 10 rows across at least 3 heads. The sheet is header + data
+ * only, so the downloaded file can be edited and re-uploaded through `parseMasterWorkbook` as-is.
+ */
+export async function downloadImportTemplate(source: CapexMasterItem[] = []): Promise<void> {
   const ExcelJS = (await import('exceljs')).default;
   const workbook = new ExcelJS.Workbook();
   const ws = workbook.addWorksheet('Budget Master');
@@ -211,8 +296,17 @@ export async function downloadImportTemplate(): Promise<void> {
     cell.font = { bold: true };
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFBBF24' } };
   });
-  ws.addRow(['1', 'Automation', 'Press Shop', '6 Axis Robot on line 1', 6, 1.26, 'Manpower Elimination', '8 MP removed', '7 Years']);
+  buildTemplateSampleRows(source).forEach((r, i) => {
+    ws.addRow([
+      String(i + 1), r.head, r.department, r.subParticulars,
+      r.qty ?? '', r.totalCost,
+      r.reasonForRequirement ?? '', r.benefits ?? '', r.roi ?? '',
+    ]);
+  });
   ws.columns.forEach((col) => { col.width = 22; });
+  ws.getColumn(4).width = 46; // Sub Particulars — the longest field by far
+  ws.getColumn(7).width = 40; // Reason for Requirement
+  ws.getColumn(8).width = 40; // Benefits
   const buffer = await workbook.xlsx.writeBuffer();
   const blob = new Blob([buffer], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

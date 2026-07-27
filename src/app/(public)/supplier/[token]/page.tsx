@@ -41,9 +41,9 @@ import {
   buildBlankIncoTermsDoc,
 } from "@/lib/incoTermsUtils"
 import {
+  computeAuctionBestPrice,
   computeVendorRankings,
   formatAuctionCountdown,
-  getL1Price,
   isAuctionExpired,
   rankLabel,
 } from "@/lib/auctionUtils"
@@ -203,20 +203,20 @@ function RankSummaryCard({
   rank,
   bestPrice,
   grandTotal,
-  gapToBest,
   aboveThreshold,
   threshold,
   hasExistingQuote,
 }: {
   rank?: number
+  /** Whole-quote price to beat: lowest RFQ − 5%, or a live bid once one comes in under it. */
   bestPrice: number | null
   grandTotal: number
-  gapToBest: number
   aboveThreshold: boolean
   threshold?: number
   hasExistingQuote: boolean
 }) {
   const isLeading = rank === 1
+  const gapToBest = bestPrice != null && grandTotal > bestPrice ? grandTotal - bestPrice : 0
   return (
     <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
       <div className="grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-slate-100">
@@ -253,7 +253,7 @@ function RankSummaryCard({
             {bestPrice != null ? fmt(Math.round(bestPrice)) : "—"}
           </p>
           <p className="text-sm text-slate-500 mt-1">
-            {bestPrice != null ? "Lowest bid in this auction" : "No bids submitted yet"}
+            {bestPrice != null ? "Beat this to take L1" : "No opening price yet"}
           </p>
         </div>
         <div className="px-6 py-5">
@@ -274,36 +274,6 @@ function RankSummaryCard({
         </div>
       </div>
     </div>
-  )
-}
-
-/* ── Per-line-item best market price (no vendor identity) ──────── */
-function InlineItemBestPrice({
-  itemId,
-  siblingInvites,
-}: {
-  itemId: string
-  siblingInvites: Array<{ id: string; quotes: Quote[] }>
-}) {
-  const bestPrice = useMemo(() => {
-    let lowest: number | null = null
-    for (const inv of siblingInvites) {
-      const latest = inv.quotes[inv.quotes.length - 1]
-      const unitPrice = latest?.itemPrices?.[itemId]
-      if (unitPrice == null) continue
-      if (lowest === null || unitPrice < lowest) lowest = unitPrice
-    }
-    return lowest
-  }, [itemId, siblingInvites])
-
-  if (bestPrice === null) return null
-
-  return (
-    <p className="inline-flex items-center gap-1 mt-1.5 rounded-full bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
-      <span aria-hidden="true">↓</span>
-      <span className="uppercase tracking-wide">Best</span>
-      <span className="tabular-nums">{fmt(bestPrice)}</span>
-    </p>
   )
 }
 
@@ -1401,7 +1371,11 @@ function RfqSupplierView({
     const milestones = (isAward ? invite.paymentMilestones : request.paymentMilestones) ?? []
     const po = isAward ? invite.purchaseOrder : request.purchaseOrder
     // PI re-upload against the issued PO — enabled per-award (invite) or single-vendor (request).
-    const piReupload = isAward ? invite.piReuploadAllowed : request.piReuploadAllowed
+    // It closes the moment ANY milestone is paid: the PO is being settled against the PI on file,
+    // so revising it after money has moved would change what was already paid. `markPaymentMade`
+    // clears the flag too; this also covers records paid before that clearing existed.
+    const anyPaymentMade = milestones.some(m => m.status === "paid")
+    const piReupload = (isAward ? invite.piReuploadAllowed : request.piReuploadAllowed) && !anyPaymentMade
     // Trial (QA) gate — unlocks after the advance (first) milestone is paid, until it's approved.
     const trialRequired = isAward ? invite.trialRequired : request.trialRequired
     const trialStatus = (isAward ? invite.trialStatus : request.trialStatus) ?? "not_required"
@@ -2004,8 +1978,10 @@ export default function SupplierPortalPage() {
   const siblingInvites = invites.filter(i => i.requestId === invite.requestId)
   const rankings = computeVendorRankings(siblingInvites)
   const myRanking = rankings.find(r => r.inviteId === invite.id)
-  const l1Price = getL1Price(rankings)
-  const gapToBest = myRanking && l1Price !== null && myRanking.rank > 1 ? myRanking.price - l1Price : 0
+  // The whole-quote price to beat: opens at the lowest RFQ − 5% and drops only when a vendor bids
+  // under it. Computed inline, like the rankings above: this sits below the component's early
+  // returns, so a hook here would change the hook order between the loading render and this one.
+  const auctionBestPrice = computeAuctionBestPrice(siblingInvites, lineItems, request?.auctionConfig)
 
   const itemSubtotal = hasLineItems
     ? computeItemSubtotal(lineItems, itemPrices)
@@ -2013,6 +1989,8 @@ export default function SupplierPortalPage() {
   const extrasTotal = computeExtras(freight, packing, service)
   const grandTotal = itemSubtotal + extrasTotal
   const aboveThreshold = threshold != null && itemSubtotal > threshold
+  const gapToBest =
+    auctionBestPrice != null && grandTotal > auctionBestPrice ? grandTotal - auctionBestPrice : 0
 
   const shellProps = {
     requestNo: request?.requestNo,
@@ -2434,8 +2412,6 @@ export default function SupplierPortalPage() {
     m => m.by === "sourcing" && m.type === "counter",
   )
 
-  const showMarketData = siblingInvites.some(i => i.quotes.some(q => q.itemPrices))
-
   return (
     <AuctionShell {...shellProps}>
 
@@ -2467,9 +2443,8 @@ export default function SupplierPortalPage() {
       {/* Rank + best price + your bid */}
       <RankSummaryCard
         rank={myRanking?.rank}
-        bestPrice={l1Price}
+        bestPrice={auctionBestPrice}
         grandTotal={grandTotal}
-        gapToBest={gapToBest}
         aboveThreshold={aboveThreshold}
         threshold={threshold}
         hasExistingQuote={invite.quotes.length > 0}
@@ -2631,9 +2606,6 @@ export default function SupplierPortalPage() {
                     linePrices={itemPrices}
                     onLinePrice={(id, v) => setItemPrices(prev => ({ ...prev, [id]: v }))}
                     showFooter={false}
-                    renderLineExtra={item =>
-                      showMarketData ? <InlineItemBestPrice itemId={item.id} siblingInvites={siblingInvites} /> : null
-                    }
                   />
                 </div>
                 <div className="lg:hidden">
@@ -2643,9 +2615,6 @@ export default function SupplierPortalPage() {
                     linePrices={itemPrices}
                     onLinePrice={(id, v) => setItemPrices(prev => ({ ...prev, [id]: v }))}
                     showFooter={false}
-                    renderLineExtra={item =>
-                      showMarketData ? <InlineItemBestPrice itemId={item.id} siblingInvites={siblingInvites} /> : null
-                    }
                   />
                 </div>
               </div>
