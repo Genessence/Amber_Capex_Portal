@@ -11,6 +11,7 @@ import { RfqPanel } from "@/components/RfqPanel"
 import { AccountsPanel } from "@/components/AccountsPanel"
 import { TatBanner } from "@/components/TatBanner"
 import { ClampText } from "@/components/ClampText"
+import { RequestQuotationView } from "@/components/RequestQuotationView"
 import { TrialCard } from "@/components/TrialCard"
 import { EmailPreviewModal } from "@/components/EmailPreviewModal"
 import { isFulfillmentStatus, resolveFinalVendor, isAwardBased, awardedInvites, awardSummary } from "@/lib/paymentUtils"
@@ -167,6 +168,7 @@ function RequestInfoCard({ request }: { request: CapexRequest }) {
                 <th className="px-3 py-2 text-left font-bold uppercase tracking-wider hidden sm:table-cell">Category</th>
                 <th className="px-3 py-2 text-left font-bold uppercase tracking-wider hidden sm:table-cell">Qty</th>
                 <th className="px-3 py-2 text-right font-bold uppercase tracking-wider hidden md:table-cell">Allocated</th>
+                <th className="px-3 py-2 text-right font-bold uppercase tracking-wider hidden md:table-cell">Est. Cost</th>
                 <th className="px-3 py-2 text-left font-bold uppercase tracking-wider hidden md:table-cell">Status</th>
                 <th className="px-3 py-2 text-left font-bold uppercase tracking-wider hidden lg:table-cell">Vendor</th>
                 <th className="px-3 py-2 text-left font-bold uppercase tracking-wider hidden lg:table-cell">Doc</th>
@@ -204,6 +206,11 @@ function RequestInfoCard({ request }: { request: CapexRequest }) {
                     <td className="px-3 py-2 text-right font-medium text-slate-600 hidden md:table-cell">
                       {allocatedINR !== null ? formatPrice(allocatedINR) : <span className="text-slate-300">—</span>}
                     </td>
+                    {/* The expected cost of the line — approvers cannot judge a request, or the
+                        quotations under it, without the number they are approving. */}
+                    <td className="px-3 py-2 text-right font-semibold text-slate-800 tabular-nums hidden md:table-cell">
+                      {item.budget ? formatPrice(item.budget) : <span className="text-slate-300">—</span>}
+                    </td>
                     <td className="px-3 py-2 hidden md:table-cell">
                       <BudgetStatusChip budget={item.budget} allocatedINR={allocatedINR} />
                     </td>
@@ -230,6 +237,14 @@ function RequestInfoCard({ request }: { request: CapexRequest }) {
                     {formatPrice(lineBudgetSummary.totalAllocated)}
                   </span>
                 </span>
+                {lineBudgetSummary.totalBudget !== undefined && (
+                  <span className="text-slate-600">
+                    Est. Cost:{" "}
+                    <span className="font-semibold text-slate-800 tabular-nums">
+                      {formatPrice(lineBudgetSummary.totalBudget)}
+                    </span>
+                  </span>
+                )}
                 <BudgetStatusChip
                   budget={lineBudgetSummary.totalBudget}
                   allocatedINR={lineBudgetSummary.totalAllocated}
@@ -1915,6 +1930,11 @@ export default function CapexDetailPage() {
       </div>
 
       <RequestInfoCard request={request} />
+
+      {/* Vendor quotations captured against this request — visible to every internal role at every
+          stage, so an approver reviewing the request can see the actual commercial offers. The
+          line-budget grid lives in RequestInfoCard above, hence showLineBudget={false}. */}
+      <RequestQuotationView request={request} heading="Quotation" showLineBudget={false} />
 
       <SourcingDecisionBanner request={request} vendors={vendors} />
 

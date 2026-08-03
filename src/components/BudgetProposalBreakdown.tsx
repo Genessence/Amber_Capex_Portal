@@ -1,9 +1,51 @@
 'use client'
 
 import { Fragment, useMemo } from 'react'
+import { PencilLine } from 'lucide-react'
 import type { BudgetProposal, BudgetProposalItem } from '@/lib/types'
 
 const cr = (n: number) => `₹${n.toFixed(2)} Cr`
+
+const STAGE_LABEL = { plant_head: 'Plant Head', admin: 'Admin' } as const
+
+const fmtWhen = (iso: string) =>
+  new Date(iso).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
+
+/**
+ * Trail of approver edits made while sending the budget forward. Rendered above the breakdown so
+ * the next approver sees at a glance that an earlier approver changed the numbers, and by how much.
+ */
+function EditTrail({ proposal }: { proposal: BudgetProposal }) {
+  const edits = proposal.edits ?? []
+  if (!edits.length) return null
+  return (
+    <div className="rounded-lg border border-blue-200 bg-blue-50/60 px-3 py-2 space-y-1.5">
+      <p className="text-[11px] font-bold uppercase tracking-wider text-blue-900 flex items-center gap-1.5">
+        <PencilLine className="w-3.5 h-3.5" /> Revised in approval ({edits.length})
+      </p>
+      {edits.map(e => {
+        const delta = e.totalAfterCr - e.totalBeforeCr
+        const linesChanged = e.linesAfter !== e.linesBefore
+        return (
+          <div key={e.id} className="text-[12px] text-blue-900">
+            <span className="font-semibold">{STAGE_LABEL[e.stage]}</span>
+            <span className="text-blue-800/70">
+              {e.by && e.by !== STAGE_LABEL[e.stage] ? ` (${e.by})` : ''} · {fmtWhen(e.at)}
+            </span>
+            {(delta !== 0 || linesChanged) && (
+              <span className="ml-1 tabular-nums">
+                — {cr(e.totalBeforeCr)} → <span className="font-semibold">{cr(e.totalAfterCr)}</span>
+                {delta !== 0 && ` (${delta > 0 ? '+' : '−'}${cr(Math.abs(delta))})`}
+                {linesChanged && `, ${e.linesBefore} → ${e.linesAfter} lines`}
+              </span>
+            )}
+            {e.note && <p className="text-blue-800 italic">“{e.note}”</p>}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
 
 interface HeadGroup {
   head: string
@@ -41,11 +83,18 @@ export function BudgetProposalBreakdown({
   const cols = 2 + (showQty ? 1 : 0) + 1
 
   if (!proposal.items.length) {
-    return <p className={`text-sm text-muted-foreground ${className}`}>This proposal has no budget lines.</p>
+    return (
+      <div className={`space-y-2 ${className}`}>
+        <EditTrail proposal={proposal} />
+        <p className="text-sm text-muted-foreground">This proposal has no budget lines.</p>
+      </div>
+    )
   }
 
   return (
-    <div className={`overflow-x-auto rounded-lg border border-border ${className}`}>
+    <div className={`space-y-2 ${className}`}>
+      <EditTrail proposal={proposal} />
+      <div className="overflow-x-auto rounded-lg border border-border">
       <table className="w-full text-sm min-w-[520px]">
         <thead className="bg-muted/40 text-[11px] uppercase tracking-wider text-muted-foreground">
           <tr>
@@ -82,6 +131,7 @@ export function BudgetProposalBreakdown({
           </tr>
         </tfoot>
       </table>
+      </div>
     </div>
   )
 }

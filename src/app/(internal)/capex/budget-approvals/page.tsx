@@ -3,9 +3,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { ClipboardCheck, Check, X, ChevronDown, ChevronRight, RotateCcw, Landmark, Copy, Mail, ExternalLink } from 'lucide-react'
+import { ClipboardCheck, Check, X, ChevronDown, ChevronRight, PencilLine, Landmark, Copy, Mail, ExternalLink } from 'lucide-react'
 import { useCapex } from '@/lib/capexContext'
-import { BudgetCorrectionPanel } from '@/components/BudgetCorrectionPanel'
+import { BudgetEditForwardPanel } from '@/components/BudgetEditForwardPanel'
 import { BudgetProposalBreakdown } from '@/components/BudgetProposalBreakdown'
 import { EmailPreviewModal } from '@/components/EmailPreviewModal'
 import { buildApprovalLink } from '@/lib/tokenUtils'
@@ -34,7 +34,8 @@ export default function BudgetApprovalsPage() {
   } = useCapex()
   const [role, setRole] = useState('')
   const [expanded, setExpanded] = useState<string | null>(null)
-  const [correcting, setCorrecting] = useState<string | null>(null)
+  // Which proposal has its "edit & send forward" panel open.
+  const [editing, setEditing] = useState<string | null>(null)
   // Global Accounts have no portal login — the admin emails them the public sign-off link.
   const [emailFor, setEmailFor] = useState<BudgetProposal | null>(null)
 
@@ -83,10 +84,11 @@ export default function BudgetApprovalsPage() {
     decideBudgetProposal(p.id, 'approved', role)
     toast.success('Approved — send the Global Accounts sign-off link from the section below')
   }
-  function sendBackWithEdits(p: BudgetProposal, items: BudgetProposalItem[], note: string) {
-    decideBudgetProposal(p.id, 'needs_correction', role, note || undefined, items)
-    setCorrecting(null)
-    toast.success('Sent back for correction — the author will see your edits')
+  /** Approve with the admin's line-item edits applied, and send it ON to Global Accounts. */
+  function forwardWithEdits(p: BudgetProposal, items: BudgetProposalItem[], note: string) {
+    decideBudgetProposal(p.id, 'approved', role, note || undefined, items)
+    setEditing(null)
+    toast.success('Approved with your edits — send the Global Accounts sign-off link below')
   }
   function reject(p: BudgetProposal) {
     const note = window.prompt('Reason for rejection (optional):')
@@ -164,9 +166,10 @@ export default function BudgetApprovalsPage() {
                       {p.items.length} lines · {fmtCr(proposalTotalCr(p))} · from FY {p.sourceFy ?? '—'} · by {ROLE_NAMES[p.createdBy] ?? p.createdBy}
                     </p>
                   </div>
-                  <button onClick={() => setCorrecting(correcting === p.id ? null : p.id)}
-                    className={`flex items-center gap-1.5 px-3 py-2 text-xs font-semibold border rounded-lg ${correcting === p.id ? 'bg-orange-600 text-white border-orange-600' : 'bg-white hover:bg-orange-50 text-orange-600 border-orange-200'}`}>
-                    <RotateCcw className="w-3.5 h-3.5" /> Edit &amp; Send Back
+                  <button onClick={() => setEditing(editing === p.id ? null : p.id)}
+                    aria-expanded={editing === p.id}
+                    className={`flex items-center gap-1.5 px-3 py-2 text-xs font-semibold border rounded-lg ${editing === p.id ? 'bg-blue-700 text-white border-blue-700' : 'bg-white hover:bg-blue-50 text-blue-700 border-blue-200'}`}>
+                    <PencilLine className="w-3.5 h-3.5" /> Edit &amp; Send Forward
                   </button>
                   <button onClick={() => reject(p)}
                     className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-white hover:bg-red-50 text-red-600 border border-red-200 rounded-lg">
@@ -177,9 +180,13 @@ export default function BudgetApprovalsPage() {
                     <Check className="w-3.5 h-3.5" /> Approve → Accounts
                   </button>
                 </div>
-                {correcting === p.id && (
-                  <div className="border-t border-border px-4 py-3 bg-orange-50/30">
-                    <BudgetCorrectionPanel proposal={p} onSendBack={(items, note) => sendBackWithEdits(p, items, note)} />
+                {editing === p.id && (
+                  <div className="border-t border-border px-4 py-3 bg-blue-50/30">
+                    <BudgetEditForwardPanel
+                      proposal={p}
+                      nextStageLabel="Global Accounts"
+                      onForward={(items, note) => forwardWithEdits(p, items, note)}
+                    />
                   </div>
                 )}
                 {isOpen && (

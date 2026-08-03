@@ -84,14 +84,14 @@ export const mockVendors: Vendor[] = [
  * Demo requests/invites were removed so the portal seeds a **clean slate** — vendors, plants and the
  * CAPEX master still seed (they are reference data), but there are no pre-made requests.
  *
- * `CLEAN_SLATE_PURGE_V1` drives a **one-time wipe of all workflow data** in a browser that already
- * holds it (see `applyCleanSlatePurge` in `capexContext.tsx`): requests, vendor invites, chat
- * threads, adhoc budget requests, and every stored file blob. **Budget data is deliberately kept** —
- * the CAPEX master rows, the Green Field plant/section/head envelopes, the Brown Field head
- * allocation overrides and the budget proposals all survive, so the plant budget is untouched.
- * Bump this value to re-run the wipe on every browser.
+ * `CLEAN_SLATE_PURGE_V1` drives a **one-time wipe** in a browser that already holds data (see
+ * `applyCleanSlatePurge` in `capexContext.tsx`): requests, vendor invites, chat threads, adhoc
+ * budget requests, budget proposals, Brown Field head allocation overrides, and every stored file
+ * blob. Brown Field live FY rows are replaced separately when `BROWNFIELD_SEED_VERSION` changes
+ * (currently empty — `fy2026_27_cleared`). Green Field envelopes / master rows survive. Bump this
+ * value to re-run the wipe on every browser.
  */
-export const CLEAN_SLATE_PURGE_V1 = 'clean_slate_v2';
+export const CLEAN_SLATE_PURGE_V1 = 'clean_slate_v3_budget';
 
 export const mockRequests: CapexRequest[] = [];
 

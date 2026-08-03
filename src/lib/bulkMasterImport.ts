@@ -208,20 +208,25 @@ export const TEMPLATE_MIN_ROWS = 10;
 export const TEMPLATE_MIN_HEADS = 3;
 
 /**
- * Last-resort examples, used only when the app holds no master rows to sample (a brand-new browser
- * before the seed lands). Spans three heads so the template keeps its promise either way.
+ * Jhajjar Plant 1 worked examples — used when the plant has no live Brown Field rows yet (FY
+ * 2026-27 was cleared so budgets are authored from scratch). Spans five heads so the template
+ * still meets TEMPLATE_MIN_ROWS / TEMPLATE_MIN_HEADS.
  */
 const FALLBACK_SAMPLES: ParsedMasterRow[] = [
-  { head: 'Automation', department: 'Press Shop',  subParticulars: '6 Axis Robot (with Accessories) on line 1', qty: 6, totalCost: 1.26, reasonForRequirement: 'Manpower Elimination', benefits: '8 MP removed from line No. 1', roi: '7 Years' },
-  { head: 'Automation', department: 'Production',  subParticulars: 'Vision Camera on Hair pin bender',          qty: 4, totalCost: 0.47, reasonForRequirement: 'Quality impact', benefits: 'COPQ improved / field failure reduced' },
-  { head: 'Automation', department: 'Production',  subParticulars: 'Auto Sleeve cutting machine',               qty: 1, totalCost: 0.03, reasonForRequirement: 'Sleeve cutting for capillary', benefits: 'Cycle time reduced' },
-  { head: 'Machinery',  department: 'Press Shop',  subParticulars: 'Press machine',                             qty: 4, totalCost: 1.4,  reasonForRequirement: "Existing machine's life over (2007, 160T/200T)", benefits: 'Repair & maintenance cost reduced' },
-  { head: 'Machinery',  department: 'Paint Shop',  subParticulars: 'Paint oven (HE)',                           qty: 1, totalCost: 0.2,  reasonForRequirement: 'Capacity enhancement', benefits: 'Productivity increase' },
-  { head: 'Machinery',  department: 'Quality',     subParticulars: 'Vacuum Leak Testing Machine',               qty: 2, totalCost: 0.2,  reasonForRequirement: 'Existing machines life over (2008)', benefits: 'Breakdown reduced' },
-  { head: 'Machinery',  department: 'Utility',     subParticulars: '450 CFM compressor',                        qty: 1, totalCost: 0.2,  reasonForRequirement: 'Existing compressors life over', benefits: 'Energy efficiency increased' },
-  { head: 'General',    department: 'Utility',     subParticulars: 'Magnetic Resonator',                        qty: 1, totalCost: 0.1,  reasonForRequirement: 'LPG saving', benefits: 'LPG consumption reduced' },
-  { head: 'General',    department: 'Maintenance', subParticulars: 'Electrical wiring & panel',                 qty: 1, totalCost: 0.15, reasonForRequirement: 'Additional cable + distribution panel required', benefits: 'Electrical safety improved' },
-  { head: 'General',    department: 'Quality',     subParticulars: 'Delta meter',                               qty: 1, totalCost: 0.03, reasonForRequirement: 'Inspection for painted parts', benefits: 'Quality improvement' },
+  { head: 'Automation', department: 'HEX', subParticulars: 'HEX Black Copper Detection', qty: 3, totalCost: 0.33, reasonForRequirement: 'Operator manual inspection can miss defective IGT; leads to HE rejection, refrigerant loss, field failure', benefits: 'Fool-proof 360° camera detection of Eddy Current marking on hairpin' },
+  { head: 'Machinery', department: 'HEX', subParticulars: 'Shrink less Vertical M/C', qty: 1, totalCost: 2.1, reasonForRequirement: 'Normal V.expander applies copper shrinkage factor', benefits: 'Shrinkless V.expander eliminates shrinkage; copper saving (~₹40/HE)', roi: '2' },
+  { head: 'General', department: 'IMM', subParticulars: 'Centralised Material Feeding for Molding Machines (24 Machine, 450T to 1300Ton)', qty: 1, totalCost: 1.5, reasonForRequirement: 'Manpower fatigue for RM loading; black spot from atmospheric dust', benefits: '4 MP elimination (day+night); black-spot rejection down; 5S improvement', roi: '18.75' },
+  { head: 'Digitization', department: 'Innovation / Data Analyst', subParticulars: 'Plant ESG/EMS', qty: 1, totalCost: 0.4, benefits: 'Department wise Traceability' },
+  { head: 'New Business', department: 'Hex', subParticulars: 'Mezzanine, Goods Lift & Utilities', qty: 1, totalCost: 2.1, reasonForRequirement: 'Eva Coating for Urban Company', benefits: 'New Requirement' },
+  { head: 'Automation', department: 'IMM', subParticulars: 'Part Conveying system (Injection Machine to Mezzanine) (10 Machines)', qty: 1, totalCost: 1.05, reasonForRequirement: 'Direct material feeding from Molding Shop to Mezzanine as sub-assembly shifts upstairs', benefits: '6 MP elimination (day+night)', roi: '8.75' },
+  { head: 'Machinery', department: 'HEX', subParticulars: 'Scissor Lifter', qty: 1, totalCost: 0.05, reasonForRequirement: 'Manpower fatigue — 4000 coils/day loaded pallet↔conveyor by one MP', benefits: 'Fatigue reduced; easier load & unload' },
+  { head: 'General', department: 'RAC', subParticulars: 'Declined Conveyors from Mezzanine to RAC Drop points', qty: 9, totalCost: 0.405, reasonForRequirement: 'Pre-assembled material conveying from Mezzanine to Final Assembly (online feeding)', benefits: 'Overfeeding & man-movement elimination' },
+  { head: 'Digitization', department: 'Innovation / Data Analyst', subParticulars: 'MES for water Purifier', qty: 1, totalCost: 0.2 },
+  { head: 'New Business', department: '', subParticulars: 'UC (Urban Company — already approved Nov 2025, balance shifted to FY26-27)', qty: 1, totalCost: 28.5, reasonForRequirement: 'CAPEX approved Nov 2025; ₹1.5 Cr used in FY 2025-26; balance ₹28.5 Cr shifted to FY26-27' },
+  { head: 'Automation', department: 'RAC Quality', subParticulars: 'Printing Part Inspection', qty: 1, totalCost: 0.1, reasonForRequirement: 'IDU manuals inspected manually; no data capture', benefits: 'Digital vision inspection + data validation / traceability' },
+  { head: 'Machinery', department: 'HEX', subParticulars: 'BOPT (Battery Operated Pallet Truck)', qty: 1, totalCost: 0.05, reasonForRequirement: 'Fatigue — 4500 coils/day fed from HEX Shop to RAC', benefits: 'Fatigue reduced; easier feed' },
+  { head: 'General', department: 'Maintenance', subParticulars: 'DG1010 KVA', qty: 1, totalCost: 0.75, reasonForRequirement: 'Rental DG ~₹1.75 Lakh/month', benefits: 'Own asset', roi: '4' },
+  { head: 'Digitization', department: 'Maintenance', subParticulars: 'Digital competency for utility', qty: 50, totalCost: 0.185, reasonForRequirement: 'Find energy-saving potential', benefits: 'Reduce electricity consumption; better use of natural resources' },
 ];
 
 /**

@@ -3,13 +3,19 @@
 import { useMemo, useState } from 'react'
 import { useParams } from 'next/navigation'
 import {
-  CheckCircle2, XCircle, ClipboardCheck, Clock, RotateCcw, Paperclip, Download, Building2, Cpu,
+  CheckCircle2, XCircle, ClipboardCheck, Clock, RotateCcw, Paperclip, Download, Building2, Cpu, EyeOff,
 } from 'lucide-react'
 import { useCapex } from '@/lib/capexContext'
 import { resolveTechSpecTarget } from '@/lib/tokenUtils'
 import { SUPPLIER_CARD } from '@/lib/uiTokens'
 import { FIELD_TYPE_LABELS } from '@/lib/types'
-import { TECH_SPEC_STATUS_LABELS, effectiveTechSpecStatus } from '@/lib/techSpecUtils'
+import {
+  TECH_SPEC_STATUS_LABELS,
+  anonymousDocumentFileName,
+  anonymousDocumentLabel,
+  anonymousVendorRef,
+  effectiveTechSpecStatus,
+} from '@/lib/techSpecUtils'
 
 const DECIDER = 'Technical Team'
 
@@ -47,11 +53,15 @@ function Terminal({ icon, title, note }: { icon: React.ReactNode; title: string;
  * vendor's machine specification BEFORE sourcing can award that vendor and request the Proforma
  * Invoice. Reached through an emailed tokenised link; the token is minted per vendor invite,
  * rotated on every re-send, and burned once a decision is recorded.
+ *
+ * The VENDOR'S IDENTITY IS WITHHELD here by design — the Technical team judges the machine on its
+ * technical merit alone. The page renders an anonymous reference (`anonymousVendorRef`) and
+ * generic document labels instead of the vendor name and their (often self-named) filenames.
  */
 export default function TechSpecApprovalPage() {
   const params = useParams()
   const token = String(params.token ?? '')
-  const { invites, requests, vendors, loaded, decideTechSpec } = useCapex()
+  const { invites, requests, loaded, decideTechSpec } = useCapex()
   const [done, setDone] = useState<null | 'approved' | 'rejected' | 'needs_revision'>(null)
   const [note, setNote] = useState('')
   const [mode, setMode] = useState<null | 'needs_revision' | 'rejected'>(null)
@@ -102,7 +112,8 @@ export default function TechSpecApprovalPage() {
   const { invite, request } = target
   const spec = invite.techSpec
   const status = effectiveTechSpecStatus(invite)
-  const vendor = vendors.find(v => v.id === invite.vendorId)
+  // Deliberately NOT resolved to a vendor record — the identity never reaches this page.
+  const vendorRef = anonymousVendorRef(invite.id)
 
   // Only actionable while it is genuinely with the Technical team.
   if (status !== 'pending_technical' || !spec) {
@@ -144,10 +155,17 @@ export default function TechSpecApprovalPage() {
           <span>{FIELD_TYPE_LABELS[request.fieldType ?? 'brown_field']}</span>
         </div>
 
+        {/* Vendor identity is withheld — the Technical team reviews the machine, not the supplier. */}
         <div className="mt-4 rounded-lg border border-border bg-muted/30 px-3 py-2.5">
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-0.5">Vendor</p>
-          <p className="text-sm font-bold text-foreground">{vendor?.vendorName ?? invite.vendorId}</p>
-          {vendor?.vendorCode && <p className="text-xs text-muted-foreground">{vendor.vendorCode}</p>}
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-0.5">
+            Supplier Reference
+          </p>
+          <p className="text-sm font-bold text-foreground font-mono">{vendorRef}</p>
+          <p className="text-xs text-muted-foreground mt-1 flex items-start gap-1.5">
+            <EyeOff className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+            The supplier’s identity is withheld so the specification is assessed on technical merit
+            alone. Quote this reference to the sourcing team if you need to discuss the package.
+          </p>
         </div>
 
         {/* Requested specification (line items) */}
@@ -197,26 +215,26 @@ export default function TechSpecApprovalPage() {
             <p className="text-sm text-muted-foreground">No documents were attached — review against the specification above.</p>
           ) : (
             <div className="flex flex-col gap-2">
-              {spec.documents.map(doc => (
-                <a
-                  key={doc.id}
-                  href={doc.base64 ? `data:${doc.mimeType};base64,${doc.base64}` : undefined}
-                  download={doc.name}
-                  aria-disabled={!doc.base64}
-                  className={`flex items-center gap-2 rounded-lg border border-border px-3 py-2.5 text-sm ${
-                    doc.base64 ? 'hover:bg-muted/40 text-foreground' : 'text-muted-foreground cursor-not-allowed'
-                  }`}
-                >
-                  <Paperclip className="w-4 h-4 shrink-0 text-muted-foreground" />
-                  <span className="truncate flex-1" title={doc.name}>{doc.name}</span>
-                  {doc.fromVendor && (
-                    <span className="text-[10px] font-semibold border border-border rounded-full px-1.5 py-0.5 shrink-0">
-                      From vendor
-                    </span>
-                  )}
-                  {doc.base64 && <Download className="w-4 h-4 shrink-0 text-blue-700" />}
-                </a>
-              ))}
+              {/* Filenames are replaced with generic labels — vendors routinely name their
+                  datasheets after themselves, which would defeat the anonymity of this page. */}
+              {spec.documents.map((doc, idx) => {
+                const label = anonymousDocumentLabel(idx, doc.name)
+                return (
+                  <a
+                    key={doc.id}
+                    href={doc.base64 ? `data:${doc.mimeType};base64,${doc.base64}` : undefined}
+                    download={anonymousDocumentFileName(idx, doc.name)}
+                    aria-disabled={!doc.base64}
+                    className={`flex items-center gap-2 rounded-lg border border-border px-3 py-2.5 text-sm ${
+                      doc.base64 ? 'hover:bg-muted/40 text-foreground' : 'text-muted-foreground cursor-not-allowed'
+                    }`}
+                  >
+                    <Paperclip className="w-4 h-4 shrink-0 text-muted-foreground" />
+                    <span className="truncate flex-1" title={label}>{label}</span>
+                    {doc.base64 && <Download className="w-4 h-4 shrink-0 text-blue-700" />}
+                  </a>
+                )
+              })}
             </div>
           )}
         </div>

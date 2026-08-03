@@ -1,6 +1,6 @@
 # Capex Amber — User Stories
 
-**Last updated:** 2026-07-16
+**Last updated:** 2026-07-29
 
 Living backlog for product requirements. The AI agent maintains this file across chats whenever you describe or change a user story.
 
@@ -579,9 +579,13 @@ Full Brown-Field fulfillment lifecycle. **All scoped to `fieldType === 'brown_fi
 | US-098 | As the business, I don't want a **per-line-item best price** shown on the vendor link during a reverse auction — the bid screen shows the line items to price and the single whole-quote best price, nothing per item. | done |
 | US-103 | As a budget author, when I download the bulk-upload **template** I want it pre-filled with **at least 10 real line items across at least 3 different heads**, taken from the plant budget that already exists — so the expected format is obvious and I can edit real lines instead of inventing them from a single blank example. | done |
 | US-102 | As the business, I want the portal cleared down to a **clean slate again** — every request, invite, chat and uploaded file wiped — while the **FY 2026-27 plant budget stays exactly as it is**. | done |
+| US-104 | As the business, I want **FY 2026-27 Brown Field budget wiped** (live master + proposals + head overrides) along with all workflow data, so we can **author the budget from scratch** in Budget Planning; the Excel **Template** should still show **Jhajjar Plant 1** worked examples while the live master is empty. | done |
 | US-101 | As Global Accounts, when I approve and publish a budget from my emailed link, I want to see a clear **Approved / published** confirmation — not "Link Invalid or Expired", which made a successful sign-off look like a failure. | done |
 | US-100 | As the business, once the **first payment has been made** to a vendor, the vendor must no longer be able to **re-upload the Proforma Invoice** against the PO — the PO is being settled against the PI on file, so the re-upload card disappears from their portal at that point. | done |
 | US-099 | As sourcing, once an RFQ has been escalated to a **reverse auction**, I want the award to work exactly as it does in RFQ: I pick the vendor + final price per line and the **Approve &amp; Request PI** action is right there — no hidden Save step first, no read-only Final Decision column, and the flow carries on into PI → FA codes → PO → payments as usual. Awarding one vendor must not lock the column while the other lines are still unawarded. | done |
+| US-105 | As a **plant head or super admin** approving a budget, I want to **edit the lines and send it FORWARD** to the next stage — not back to the author. "Edit &amp; Send Back" is replaced by **Edit &amp; Send Forward** on both the public plant-head link and the internal admin approvals page; my edits travel with the approval and the next approver can see exactly what I changed. (Budget approvals only — the technical-spec and RFQ send-backs are unaffected.) | done |
+| US-106 | As the **approver of an item request**, I want to see the **whole quotation** — what each line was allocated, what it is expected to cost, and every vendor's offer with its charges and per-line prices — because I could see neither the budget nor the quotations and was being asked to approve a number I couldn't see. | done |
+| US-107 | As the business, when a machine specification goes to the **Technical team**, the **vendor's name must not appear on their link** — it's confidential, and the spec should be judged on technical merit alone. They see an anonymous supplier reference instead; sourcing can still tie it back to the real vendor internally. | done |
 | US-092 | As a budget author, I want a new next-FY proposal to open **blank** — the previous year's budget must never be pre-filled — so every line is deliberately re-justified. | done |
 | US-093 | As a budget author/approver, I don't want a **Rate** column in the budget — I enter the Total (Cr) per line directly. | done |
 
@@ -657,3 +661,39 @@ When a story needs acceptance criteria, the agent expands it below using this sh
   - [x] Fixed a pre-existing **file-blob data-loss bug**: a persist running before IndexedDB hydration overwrote the file map with an empty object, destroying every stored blob (PIs, PO documents, trial uploads, attachments) on reload
 - **Notes / related files:** `src/lib/techSpecUtils.ts`, `src/lib/types.ts`, `src/lib/tokenUtils.ts`, `src/lib/constants.ts` (`TECHNICAL_TEAM_EMAIL`), `src/lib/capexContext.tsx`, `src/components/TechSpecPanel.tsx`, `src/components/FinalDecisionActions.tsx`, `src/app/(public)/tech-spec/[token]/page.tsx`, `src/components/RfqPanel.tsx`, `src/app/(internal)/capex/[id]/page.tsx`. Verified via `npx tsc --noEmit`, `npm run build`, and a full runtime pass (upload → reload-survives → send → send-back with remark → revise + re-send → approve → award unblocks → `pi_requested`).
 
+
+
+### US-105 / US-106 / US-107 — Budget edit-and-forward, approver quotation visibility, technical-spec anonymity (2026-08-03)
+
+**US-105 — budget approvers edit and send FORWARD, never back**
+
+- **Acceptance criteria**
+  - [x] "Edit & Send Back" is gone from **both** budget approval surfaces — the public plant-head link (`/approve/<approvalToken>`) and the internal admin page (`/capex/budget-approvals`); each now offers **Edit & Send Forward**
+  - [x] The shared `BudgetEditForwardPanel` (replaces `BudgetCorrectionPanel`) edits head / sub-particulars / **department** / **qty** / budget, adds / removes lines, and takes a remark for the next stage
+  - [x] Approving with edits is **one atomic mutation** — `decideBudgetPlantHead(id,'approved',note,items)` → `pending_admin`; `decideBudgetProposal(id,'approved',actor,note,items)` → `pending_accounts` (+ mints the Global-Accounts token as before)
+  - [x] Each edit appends a `BudgetProposalEdit` (stage, approver, timestamp, remark, lines + total before/after) rendered as **"Revised in approval"** at the top of `BudgetProposalBreakdown`, so the next approver sees what changed
+  - [x] A no-op (panel opened, nothing changed, no remark) records **nothing**; the trail is cleared on (re)submit; the panel shows a live `submitted → revised (Δ)` figure and a **Reset edits** control
+  - [x] **Reject** is unchanged; scoped to budget approvals only — the technical-spec and RFQ/INCO send-backs are untouched
+- **Verified in the running app:** plant head edited ₹36.63 Cr → ₹28.13 Cr with a remark → proposal moved to `pending_admin` carrying the edit; the admin's screen showed "Revised in approval — Plant Head · ₹36.63 Cr → ₹28.13 Cr (−₹8.50 Cr)" with the remark; the admin then edited again and forwarded → `pending_accounts` with **both** entries in the trail and the sign-off token minted.
+
+**US-106 — the approver sees the whole quotation**
+
+- **Acceptance criteria**
+  - [x] New shared `RequestQuotationView`: per-line **Allocated / Est. Cost / variance chip / preferred vendor** with totals, plus **every vendor quotation** (buyer-seeded, RFQ, or auction bid) with grand total, freight/packing/service, delivery, warranty, per-line unit prices and attachment
+  - [x] Cross-vendor comparison on an **INR basis** so a foreign-currency quote is never mistaken for the cheapest; the original amount renders beneath, lowest flagged emerald
+  - [x] Rendered on the **public request-approval page** (replacing the description+qty list; shell widened to `max-w-4xl`) and on the **internal request detail** (quotes only — the line grid already lives in `RequestInfoCard`)
+  - [x] **Est. Cost** restored as a column in the request-detail line table and the Budget Summary; still absent from the requests list, dashboard, and `/capex/new`
+  - [x] Quote-total math de-duplicated into `quoteGrandTotal` / `inrQuoteGrandTotal` / `latestQuote` in `paymentUtils.ts`; `resolveFinalVendor` now uses them
+- **Verified in the running app:** an emailed approval link for a Brown Field request showed Allocated ₹1,50,00,000 / Est. Cost ₹1,50,00,000 / "On budget" and three quotations — ₹1,42,80,000 (flagged Lowest), ₹1,58,80,000, and a **$240,000** offer correctly converted to ₹2,05,20,000 for ranking with the USD figure shown beneath.
+
+**US-107 — the Technical team never sees the vendor**
+
+- **Acceptance criteria**
+  - [x] `/tech-spec/<token>` shows an anonymous **`SPEC-XXXXXX`** reference (`anonymousVendorRef`, FNV-1a over the invite id — stable across re-sends and token rotations) instead of the vendor name/code, with an on-page notice explaining why
+  - [x] The `SPEC-` prefix deliberately avoids resembling a real `VND-001` vendor code
+  - [x] **Document filenames are anonymised too** (`Specification Document 1 · PDF`, downloaded as `specification-document-1.pdf`) — vendors name their datasheets after themselves
+  - [x] The public page no longer reads the `vendors` array at all; the **email** carrying the link uses the reference in its subject and body
+  - [x] Sourcing sees the reference beside the real vendor name in `TechSpecPanel`, plus a notice to keep the vendor's name out of the notes (the one free-text field that reaches the Technical team)
+- **Verified in the running app:** the page rendered `SPEC-7NEYM5`; a document seeded as `Bosch_Packaging_datasheet_rev2.pdf` displayed as "Specification Document 1 · PDF" with download name `specification-document-1.pdf`; a DOM-wide scan for the vendor name, the original filename and the vendor id found **no** occurrence; Approve still recorded the decision and burned the token.
+
+- **Notes / related files:** `src/lib/types.ts` (`BudgetProposalEdit`), `src/lib/budgetProposalUtils.ts` (`applyApproverEdit`), `src/lib/capexContext.tsx`, `src/lib/paymentUtils.ts`, `src/lib/techSpecUtils.ts`, `src/components/BudgetEditForwardPanel.tsx` (new), `src/components/BudgetProposalBreakdown.tsx`, `src/components/RequestQuotationView.tsx` (new), `src/components/TechSpecPanel.tsx`, `src/app/(public)/approve/[token]/page.tsx`, `src/app/(public)/tech-spec/[token]/page.tsx`, `src/app/(internal)/capex/budget-approvals/page.tsx`, `src/app/(internal)/capex/[id]/page.tsx`. `BudgetCorrectionPanel.tsx` deleted. Verified via `npx tsc --noEmit`, `npm run build`, and the runtime passes above (test records seeded into localStorage and removed afterwards — existing data restored byte-for-byte).

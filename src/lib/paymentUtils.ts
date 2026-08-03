@@ -3,7 +3,7 @@
  * split (e.g. 30% advance / 60% dispatch / 10% installation). Accounts (or sourcing) marks
  * each milestone paid; ticking the final one stops the TAT clock and completes the request.
  */
-import type { AwardStatus, CapexLineItem, CapexRequest, CapexStatus, PaymentMilestone, TrialStatus, Vendor, VendorInvite } from './types';
+import type { AwardStatus, CapexLineItem, CapexRequest, CapexStatus, PaymentMilestone, Quote, TrialStatus, Vendor, VendorInvite } from './types';
 import { DEFAULT_PAYMENT_SPLITS } from './docPackageUtils';
 import { inrRfqTotal } from './rfqUtils';
 import { gstAmount } from './hsnGst';
@@ -142,10 +142,8 @@ export function resolveFinalVendor(
   if (approved) {
     // Auction ranks reset on start (seeded bid lives on openingQuote, not quotes[]) — fall back to
     // the opening bid so an awarded vendor who never re-bid still has a price to fulfill against.
-    const q = approved.quotes[approved.quotes.length - 1] ?? approved.openingQuote;
-    const amount = q
-      ? toInr(q.price + (q.freight ?? 0) + (q.packing ?? 0) + (q.service ?? 0), q.currency)
-      : request.budget ?? 0;
+    const q = latestQuote(approved);
+    const amount = q ? inrQuoteGrandTotal(q) : request.budget ?? 0;
     return { invite: approved, amount };
   }
   return { amount: request.budget ?? 0 };
@@ -153,6 +151,26 @@ export function resolveFinalVendor(
 
 export function isFulfillmentStatus(status: string): boolean {
   return FULFILLMENT_STATUSES.includes(status);
+}
+
+/**
+ * Grand total of an auction / buyer-seeded `Quote` in its OWN currency: the base subtotal plus the
+ * untaxed footer charges. Mirrors `rfqTotal`'s shape for the RFQ side.
+ */
+export function quoteGrandTotal(quote?: Quote): number {
+  if (!quote) return 0;
+  return quote.price + (quote.freight ?? 0) + (quote.packing ?? 0) + (quote.service ?? 0);
+}
+
+/** Same, converted to an INR basis so quotes in different currencies can be compared. */
+export function inrQuoteGrandTotal(quote?: Quote): number {
+  if (!quote) return 0;
+  return toInr(quoteGrandTotal(quote), quote.currency);
+}
+
+/** The quote that represents a vendor's current position: latest bid, else their opening bid. */
+export function latestQuote(invite: VendorInvite): Quote | undefined {
+  return invite.quotes[invite.quotes.length - 1] ?? invite.openingQuote;
 }
 
 // ── Trials + delivery-lead-time → final-payment date ─────────────────────────

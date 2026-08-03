@@ -68,6 +68,46 @@ export function isTechSpecReadyToSend(spec?: TechSpecApproval): boolean {
   return spec.documents.length > 0 || !!spec.notes?.trim();
 }
 
+/**
+ * ── Vendor anonymity ────────────────────────────────────────────────────────
+ * The Technical team must judge the machine on its technical merit alone, so the vendor's identity
+ * is WITHHELD on the public `/tech-spec/<token>` page (and in the email that carries the link).
+ * They get a stable, non-identifying reference instead, which sourcing can quote back when
+ * discussing a package — the mapping ref → vendor lives only on the internal side.
+ *
+ * The reference is derived from the invite id (which is not itself a vendor name) so it is stable
+ * across re-sends and token rotations, and identical wherever it is rendered. The `SPEC-` prefix is
+ * deliberate: real vendor codes are `VND-001`-style, and a lookalike code would invite exactly the
+ * identification this reference exists to prevent.
+ */
+export function anonymousVendorRef(inviteId: string): string {
+  let h = 2166136261;
+  for (let i = 0; i < inviteId.length; i++) {
+    h ^= inviteId.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return `SPEC-${h.toString(36).toUpperCase().padStart(6, '0').slice(-6)}`;
+}
+
+const FILE_EXT_RE = /\.([A-Za-z0-9]{1,6})$/;
+
+/**
+ * Display label for a spec document on the Technical team's page. The original filename is hidden
+ * because vendors routinely name their datasheets after themselves ("BlueStar_offer.pdf"), which
+ * would leak the identity the page is built to withhold. The extension is kept so the reviewer
+ * still knows what they are opening.
+ */
+export function anonymousDocumentLabel(index: number, name: string): string {
+  const ext = FILE_EXT_RE.exec(name)?.[1]?.toUpperCase();
+  return `Specification Document ${index + 1}${ext ? ` · ${ext}` : ''}`;
+}
+
+/** Matching download filename — also stripped of the vendor's name. */
+export function anonymousDocumentFileName(index: number, name: string): string {
+  const ext = FILE_EXT_RE.exec(name)?.[1]?.toLowerCase();
+  return `specification-document-${index + 1}${ext ? `.${ext}` : ''}`;
+}
+
 /** Short "what happens next" line per status, for the sourcing tracker. */
 export const TECH_SPEC_HINTS: Record<TechSpecStatus, string> = {
   not_sent: 'Attach the spec documents and send them to the Technical team.',

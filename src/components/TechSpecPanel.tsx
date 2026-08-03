@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import {
-  ClipboardCheck, Paperclip, Send, Trash2, ChevronDown, Download, Copy, Mail, CheckCircle2,
+  ClipboardCheck, Paperclip, Send, Trash2, ChevronDown, Download, Copy, Mail, CheckCircle2, EyeOff,
 } from 'lucide-react'
 import { useCapex } from '@/lib/capexContext'
 import { EmailPreviewModal } from '@/components/EmailPreviewModal'
@@ -16,6 +16,7 @@ import {
   TECH_SPEC_HINTS,
   TECH_SPEC_STATUS_COLORS,
   TECH_SPEC_STATUS_LABELS,
+  anonymousVendorRef,
   canSendTechSpec,
   effectiveTechSpecStatus,
   isTechSpecReadyToSend,
@@ -31,6 +32,11 @@ const fmtTs = (iso?: string) =>
  * and sends the package to Amber's Technical team through a public `/tech-spec/<token>` link. The
  * Technical team approves, sends it back for revision, or rejects; sourcing revises and re-sends.
  * A vendor cannot be awarded until their spec is approved (enforced in `awardAndRequestPi`).
+ *
+ * The package the Technical team receives is ANONYMISED — they see a supplier reference
+ * (`anonymousVendorRef`), never the vendor name, so the machine is judged on technical merit. This
+ * panel shows sourcing the reference alongside the real name so the two can be tied together
+ * internally.
  */
 export function TechSpecPanel({
   request,
@@ -164,7 +170,12 @@ export function TechSpecPanel({
             <li key={inv.id} className="px-3 py-2.5">
               <div className="flex items-center justify-between gap-2 flex-wrap">
                 <div className="min-w-0">
-                  <p className="text-sm font-semibold text-slate-900 truncate">{vendorName(inv.vendorId)}</p>
+                  <p className="text-sm font-semibold text-slate-900 truncate">
+                    {vendorName(inv.vendorId)}
+                    <span className="ml-1.5 font-mono text-[10px] font-semibold text-slate-500" title="Anonymous reference the Technical team sees instead of the vendor name">
+                      {anonymousVendorRef(inv.id)}
+                    </span>
+                  </p>
                   <p className="text-[11px] text-slate-700">{TECH_SPEC_HINTS[status]}</p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -192,6 +203,18 @@ export function TechSpecPanel({
 
               {isOpen && (
                 <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50/60 p-3 space-y-3">
+                  {/* Anonymity notice — sourcing needs to know what the Technical team will and
+                      will not see, because the notes below are the one field they control. */}
+                  <p className="flex items-start gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] text-slate-600">
+                    <EyeOff className="w-3.5 h-3.5 shrink-0 mt-0.5 text-slate-400" />
+                    <span>
+                      The Technical team sees this package as{' '}
+                      <span className="font-mono font-semibold text-slate-800">{anonymousVendorRef(inv.id)}</span> —
+                      the vendor name and the document filenames are hidden from them. Keep the vendor’s
+                      name out of your notes below.
+                    </span>
+                  </p>
+
                   {/* Documents */}
                   <div>
                     <p className={LABEL}>Specification documents {spec?.documents.length ? `(${spec.documents.length}/${MAX_TECH_SPEC_DOCS})` : ''}</p>
@@ -321,14 +344,17 @@ export function TechSpecPanel({
                   onSend={to => { setEmailFor(null); toast.success(`Specification approval email sent to ${to}`) }}
                   title="Technical Specification Approval"
                   defaultTo={TECHNICAL_TEAM_EMAIL}
-                  subject={`Spec Approval Needed — ${request.requestNo ?? request.id.slice(0, 8)} · ${vendorName(inv.vendorId)}`}
+                  // The vendor is referenced anonymously here too — the email travels with the
+                  // link, so naming the vendor in it would defeat the anonymity of the page.
+                  subject={`Spec Approval Needed — ${request.requestNo ?? request.id.slice(0, 8)} · ${anonymousVendorRef(inv.id)}`}
                   link={buildTechSpecLink(spec.token)}
                   body={[
                     'Dear Technical Team,',
                     '',
-                    `A machine specification requires your approval before we can award the vendor for ${request.requestNo ?? request.id.slice(0, 8)} — ${request.subject}.`,
+                    `A machine specification requires your approval before we can award the supplier for ${request.requestNo ?? request.id.slice(0, 8)} — ${request.subject}.`,
                     '',
-                    `Vendor: ${vendorName(inv.vendorId)}`,
+                    `Supplier reference: ${anonymousVendorRef(inv.id)}`,
+                    '(The supplier’s identity is withheld — please assess the specification on technical merit alone.)',
                     `Documents attached: ${spec.documents.length}`,
                     ...(spec.notes ? ['', `Notes from sourcing: ${spec.notes}`] : []),
                     '',

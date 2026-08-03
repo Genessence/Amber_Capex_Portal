@@ -42,9 +42,11 @@ export type DocApprovalStatus = 'not_sent' | 'pending' | 'approved' | 'rejected'
 
 /**
  * Lifecycle of a next-FY Brown Field budget proposal (multi-stage approval).
- * author submits → plant head (public email link) → super admin (approve / reject /
- * send-back-for-correction) → global accounts (approve / reject) → published live to master.
- * A correction (`needs_correction`) restarts the flow from the plant head on resubmit.
+ * author submits → plant head (public email link) → super admin → global accounts → published
+ * live to master. At the plant-head and admin stages the approver may EDIT the line items and
+ * send the proposal FORWARD with those edits (see `BudgetProposalEdit`); the only backward moves
+ * are an outright reject and the legacy `needs_correction` state, which restarts the flow from
+ * the plant head on resubmit.
  */
 export type BudgetProposalStatus =
   | 'draft'
@@ -404,6 +406,28 @@ export interface BudgetProposalItem {
   sourceMasterItemId?: string;
 }
 
+/** Which approval stage an edit was made at (the two stages that can edit + forward). */
+export type BudgetProposalEditStage = 'plant_head' | 'admin';
+
+/**
+ * An audit entry for an approver who EDITED the budget lines and sent the proposal forward.
+ * The next approver (and the author) can see that the numbers changed, by whom, and by how much,
+ * without having to diff two versions by eye.
+ */
+export interface BudgetProposalEdit {
+  id: string;
+  stage: BudgetProposalEditStage;
+  /** Display name of the approver (e.g. "Plant Head", or the admin's role name). */
+  by: string;
+  at: string;
+  /** Optional remark the approver left for the downstream approver / author. */
+  note?: string;
+  linesBefore: number;
+  linesAfter: number;
+  totalBeforeCr: number;
+  totalAfterCr: number;
+}
+
 /** A maintenance-authored Brown Field budget for a future FY, pending admin approval. */
 export interface BudgetProposal {
   id: string;
@@ -441,6 +465,11 @@ export interface BudgetProposal {
   correctionNote?: string;
   /** How many times it was sent back for correction and resubmitted. */
   resubmitCount?: number;
+  /**
+   * Append-only trail of approver edits made while sending the proposal FORWARD (plant head /
+   * admin). Cleared on (re)submit so each fresh cycle starts with a clean history.
+   */
+  edits?: BudgetProposalEdit[];
 }
 
 /** A request to move budget between two heads in the same plant + FY (admin-approved). */

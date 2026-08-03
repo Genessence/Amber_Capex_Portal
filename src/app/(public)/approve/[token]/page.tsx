@@ -2,11 +2,12 @@
 
 import { useMemo, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
-import { CheckCircle2, XCircle, ShieldCheck, FileText, Building2, Landmark, Clock, RotateCcw } from 'lucide-react'
+import { CheckCircle2, XCircle, ShieldCheck, FileText, Building2, Landmark, Clock, PencilLine } from 'lucide-react'
 import { useCapex } from '@/lib/capexContext'
 import { resolveApprovalTarget } from '@/lib/tokenUtils'
-import { BudgetCorrectionPanel } from '@/components/BudgetCorrectionPanel'
+import { BudgetEditForwardPanel } from '@/components/BudgetEditForwardPanel'
 import { BudgetProposalBreakdown } from '@/components/BudgetProposalBreakdown'
+import { RequestQuotationView } from '@/components/RequestQuotationView'
 import { SUPPLIER_CARD } from '@/lib/uiTokens'
 import { FIELD_TYPE_LABELS } from '@/lib/types'
 import { STATUS_LABELS } from '@/lib/constants'
@@ -17,18 +18,28 @@ import {
 
 const cr = (n: number) => `₹${n.toFixed(2)} Cr`
 
-function Shell({ children, label = 'Plant Head Approval' }: { children: React.ReactNode; label?: string }) {
+function Shell({
+  children,
+  label = 'Plant Head Approval',
+  wide = false,
+}: {
+  children: React.ReactNode
+  label?: string
+  /** Request approvals carry a full budget + quotation table and need the extra width. */
+  wide?: boolean
+}) {
+  const width = wide ? 'max-w-4xl' : 'max-w-2xl'
   return (
     <div className="min-h-screen bg-gradient-to-b from-neutral-900 to-black flex flex-col">
       <header className="px-5 py-4 border-b border-white/10">
-        <div className="max-w-2xl mx-auto flex items-center gap-2 text-white">
+        <div className={`${width} mx-auto flex items-center gap-2 text-white`}>
           <ShieldCheck className="w-5 h-5 text-blue-400" />
           <span className="font-bold tracking-tight">Amber CAPEX</span>
           <span className="text-white/50 text-sm">· {label}</span>
         </div>
       </header>
       <main className="flex-1 px-4 py-8">
-        <div className="max-w-2xl mx-auto">{children}</div>
+        <div className={`${width} mx-auto`}>{children}</div>
       </main>
     </div>
   )
@@ -53,8 +64,8 @@ export default function ApprovePage() {
     requests, budgetProposals, loaded,
     decideRequestPlantHead, decideBudgetPlantHead, decideBudgetAccounts,
   } = useCapex()
-  const [done, setDone] = useState<null | 'approved' | 'rejected' | 'sent_back'>(null)
-  const [correcting, setCorrecting] = useState(false)
+  const [done, setDone] = useState<null | 'approved' | 'rejected' | 'approved_edited'>(null)
+  const [editing, setEditing] = useState(false)
 
   const target = useMemo(
     () => resolveApprovalTarget(token, requests, budgetProposals),
@@ -90,7 +101,11 @@ export default function ApprovePage() {
           : 'Your approval has been recorded and the workflow has moved forward.',
       },
       rejected: { icon: <XCircle className="w-10 h-10 text-red-500" />, title: 'Rejected', note: 'Your rejection has been recorded.' },
-      sent_back: { icon: <RotateCcw className="w-10 h-10 text-orange-500" />, title: 'Sent Back for Correction', note: 'Your edits and remark were sent to the budget author to revise and resubmit.' },
+      approved_edited: {
+        icon: <CheckCircle2 className="w-10 h-10 text-emerald-500" />,
+        title: 'Approved with Edits',
+        note: 'Your revised budget has been sent forward to the admin for the next approval. The next approver can see exactly what you changed.',
+      },
     }[done]
     return <Shell label={issuedTo.current.label}><Terminal icon={cfg.icon} title={cfg.title} note={cfg.note} /></Shell>
   }
@@ -122,9 +137,8 @@ export default function ApprovePage() {
         </Shell>
       )
     }
-    const lines = r.lineItems ?? []
     return (
-      <Shell>
+      <Shell wide>
         <div className={SUPPLIER_CARD}>
           <div className="flex items-center gap-2 mb-1">
             <FileText className="w-4 h-4 text-blue-700" />
@@ -147,19 +161,9 @@ export default function ApprovePage() {
             </div>
           )}
 
-          {lines.length > 0 && (
-            <div className="mt-4">
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">Line Items ({lines.length})</p>
-              <div className="rounded-lg border border-border divide-y divide-border">
-                {lines.map((li) => (
-                  <div key={li.id} className="px-3 py-2 flex items-start justify-between gap-3 text-sm">
-                    <span className="text-foreground">{li.description || li.masterHead || 'Item'}</span>
-                    <span className="text-muted-foreground shrink-0">Qty {li.quantity}{li.uom ? ` ${li.uom}` : ''}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+          {/* The whole commercial picture — allocated budget, expected cost, and every vendor
+              quotation — so the approver is not signing off on numbers they cannot see. */}
+          <RequestQuotationView request={r} className="mt-4" />
 
           <div className="mt-6 flex flex-col sm:flex-row gap-2">
             <button
@@ -236,10 +240,11 @@ export default function ApprovePage() {
           </button>
           {!isAccountsStage && (
             <button
-              onClick={() => setCorrecting(v => !v)}
-              className={`flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-semibold text-sm border ${correcting ? 'bg-orange-600 text-white border-orange-600' : 'bg-white border-orange-200 text-orange-700 hover:bg-orange-50'}`}
+              onClick={() => setEditing(v => !v)}
+              aria-expanded={editing}
+              className={`flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-semibold text-sm border ${editing ? 'bg-blue-700 text-white border-blue-700' : 'bg-white border-blue-200 text-blue-700 hover:bg-blue-50'}`}
             >
-              <RotateCcw className="w-4 h-4" /> Edit &amp; Send Back
+              <PencilLine className="w-4 h-4" /> Edit &amp; Send Forward
             </button>
           )}
           <button
@@ -255,11 +260,15 @@ export default function ApprovePage() {
           </button>
         </div>
 
-        {correcting && !isAccountsStage && (
+        {editing && !isAccountsStage && (
           <div className="mt-4">
-            <BudgetCorrectionPanel
+            <BudgetEditForwardPanel
               proposal={p}
-              onSendBack={(items, note) => { decideBudgetPlantHead(p.id, 'needs_correction', note || undefined, items); setDone('sent_back') }}
+              nextStageLabel="Admin"
+              onForward={(items, note) => {
+                decideBudgetPlantHead(p.id, 'approved', note || undefined, items)
+                setDone('approved_edited')
+              }}
             />
           </div>
         )}

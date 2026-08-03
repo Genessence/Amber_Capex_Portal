@@ -36,7 +36,7 @@ import {
   Vendor,
   VendorInvite,
 } from './types';
-import { buildMasterItemsFromProposal } from './budgetProposalUtils';
+import { applyApproverEdit, buildMasterItemsFromProposal } from './budgetProposalUtils';
 import { generateApprovalToken, generatePoToken, generatePoIssueToken, generateTechSpecToken } from './tokenUtils';
 import { buildDocApprovalPackage, effectiveDocApprovalStatus } from './docPackageUtils';
 import { buildAwardGroups, deriveRequestStatus, isAwardBased, awardedInvites, finalPaymentBlockedByTrial } from './paymentUtils';
@@ -68,7 +68,7 @@ import {
   mockVendors,
   CLEAN_SLATE_PURGE_V1,
 } from './mockData';
-import { PLANTS } from './constants';
+import { PLANTS, ROLE_NAMES } from './constants';
 import { BROWNFIELD_SEED_VERSION, brownFieldSeedData } from './brownFieldSeedData';
 import {
   BROWN_FIELD_NESTED_MIGRATION_V1,
@@ -193,7 +193,11 @@ interface CapexContextValue {
   createBudgetProposal: (proposal: BudgetProposal) => void;
   updateBudgetProposal: (id: string, updates: Partial<BudgetProposal>) => void;
   submitBudgetProposal: (id: string) => void;
-  /** Super-admin stage: approve (→ global accounts) / reject / send-back-for-correction (+ optional edits). */
+  /**
+   * Super-admin stage: approve (→ global accounts) / reject. Passing `editedItems` with an
+   * `approved` decision edits the lines and sends the proposal FORWARD carrying those edits.
+   * (`needs_correction` remains for the legacy send-back path.)
+   */
   decideBudgetProposal: (
     id: string,
     decision: 'approved' | 'rejected' | 'needs_correction',
@@ -201,7 +205,10 @@ interface CapexContextValue {
     note?: string,
     editedItems?: BudgetProposalItem[],
   ) => void;
-  /** Plant-head budget decision via the public email link (approve / reject / send-back-for-correction + edits). */
+  /**
+   * Plant-head budget decision via the public email link: approve / reject. Passing `editedItems`
+   * with an `approved` decision edits the lines and sends the proposal FORWARD to the admin.
+   */
   decideBudgetPlantHead: (
     id: string,
     decision: 'approved' | 'rejected' | 'needs_correction',
@@ -386,23 +393,30 @@ function normalizeInvite(inv: VendorInvite): VendorInvite {
 }
 
 /**
- * One-time clean slate for a browser that already holds workflow data: every request, vendor
- * invite, chat thread and adhoc budget request is dropped, and the IndexedDB blob store is emptied
- * (PIs, PO documents, trial uploads, spec sheets, attachments all hang off those records).
- *
- * **The plant budget is deliberately untouched** — `capexMaster`, the Green Field plant/section/head
- * envelopes, the Brown Field head allocation overrides, the budget proposals, the vendor master and
- * the custom plants/heads all survive. Idempotent via `CLEAN_SLATE_PURGE_V1`; bump that to re-run.
+ * One-time wipe of workflow + Brown Field planning data from a browser that already holds it.
+ * Drops every request, invite, chat thread, adhoc budget request, budget proposal and Brown Field
+ * head allocation override, and empties the IndexedDB blob store. Green Field master / envelopes,
+ * vendors, plants and custom heads survive; Brown Field live FY rows are replaced by the (currently
+ * empty) seed when `BROWNFIELD_SEED_VERSION` changes. Idempotent via `CLEAN_SLATE_PURGE_V1`.
  */
 function applyCleanSlatePurge(): {
   requests: CapexRequest[];
   invites: VendorInvite[];
   chatMessages: ChatMessage[];
   adhocBudgetRequests: AdhocBudgetRequest[];
+  budgetProposals: BudgetProposal[];
+  brownFieldHeadAllocations: BrownFieldHeadBudget[];
 } {
   // Blobs are keyed off requests/invites, so with those gone the whole map is orphaned.
   void putAllFiles({});
-  return { requests: [], invites: [], chatMessages: [], adhocBudgetRequests: [] };
+  return {
+    requests: [],
+    invites: [],
+    chatMessages: [],
+    adhocBudgetRequests: [],
+    budgetProposals: [],
+    brownFieldHeadAllocations: [],
+  };
 }
 
 function dedupeById<T extends { id: string }>(items: T[]): T[] {
@@ -754,8 +768,8 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
-        // Wipe every stored workflow record exactly once (see applyCleanSlatePurge). Budget data
-        // is not part of the purge and is loaded normally below.
+        // Wipe workflow + Brown Field planning data once (see applyCleanSlatePurge). Brown Field
+        // live FY rows are replaced by the empty seed when BROWNFIELD_SEED_VERSION changes.
         const purged =
           parsed.cleanSlatePurgeVersion === CLEAN_SLATE_PURGE_V1 ? null : applyCleanSlatePurge();
         const storedRequests = purged?.requests ?? dedupeById<CapexRequest>(parsed.requests ?? []);
@@ -803,10 +817,12 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
             headBudgets: parsed.greenFieldBudgetAllocations.headBudgets ?? [],
           });
         }
-        if (Array.isArray(parsed.budgetProposals))
+        if (purged) setBudgetProposals(purged.budgetProposals);
+        else if (Array.isArray(parsed.budgetProposals))
           setBudgetProposals(parsed.budgetProposals.map(normalizeBudgetProposal));
         if (!purged && Array.isArray(parsed.adhocBudgetRequests)) setAdhocBudgetRequests(parsed.adhocBudgetRequests);
-        if (Array.isArray(parsed.brownFieldHeadAllocations)) setBrownFieldHeadAllocations(parsed.brownFieldHeadAllocations);
+        if (purged) setBrownFieldHeadAllocations(purged.brownFieldHeadAllocations);
+        else if (Array.isArray(parsed.brownFieldHeadAllocations)) setBrownFieldHeadAllocations(parsed.brownFieldHeadAllocations);
       } else {
         setRequests(mockRequests.map(normalizeRequest));
         setVendors(mockVendors);
@@ -2511,6 +2527,7 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
           resubmitCount: (p.resubmitCount ?? 0) + (wasRework ? 1 : 0),
           // Clear ALL prior-stage decisions/notes on (re)submit so a fresh cycle starts clean.
           correctionNote: undefined,
+          edits: undefined,
           plantHeadDecidedAt: undefined,
           plantHeadDecidedBy: undefined,
           adminDecidedAt: undefined,
@@ -2529,6 +2546,9 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
   /**
    * Plant-head budget decision (public email link, no role): approve → admin; reject → rejected;
    * needs_correction → back to the author with a remark (and optional edited line items).
+   *
+   * On **approve** the plant head may pass `editedItems` — they adjust the lines and send the
+   * proposal FORWARD carrying those edits (the edit is recorded on `proposal.edits`).
    */
   function decideBudgetPlantHead(
     id: string,
@@ -2541,7 +2561,12 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
       prev.map((p) => {
         if (p.id !== id || p.status !== 'pending_plant_head') return p;
         if (decision === 'approved') {
-          return { ...p, status: 'pending_admin', plantHeadDecidedAt: now, plantHeadDecidedBy: 'Plant Head' };
+          return {
+            ...applyApproverEdit(p, editedItems, 'plant_head', 'Plant Head', now, note),
+            status: 'pending_admin',
+            plantHeadDecidedAt: now,
+            plantHeadDecidedBy: 'Plant Head',
+          };
         }
         if (decision === 'needs_correction') {
           return {
@@ -2567,6 +2592,9 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
   /**
    * Super-admin budget decision. approve → forwards to Global Accounts (NO publish yet);
    * needs_correction → back to the author with a remark (and optional edited line items); reject → rejected.
+   *
+   * On **approve** the admin may pass `editedItems` — they adjust the lines and send the proposal
+   * FORWARD carrying those edits (recorded on `proposal.edits`), rather than bouncing it back.
    */
   function decideBudgetProposal(
     id: string,
@@ -2582,7 +2610,7 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
         if (p.id !== id || p.status !== 'pending_admin') return p;
         if (decision === 'approved') {
           return {
-            ...p,
+            ...applyApproverEdit(p, editedItems, 'admin', ROLE_NAMES[actor] ?? actor, now, note),
             status: 'pending_accounts',
             adminDecidedAt: now,
             adminDecidedBy: actor,
