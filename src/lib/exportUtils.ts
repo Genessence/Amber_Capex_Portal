@@ -1,5 +1,47 @@
 import type ExcelJS from 'exceljs';
-import { CapexRequest, Vendor, VendorInvite } from './types';
+import { CapexRequest, Quote, Vendor, VendorInvite } from './types';
+import { inrQuoteGrandTotal, quoteGrandTotal } from './paymentUtils';
+
+/** One vendor row of the comparison export. */
+export interface VendorComparisonRow {
+  invite: VendorInvite;
+  vendor?: Vendor;
+  quote: Quote;
+  /** The currency the vendor quoted in — every non-INR figure on the row is in THIS currency. */
+  currency: string;
+  /** Grand total as quoted (subtotal + freight + packing + service), in `currency`. */
+  nativeTotal: number;
+  /** The same total converted to INR — the only basis on which rows may be compared. */
+  inrTotal: number;
+}
+
+/**
+ * Build the comparison rows for a request, cheapest FIRST on an INR basis.
+ *
+ * The ordering is load-bearing: the exported sheet paints row 0 green as "lowest", and this file is
+ * circulated outside the portal where nobody can check the working. Sorting on raw quoted totals
+ * made a $1,00,000 bid (₹85,50,000) sort ahead of an ₹80,00,000 one and take the green fill.
+ */
+export function buildVendorComparisonRows(
+  request: CapexRequest,
+  invites: VendorInvite[],
+  vendors: Vendor[],
+): VendorComparisonRow[] {
+  return invites
+    .filter(inv => inv.requestId === request.id && inv.quotes.length > 0)
+    .map(inv => {
+      const quote = inv.quotes[inv.quotes.length - 1];
+      return {
+        invite: inv,
+        vendor: vendors.find(v => v.id === inv.vendorId),
+        quote,
+        currency: quote.currency ?? 'INR',
+        nativeTotal: quoteGrandTotal(quote),
+        inrTotal: inrQuoteGrandTotal(quote),
+      };
+    })
+    .sort((a, b) => a.inrTotal - b.inrTotal);
+}
 
 export async function exportVendorGridToExcel(
   request: CapexRequest,
@@ -15,8 +57,8 @@ export async function exportVendorGridToExcel(
 
   // ── Section A: Request Info ────────────────────────────────────
 
-  // Determine how many columns we'll need (12 for the comparison table)
-  const TOTAL_COLS = 12;
+  // Determine how many columns we'll need (14 for the comparison table)
+  const TOTAL_COLS = 14;
 
   // Row 1: Title
   ws.addRow(['CAPEX Vendor Comparison']);
@@ -52,9 +94,13 @@ export async function exportVendorGridToExcel(
     type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFBBF24' },
   };
 
+  // Currency is explicit and the money columns are labelled "as quoted" — the sheet used to print
+  // every figure under a ₹ header regardless of what the vendor actually quoted in. `Total (INR)`
+  // is the single comparable column (and the one the "lowest" highlight is decided on).
   const headers = [
-    '#', 'Vendor Name', 'Vendor Code', 'Status',
-    'Base Price (₹)', 'Freight (₹)', 'Packing (₹)', 'Service (₹)', 'Total (₹)',
+    '#', 'Vendor Name', 'Vendor Code', 'Status', 'Currency',
+    'Base Price (as quoted)', 'Freight (as quoted)', 'Packing (as quoted)', 'Service (as quoted)',
+    'Total (as quoted)', 'Total (INR)',
     'Delivery (days)', 'Warranty (yrs)', 'Valid Until',
   ];
 
@@ -68,15 +114,7 @@ export async function exportVendorGridToExcel(
     };
   });
 
-  const requestInvites = invites
-    .filter(inv => inv.requestId === request.id && inv.quotes.length > 0)
-    .map(inv => {
-      const vendor = vendors.find(v => v.id === inv.vendorId);
-      const quote = inv.quotes[inv.quotes.length - 1];
-      const total = quote.price + (quote.freight ?? 0) + (quote.packing ?? 0) + (quote.service ?? 0);
-      return { inv, vendor, quote, total };
-    })
-    .sort((a, b) => a.total - b.total);
+  const requestInvites = buildVendorComparisonRows(request, invites, vendors);
 
   const approvedInviteId = invites.find(i => i.status === 'approved')?.id ?? null;
 
@@ -90,7 +128,7 @@ export async function exportVendorGridToExcel(
     type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' },
   };
 
-  requestInvites.forEach(({ inv, vendor, quote, total }, idx) => {
+  requestInvites.forEach(({ invite: inv, vendor, quote, currency, nativeTotal, inrTotal }, idx) => {
     const isLowest   = idx === 0;
     const isApproved = inv.id === approvedInviteId;
 
@@ -99,11 +137,13 @@ export async function exportVendorGridToExcel(
       vendor?.vendorName ?? '—',
       vendor?.vendorCode ?? '—',
       inv.status,
+      currency,
       quote.price,
       quote.freight ?? '—',
       quote.packing ?? '—',
       quote.service ?? '—',
-      total,
+      nativeTotal,
+      Math.round(inrTotal),
       quote.deliveryDays,
       quote.warranty ?? '—',
       quote.validUntil ? new Date(quote.validUntil).toLocaleDateString('en-IN') : '—',
@@ -138,8 +178,8 @@ export async function exportVendorGridToExcel(
       'Lowest Price Vendor:',
       cheapest.vendor?.vendorName ?? '—',
       '',
-      'Total:',
-      '₹' + cheapest.total.toLocaleString('en-IN'),
+      'Total (INR):',
+      '₹' + Math.round(cheapest.inrTotal).toLocaleString('en-IN'),
     ]);
     recRow.getCell(1).font = { bold: true };
     recRow.getCell(2).font = { bold: true };

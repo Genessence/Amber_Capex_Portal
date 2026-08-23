@@ -18,9 +18,11 @@ import { isFulfillmentStatus, resolveFinalVendor, isAwardBased, awardedInvites, 
 import { lowestRfqTotal } from "@/lib/rfqUtils"
 import { effectiveDocApprovalStatus } from "@/lib/docPackageUtils"
 import { useCapex } from "@/lib/capexContext"
+import { PRE_PI_REQUEST_STATUSES } from "@/lib/statusFlow"
 import type { AuctionConfig, CapexMasterItem, CapexRequest, CapexStatus, Vendor, Quote, VendorInvite } from "@/lib/types"
 import { ROLE_NAMES, SOURCING_ENGINEERS, PLANTS } from "@/lib/constants"
 import { StatusBadge } from "@/components/StatusBadge"
+import { fmtCurrency } from "@/lib/auctionTheme"
 import { CARD } from "@/lib/uiTokens"
 
 const FIELD_TYPE_LABELS: Record<string, string> = {
@@ -54,8 +56,13 @@ import { buildSupplierLink, buildApprovalLink } from "@/lib/tokenUtils"
 import { PLANT_HEAD_EMAIL } from "@/lib/constants"
 import { effectiveTrialStatus } from "@/lib/trialUtils"
 
+/**
+ * INR display. Rounds because its inputs are now FX-converted figures (`computeVendorRankings`
+ * returns `toInr(...)`), which are routinely fractional — an unrounded JPY or odd-USD bid rendered
+ * as `₹85,50,085.5`. Mirrors the `fmt` helpers on both public PO pages.
+ */
 function formatPrice(n: number) {
-  return "₹" + n.toLocaleString("en-IN")
+  return "₹" + Math.round(n).toLocaleString("en-IN")
 }
 
 const CR_TO_INR = 10_000_000
@@ -606,9 +613,14 @@ function StatusTimeline({ history }: { history: CapexRequest["statusHistory"] })
 
 /* ── Sourcing decision locked banner (all roles) ─────────────── */
 
-function SourcingDecisionBanner({ request, vendors }: { request: CapexRequest; vendors: Vendor[] }) {
+function SourcingDecisionBanner({ request, vendors, invites }: { request: CapexRequest; vendors: Vendor[]; invites: VendorInvite[] }) {
   const sd = request.sourcingDecision
-  const isLocked = request.status === "sourcing_approved" || request.status === "buyer_approved"
+  // Mirrors VendorGrid's `isLocked`: the Final Decision column (and this banner) is only actually
+  // locked once a single vendor's invite is stamped `approved` and the award isn't split across
+  // vendors. The legacy `sourcing_approved`/`buyer_approved` statuses no longer lock anything (see
+  // VendorGrid's comment) — a request can sit at either status with the column still editable.
+  const approvedInviteId = invites.find(i => i.status === "approved")?.id ?? null
+  const isLocked = !!approvedInviteId && !isAwardBased(invites)
   if (!isLocked) return null
 
   const items = request.lineItems ?? []
@@ -772,7 +784,7 @@ function AuctionDocumentPrintView({
   return (
     <div className="bg-white p-8 max-w-4xl mx-auto print:p-0 print:m-0">
       <div className="text-center mb-6">
-        <h1 className="text-xl font-bold uppercase tracking-wide">Business Rules for Reverse Auction</h1>
+        <h2 className="text-xl font-bold uppercase tracking-wide">Business Rules for Reverse Auction</h2>
         <p className="text-sm text-slate-500">(Annexure – I)</p>
       </div>
 
@@ -1704,8 +1716,9 @@ function ReverseAuctionPanel({
             {request.auctionConfig?.openingBestPrice != null && (
               <div className="mb-3 flex items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2.5 flex-wrap">
                 <div>
-                  <p className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider">Opening Price to Beat</p>
+                  <p className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider">Opening Price to Beat — whole quote</p>
                   <p className="text-lg font-bold text-emerald-800 tabular-nums">{formatPrice(request.auctionConfig.openingBestPrice)}</p>
+                  <p className="text-[10px] text-emerald-700">Incl. freight / packing / service. The ranking below is on the bid subtotal — a different basis.</p>
                 </div>
                 <p className="text-xs text-emerald-700 max-w-[18rem]">Best RFQ price cut 5% at auction start. All ranks reset — vendors must submit a fresh bid to reveal their rank.</p>
               </div>
@@ -1718,13 +1731,17 @@ function ReverseAuctionPanel({
               <div className="border border-slate-200 rounded-lg overflow-hidden">
                 <div className="bg-slate-50 px-4 py-2 border-b border-slate-100">
                   <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Vendor Ranking</p>
+                  {/* The rank basis is the bid SUBTOTAL, not the whole quote — stated here because
+                      the "Opening Price to Beat" directly above is a whole-quote figure, and the
+                      two used to sit stacked under one another with nothing distinguishing them. */}
+                  <p className="text-[10px] text-slate-500">Ranked on the bid subtotal (excl. freight / packing / service), in INR.</p>
                 </div>
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100">
                       <th className="px-4 py-2 text-left">Rank</th>
                       <th className="px-4 py-2 text-left">Vendor</th>
-                      <th className="px-4 py-2 text-right">Quote</th>
+                      <th className="px-4 py-2 text-right">Bid Subtotal (₹)</th>
                       <th className="px-4 py-2 text-right">Gap to L1</th>
                     </tr>
                   </thead>
@@ -1743,7 +1760,16 @@ function ReverseAuctionPanel({
                             </span>
                           </td>
                           <td className="px-4 py-2 font-semibold text-slate-800">{vendor?.vendorName ?? row.vendorId}</td>
-                          <td className="px-4 py-2 text-right font-mono font-bold text-slate-800">{formatPrice(row.price)}</td>
+                          {/* INR basis (see computeVendorRankings) — the vendor's own-currency bid
+                              is shown beneath, the way every other sourcing surface does it. */}
+                          <td className="px-4 py-2 text-right font-mono font-bold text-slate-800">
+                            {formatPrice(row.price)}
+                            {row.currency !== "INR" && (
+                              <span className="block text-[10px] font-sans font-semibold text-slate-400">
+                                {fmtCurrency(row.nativePrice, row.currency)}
+                              </span>
+                            )}
+                          </td>
                           <td className="px-4 py-2 text-right">
                             {row.rank === 1 ? (
                               <span className="text-xs font-semibold text-slate-700">Lowest</span>
@@ -1814,8 +1840,9 @@ export default function CapexDetailPage() {
   // either the countdown reached `endsAt` or sourcing closed it early.
   const auctionEnded = !ranAuction || isAuctionExpired(request.auctionConfig)
   // Pre-PI states an auction winner may sit in before the PI is requested (the last two only for
-  // legacy/in-flight requests created before the buyer step was dropped).
-  const PRE_PI_STATUSES: CapexStatus[] = ["sourcing", "negotiation", "sourcing_approved", "buyer_approved"]
+  // legacy/in-flight requests created before the buyer step was dropped). Canonical list lives in
+  // `statusFlow.ts` (`PRE_PI_REQUEST_STATUSES`) — this used to be a hand-copied local duplicate.
+  const PRE_PI_STATUSES = PRE_PI_REQUEST_STATUSES
 
   // Default a Brown Field request entering sourcing into RFQ mode (no chooser) so the supplier
   // portal routes to the RFQ view and invites are stamped awaiting_quote.
@@ -1936,7 +1963,7 @@ export default function CapexDetailPage() {
           line-budget grid lives in RequestInfoCard above, hence showLineBudget={false}. */}
       <RequestQuotationView request={request} heading="Quotation" showLineBudget={false} />
 
-      <SourcingDecisionBanner request={request} vendors={vendors} />
+      <SourcingDecisionBanner request={request} vendors={vendors} invites={reqInvites} />
 
       <div className="space-y-4">
 

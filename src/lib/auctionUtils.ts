@@ -25,18 +25,42 @@ export function formatAuctionCountdown(endsAt: string): string {
 export interface VendorRanking {
   inviteId: string;
   vendorId: string;
+  /**
+   * The ranking basis: the bid's BASE SUBTOTAL converted to INR. Foreign-currency bids used to be
+   * ranked (and displayed under a ₹ sign) at their raw face value, so a $1,00,000 bid outranked an
+   * ₹80,00,000 one. Rank, gap-to-L1 and every ₹-labelled figure derived from this are INR.
+   */
   price: number;
+  /** The same subtotal in the currency the vendor actually quoted — display only, never compared. */
+  nativePrice: number;
+  /** The bid's own currency (defaults to INR when the quote carries none). */
+  currency: string;
   rank: number;
 }
 
+/**
+ * Rank vendors L1..Ln by their current bid, cheapest first, on an INR basis.
+ *
+ * Basis note: this ranks the bid's `price` — the BASE SUBTOTAL, per the auction-bid convention —
+ * while `computeAuctionBestPrice` below prices the WHOLE quote (subtotal + freight/packing/service).
+ * That difference is intentional and unchanged here; only the currency normalisation was missing.
+ * Only `quotes` is read (never `openingQuote`), so ranks stay empty until a vendor actually re-bids.
+ */
 export function computeVendorRankings(invites: VendorInvite[]): VendorRanking[] {
   const withQuotes = invites
     .map((inv) => {
       const latest = inv.quotes[inv.quotes.length - 1];
       if (!latest) return null;
-      return { inviteId: inv.id, vendorId: inv.vendorId, price: latest.price };
+      const currency = latest.currency ?? 'INR';
+      return {
+        inviteId: inv.id,
+        vendorId: inv.vendorId,
+        price: toInr(latest.price, currency),
+        nativePrice: latest.price,
+        currency,
+      };
     })
-    .filter((entry): entry is { inviteId: string; vendorId: string; price: number } => entry !== null);
+    .filter((entry): entry is Omit<VendorRanking, 'rank'> => entry !== null);
 
   withQuotes.sort((a, b) => a.price - b.price);
   return withQuotes.map((entry, idx) => ({ ...entry, rank: idx + 1 }));
@@ -46,6 +70,45 @@ export function rankLabel(rank: number): string {
   return `L${rank}`;
 }
 
+/**
+ * The unit price a bid offers for one line item, in the bid's OWN currency. Falls back to the
+ * whole-quote `price` for legacy bids that were never priced line by line — the same fallback the
+ * comparison grid and the Final-Decision auto-fill use.
+ */
+export function quoteLineUnitPrice(quote: Quote | null | undefined, lineItemId: string): number | null {
+  if (!quote) return null;
+  return quote.itemPrices?.[lineItemId] ?? quote.price ?? null;
+}
+
+/**
+ * Index of the column holding the LOWEST unit price for a line item, compared on an INR basis.
+ * Returns null when no column carries a bid.
+ *
+ * This drives the comparison grid's per-line "↓ Lowest" highlight, which in turn steers the award
+ * (selecting a vendor auto-fills that line's Final-Decision price). Comparing the raw quoted units
+ * hands the highlight — and the award — to whichever vendor happens to quote in the smallest-
+ * numbered currency: a USD unit of 50,000 (₹42,75,000) beat an INR unit of ₹40,00,000.
+ */
+export function lowestInrUnitIndex(
+  quotes: (Quote | null | undefined)[],
+  lineItemId: string,
+): number | null {
+  let min = Infinity;
+  let minIdx = -1;
+  quotes.forEach((q, i) => {
+    if (!q) return;
+    const unit = quoteLineUnitPrice(q, lineItemId);
+    if (unit == null) return;
+    const inr = toInr(unit, q.currency);
+    if (inr < min) {
+      min = inr;
+      minIdx = i;
+    }
+  });
+  return minIdx >= 0 ? minIdx : null;
+}
+
+/** The L1 (cheapest) bid's base subtotal, INR — comparable with every other ranking `price`. */
 export function getL1Price(rankings: VendorRanking[]): number | null {
   const l1 = rankings.find((r) => r.rank === 1);
   return l1?.price ?? null;

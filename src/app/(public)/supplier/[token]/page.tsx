@@ -29,7 +29,8 @@ import {
 import { useCapex } from "@/lib/capexContext"
 import { resolveInviteByToken, isSubmissionAllowed } from "@/lib/tokenUtils"
 import type { CapexLineItem, CapexRequest, PurchaseOrder, Quote, NegotiationMessage, ProformaInvoice, RfqQuote, TrialSubmission, Vendor, VendorInvite, IncoTermsDoc } from "@/lib/types"
-import { rfqTotal, effectiveRfqStatus, rfqLineSubtotal, rfqGstAmount, isCompleteItemHsnMap, RFQ_STATUS_LABELS, RFQ_STATUS_COLORS } from "@/lib/rfqUtils"
+import { rfqTotal, inrRfqTotal, effectiveRfqStatus, rfqLineSubtotal, rfqGstAmount, isCompleteItemHsnMap, RFQ_STATUS_LABELS, RFQ_STATUS_COLORS } from "@/lib/rfqUtils"
+import { toInr, currencySymbol, isForeignCurrency } from "@/lib/currencyUtils"
 import {
   INCO_TERMS_QUESTIONS,
   INCO_TERMS_STATUS_LABELS,
@@ -61,7 +62,7 @@ import { SupplierQuoteCards } from "@/components/supplier/SupplierQuoteCards"
 import { INPUT, INPUT_RIGHT, LABEL, LABEL_REQ, fmtCurrency } from "@/lib/auctionTheme"
 import { SUPPLIER_CARD } from "@/lib/uiTokens"
 import { DEFAULT_TERMS_TEXT, effectiveDocApprovalStatus, docPackageTitles } from "@/lib/docPackageUtils"
-import { isFulfillmentStatus, resolveFinalVendor } from "@/lib/paymentUtils"
+import { isFulfillmentStatus, ownsFulfillmentTrack, resolveFinalVendor } from "@/lib/paymentUtils"
 
 const MAX_FILE_BYTES = 500 * 1024
 
@@ -198,24 +199,36 @@ function AuctionRulesList({
   )
 }
 
-/* ── Rank + best price + your bid summary ────────────────────── */
+/* ── Rank + best price + your bid summary ──────────────────────
+ * Every figure in this card is INR (`fmt` hardcodes ₹) so rank, best price and the vendor's own
+ * bid are all on one comparable basis. A vendor quoting in a foreign currency additionally sees
+ * their own-currency total beneath, explicitly labelled with its own symbol.
+ */
 function RankSummaryCard({
   rank,
   bestPrice,
   grandTotal,
+  nativeGrandTotal,
+  currency,
   aboveThreshold,
   threshold,
   hasExistingQuote,
 }: {
   rank?: number
-  /** Whole-quote price to beat: lowest RFQ − 5%, or a live bid once one comes in under it. */
+  /** Whole-quote price to beat: lowest RFQ − 5%, or a live bid once one comes in under it. INR. */
   bestPrice: number | null
+  /** The vendor's whole-quote bid total, converted to INR — comparable with `bestPrice`. */
   grandTotal: number
+  /** The same total in the currency the vendor is bidding in (display context only). */
+  nativeGrandTotal: number
+  currency: string
   aboveThreshold: boolean
+  /** Auction threshold (ceiling), INR. */
   threshold?: number
   hasExistingQuote: boolean
 }) {
   const isLeading = rank === 1
+  const isForeign = currency !== "INR"
   const gapToBest = bestPrice != null && grandTotal > bestPrice ? grandTotal - bestPrice : 0
   return (
     <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
@@ -261,6 +274,11 @@ function RankSummaryCard({
           <p className="text-3xl font-black text-[#2563EB] tabular-nums leading-none">
             {grandTotal > 0 ? fmt(Math.round(grandTotal)) : "—"}
           </p>
+          {isForeign && nativeGrandTotal > 0 && (
+            <p className="text-xs text-slate-500 mt-1.5 tabular-nums">
+              You bid {fmtCurrency(Math.round(nativeGrandTotal), currency)} — ranked in INR at today&apos;s rate.
+            </p>
+          )}
           {threshold != null && (
             <p className={[
               "text-xs mt-2 font-medium",
@@ -358,17 +376,20 @@ function RequestScopeCard({ request }: { request: CapexRequest }) {
 /* ── Read-only quotation summary (vendor's own figures only) ─────── */
 function QuoteSummaryCard({ quote, title }: { quote?: RfqQuote; title: string }) {
   const total = rfqTotal(quote)
+  // The vendor's own quotation, shown in the vendor's own currency (a ₹ sign over a $ figure is
+  // how "$1,20,000" came to read as "₹1,20,000" beside a ₹1.03 Cr order value).
+  const cur = quote?.currency ?? "INR"
   // Delivery is captured in DAYS now; tolerate legacy weeks by converting to days for display.
   const deliveryDaysVal = quote?.deliveryDays ?? (quote?.deliveryWeeks != null ? quote.deliveryWeeks * 7 : undefined)
   const rows: [string, string][] = [
-    ["Price", quote ? fmt(quote.price) : "—"],
-    ["Transportation / Freight", quote?.freight != null ? fmt(quote.freight) : "—"],
-    ["Packing / Forwarding", quote?.packing != null ? fmt(quote.packing) : "—"],
-    ["Service / Installation", quote?.service != null ? fmt(quote.service) : "—"],
+    ["Price", quote ? fmtCurrency(quote.price, cur) : "—"],
+    ["Transportation / Freight", quote?.freight != null ? fmtCurrency(quote.freight, cur) : "—"],
+    ["Packing / Forwarding", quote?.packing != null ? fmtCurrency(quote.packing, cur) : "—"],
+    ["Service / Installation", quote?.service != null ? fmtCurrency(quote.service, cur) : "—"],
     ["Delivery Lead Time", deliveryDaysVal != null ? `${deliveryDaysVal} day${deliveryDaysVal !== 1 ? "s" : ""}` : "—"],
     ["Warranty", quote?.warranty != null ? `${quote.warranty} year${quote.warranty !== 1 ? "s" : ""}` : "—"],
-    ["GST", rfqGstAmount(quote) > 0 ? fmt(Math.round(rfqGstAmount(quote))) : "—"],
-    ["Currency", quote?.currency ?? "INR"],
+    ["GST", rfqGstAmount(quote) > 0 ? fmtCurrency(Math.round(rfqGstAmount(quote)), cur) : "—"],
+    ["Currency", cur],
   ]
   return (
     <section className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
@@ -385,7 +406,7 @@ function QuoteSummaryCard({ quote, title }: { quote?: RfqQuote; title: string })
         ))}
         <div className="flex items-center justify-between pt-3 mt-1">
           <span className="text-sm font-bold text-slate-700">Grand Total</span>
-          <span className="text-xl font-black text-[#2563EB] tabular-nums">{total > 0 ? fmt(total) : "—"}</span>
+          <span className="text-xl font-black text-[#2563EB] tabular-nums">{total > 0 ? fmtCurrency(Math.round(total), cur) : "—"}</span>
         </div>
       </div>
     </section>
@@ -582,6 +603,7 @@ function QuotationEntryForm({
                 onLinePrice={(id, v) => setLinePrices(prev => ({ ...prev, [id]: v }))}
                 hsnByItem={hsnByItem}
                 onHsnChange={(id, v) => setHsnByItem(prev => ({ ...prev, [id]: v }))}
+                currency={currency}
               />
             </div>
             <div className="lg:hidden">
@@ -592,12 +614,14 @@ function QuotationEntryForm({
                 onLinePrice={(id, v) => setLinePrices(prev => ({ ...prev, [id]: v }))}
                 hsnByItem={hsnByItem}
                 onHsnChange={(id, v) => setHsnByItem(prev => ({ ...prev, [id]: v }))}
+                currency={currency}
               />
             </div>
           </>
         ) : (
           <div className="max-w-sm">
-            <label htmlFor="rfq-price" className={LABEL_REQ}>Unit Price (₹)</label>
+            {/* Own-currency input — labelled with the selected currency, never a hardcoded ₹. */}
+            <label htmlFor="rfq-price" className={LABEL_REQ}>Unit Price ({currencySymbol(currency)})</label>
             <input
               id="rfq-price"
               type="number"
@@ -622,7 +646,7 @@ function QuotationEntryForm({
             { id: "rfq-service", label: "Service / Installation", value: service, set: setService },
           ]).map(({ id, label, value, set }) => (
             <div key={id}>
-              <label htmlFor={id} className={LABEL}>{label} <span className="font-normal text-slate-400">(₹)</span></label>
+              <label htmlFor={id} className={LABEL}>{label} <span className="font-normal text-slate-400">({currencySymbol(currency)})</span></label>
               <input
                 id={id}
                 type="number"
@@ -1142,6 +1166,15 @@ function RfqSupplierView({
   // Split-award: this invite is a self-contained fulfillment track. Scope the line items to the
   // ones this vendor was awarded, and drive the total / PO / payments from the invite's own fields.
   const isAward = !!invite.awarded
+  // CONFIDENTIALITY GATE. The request-level fulfillment chain (PI upload → issued PO → payment
+  // milestones → trial) belongs to exactly ONE vendor: the finalized one. `fulfilled`/`piRequested`
+  // used to key off `request.status` alone, so every LOSING vendor on the same request was shown
+  // "Upload Proforma Invoice" and — on a single-vendor track — the winner's issued PO document, the
+  // payment schedule and the trial-upload card, whose submission satisfied the QA gate on an order
+  // they never won. Both award shapes are covered here, deliberately: `invite.awarded` for a split
+  // award, `request.finalVendorId` for the single-vendor RFQ / auction track. Handling one and not
+  // the other is the exact asymmetry that produced this class of bug before.
+  const ownsTrack = ownsFulfillmentTrack(request, invite)
   const lineItems = (request.lineItems ?? []).filter(
     (li) => !isAward || invite.awardedItemIds?.includes(li.id),
   )
@@ -1149,15 +1182,35 @@ function RfqSupplierView({
   // RFQ keeps its rfqQuote-derived total; an award / auction winner's rfqQuote is stale/absent (the
   // final price lives in the award amount or auction Quote), so use the award amount or the
   // canonical resolver used by accounts/PO.
-  const quoteTotal = isAward
+  //
+  // TWO figures, deliberately: `quoteTotalInr` is the order value Accounts consume — it seeds the
+  // PI amount (persisted on `ProformaInvoice.amount` and rendered with ₹ by AccountsPanel and both
+  // PO pages) and the TAT delay-liability base. `quoteTotalNative` is what the vendor themselves
+  // quoted, shown in their own currency. The RFQ branch used to feed the NATIVE total into both, so
+  // a foreign vendor's $1,20,000 was stored and displayed as "₹1,20,000" on a ₹1.03 Cr order.
+  const useRfqQuote = !isAward && !!invite.rfqQuote && request.sourcingMode !== "auction"
+  const quoteCurrency = (useRfqQuote ? invite.rfqQuote?.currency : undefined) ?? "INR"
+  const quoteTotalInr = isAward
     ? invite.awardAmount ?? 0
-    : invite.rfqQuote && request.sourcingMode !== "auction"
-      ? rfqTotal(invite.rfqQuote, lineItems)
-      : resolveFinalVendor(request, invites).amount
+    : useRfqQuote
+      ? inrRfqTotal(invite.rfqQuote, lineItems)
+      // Scoped to THIS request — a vendor can hold invites on several requests — and to the vendor
+      // who owns the track: `resolveFinalVendor` returns the FINALIZED vendor's negotiated total, so
+      // reading it for a non-winning invite would print another vendor's price on their screen.
+      : ownsTrack
+        ? resolveFinalVendor(request, invites.filter(i => i.requestId === request.id)).amount
+        : 0
+  // Award amounts and `resolveFinalVendor` are already INR, so only the RFQ branch differs.
+  const quoteTotalNative = useRfqQuote ? rfqTotal(invite.rfqQuote, lineItems) : quoteTotalInr
+  /** The vendor's quotation as THEY quoted it, with the INR equivalent when the two differ. */
+  const quoteTotalLabel = isForeignCurrency(quoteCurrency)
+    ? `${fmtCurrency(Math.round(quoteTotalNative), quoteCurrency)} (${fmt(Math.round(quoteTotalInr))})`
+    : fmt(Math.round(quoteTotalInr))
   const [piName, setPiName] = useState(invite.proformaInvoice?.name ?? "")
   const [piBase64, setPiBase64] = useState(invite.proformaInvoice?.base64 ?? "")
   const [piMime, setPiMime] = useState(invite.proformaInvoice?.mimeType ?? "")
-  const [piAmount, setPiAmount] = useState(quoteTotal ? String(quoteTotal) : "")
+  // Pre-filled in INR to match the "PI Amount (₹)" label and everything downstream of it.
+  const [piAmount, setPiAmount] = useState(quoteTotalInr ? String(Math.round(quoteTotalInr)) : "")
   const [piNote, setPiNote] = useState("")
   const [fileError, setFileError] = useState("")
 
@@ -1188,11 +1241,15 @@ function RfqSupplierView({
   const rfqStatus = effectiveRfqStatus(invite)
   const docStatus = effectiveDocApprovalStatus(invite.docApprovalStatus)
   const vendorName = vendor?.vendorName ?? "Vendor"
-  // For an award, fulfillment is tracked on the invite (awardStatus); otherwise on request.status.
+  // For an award, fulfillment is tracked on the invite (awardStatus); otherwise on request.status —
+  // and ONLY for the vendor who actually owns that track (see `ownsFulfillmentTrack` above).
   const fulfilled = isAward
     ? ["pi_submitted", "accounts_processing", "payment_in_progress", "completed"].includes(invite.awardStatus ?? "")
-    : ["pi_submitted", "accounts_processing", "payment_in_progress", "completed"].includes(request.status)
-  const piRequested = isAward ? invite.awardStatus === "pi_requested" : request.status === "pi_requested"
+    : ownsTrack &&
+      ["pi_submitted", "accounts_processing", "payment_in_progress", "completed"].includes(request.status)
+  const piRequested = isAward
+    ? invite.awardStatus === "pi_requested"
+    : ownsTrack && request.status === "pi_requested"
   const card = `${SUPPLIER_CARD} max-w-2xl mx-auto`
 
   // Incoterms are answered WITH the quotation (see IncoTermsModal) and then negotiated on their own
@@ -1394,10 +1451,11 @@ function RfqSupplierView({
             Thank you. Your PI has been sent to Amber&apos;s buyer and accounts team for PO processing and payment.
           </p>
         </div>
+        {/* vendorAmount is INR — TatBanner prints its delay-liability figure with a ₹ sign. */}
         <TatBanner
           piSubmittedAt={isAward ? invite.piSubmittedAt : request.piSubmittedAt}
           tatStoppedAt={isAward ? invite.tatStoppedAt : request.tatStoppedAt}
-          vendorAmount={quoteTotal || po?.amount || request.budget || 0}
+          vendorAmount={quoteTotalInr || po?.amount || request.budget || 0}
         />
         <PurchaseOrderCard po={po} />
         {piReupload && (
@@ -1413,6 +1471,11 @@ function RfqSupplierView({
               <div>
                 <label htmlFor="pi-reupload-amount" className={LABEL}>PI Amount (₹)</label>
                 <input id="pi-reupload-amount" type="number" inputMode="decimal" value={piAmount} onChange={e => setPiAmount(e.target.value)} className={`${INPUT_RIGHT} min-h-[44px]`} />
+                {isForeignCurrency(quoteCurrency) && (
+                  <p className="text-xs text-slate-500 mt-1">
+                    In Indian Rupees, converted from your quoted {fmtCurrency(Math.round(quoteTotalNative), quoteCurrency)} at today&apos;s rate.
+                  </p>
+                )}
               </div>
               <div>
                 <label className={LABEL_REQ}>Proforma Invoice File</label>
@@ -1480,13 +1543,18 @@ function RfqSupplierView({
           <h2 className="text-lg font-bold text-slate-900">Upload Proforma Invoice</h2>
         </div>
         <p className="text-sm text-slate-600 mb-4">
-          Your quotation of <span className="font-bold">{quoteTotal ? fmt(quoteTotal) : "—"}</span> (grand total) was approved.
+          Your quotation of <span className="font-bold">{quoteTotalInr ? quoteTotalLabel : "—"}</span> (grand total) was approved.
           Upload your Proforma Invoice to proceed.
         </p>
         <div className="space-y-4">
           <div>
             <label htmlFor="pi-amount" className={LABEL}>PI Amount (₹)</label>
             <input id="pi-amount" type="number" inputMode="decimal" value={piAmount} onChange={e => setPiAmount(e.target.value)} className={`${INPUT_RIGHT} min-h-[44px]`} />
+            {isForeignCurrency(quoteCurrency) && (
+              <p className="text-xs text-slate-500 mt-1">
+                In Indian Rupees, converted from your quoted {fmtCurrency(Math.round(quoteTotalNative), quoteCurrency)} at today&apos;s rate.
+              </p>
+            )}
           </div>
           <div>
             <label className={LABEL_REQ}>Proforma Invoice File</label>
@@ -1520,7 +1588,7 @@ function RfqSupplierView({
           <Hourglass className="w-12 h-12 text-slate-400 mx-auto mb-3" />
           <h2 className="text-lg font-bold text-slate-900">Submitted to Amber</h2>
           <p className="text-sm text-slate-600 mt-2">
-            Your quotation{quoteTotal ? ` of ${fmt(quoteTotal)} (grand total)` : ""} is with Amber&apos;s sourcing team for review.
+            Your quotation{quoteTotalInr ? ` of ${quoteTotalLabel} (grand total)` : ""} is with Amber&apos;s sourcing team for review.
             We&apos;ll update this page when they respond.
           </p>
         </div>
@@ -1560,10 +1628,12 @@ function RfqSupplierView({
             <div className="space-y-3">
               <p className="text-sm font-bold text-slate-800">Your Counter-Quotation</p>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                <CounterField label="Price (₹)" required value={cForm.price} onChange={v => setCForm(f => ({ ...f, price: v }))} />
-                <CounterField label="Freight (₹)" value={cForm.freight} onChange={v => setCForm(f => ({ ...f, freight: v }))} />
-                <CounterField label="Packing (₹)" value={cForm.packing} onChange={v => setCForm(f => ({ ...f, packing: v }))} />
-                <CounterField label="Service (₹)" value={cForm.service} onChange={v => setCForm(f => ({ ...f, service: v }))} />
+                {/* The counter is the vendor's own offer — labelled and totalled in THEIR currency
+                    (the selector below), never ₹. Conversion to INR happens on the sourcing side. */}
+                <CounterField label={`Price (${currencySymbol(cForm.currency)})`} required value={cForm.price} onChange={v => setCForm(f => ({ ...f, price: v }))} />
+                <CounterField label={`Freight (${currencySymbol(cForm.currency)})`} value={cForm.freight} onChange={v => setCForm(f => ({ ...f, freight: v }))} />
+                <CounterField label={`Packing (${currencySymbol(cForm.currency)})`} value={cForm.packing} onChange={v => setCForm(f => ({ ...f, packing: v }))} />
+                <CounterField label={`Service (${currencySymbol(cForm.currency)})`} value={cForm.service} onChange={v => setCForm(f => ({ ...f, service: v }))} />
                 <CounterField label="Delivery (days)" value={cForm.deliveryDays} onChange={v => setCForm(f => ({ ...f, deliveryDays: v }))} />
                 <CounterField label="Warranty (yrs)" value={cForm.warranty} onChange={v => setCForm(f => ({ ...f, warranty: v }))} />
                 <div>
@@ -1576,15 +1646,15 @@ function RfqSupplierView({
               <div className="rounded-lg border border-slate-100 bg-slate-50 px-4 py-2.5 space-y-1.5 text-sm">
                 <div className="flex justify-between text-slate-600">
                   <span>Taxable value</span>
-                  <span className="font-semibold tabular-nums">{cTaxable > 0 ? fmt(Math.round(cTaxable)) : "—"}</span>
+                  <span className="font-semibold tabular-nums">{cTaxable > 0 ? fmtCurrency(Math.round(cTaxable), cForm.currency) : "—"}</span>
                 </div>
                 <div className="flex justify-between text-slate-600">
                   <span>GST <span className="text-slate-400">(as per HSN)</span></span>
-                  <span className="font-semibold tabular-nums">{cGstValue > 0 ? `+${fmt(Math.round(cGstValue))}` : "—"}</span>
+                  <span className="font-semibold tabular-nums">{cGstValue > 0 ? `+${fmtCurrency(Math.round(cGstValue), cForm.currency)}` : "—"}</span>
                 </div>
                 <div className="flex justify-between pt-1.5 border-t border-slate-200">
                   <span className="font-bold text-slate-700">Grand Total <span className="font-normal text-slate-400">(incl. GST)</span></span>
-                  <span className="font-black text-[#2563EB] tabular-nums">{cGrandTotal > 0 ? fmt(Math.round(cGrandTotal)) : "—"}</span>
+                  <span className="font-black text-[#2563EB] tabular-nums">{cGrandTotal > 0 ? fmtCurrency(Math.round(cGrandTotal), cForm.currency) : "—"}</span>
                 </div>
               </div>
               <div className="flex flex-col sm:flex-row gap-3">
@@ -1610,7 +1680,7 @@ function RfqSupplierView({
           <CheckCircle2 className="w-12 h-12 text-slate-500 mx-auto mb-3" />
           <h2 className="text-lg font-bold text-slate-900">Price Agreed — Final Step: Approve the Terms</h2>
           <p className="text-sm text-slate-600 mt-2">
-            Your quotation{quoteTotal ? ` of ${fmt(quoteTotal)} (grand total)` : ""} is agreed. Please review and accept the
+            Your quotation{quoteTotalInr ? ` of ${quoteTotalLabel} (grand total)` : ""} is agreed. Please review and accept the
             contract terms below to proceed to the Proforma Invoice.
           </p>
         </div>
@@ -1625,7 +1695,7 @@ function RfqSupplierView({
         <CheckCircle2 className="w-12 h-12 text-slate-500 mx-auto mb-3" />
         <h2 className="text-lg font-bold text-slate-900">Quotation Approved</h2>
         <p className="text-sm text-slate-600 mt-2">
-          Your quotation{quoteTotal ? ` of ${fmt(quoteTotal)}` : ""} is approved. Awaiting Amber to request your Proforma Invoice.
+          Your quotation{quoteTotalInr ? ` of ${quoteTotalLabel}` : ""} is approved. Awaiting Amber to request your Proforma Invoice.
         </p>
       </div>
     )
@@ -1652,7 +1722,7 @@ function RfqSupplierView({
           <CheckCircle2 className="w-12 h-12 text-slate-500 mx-auto mb-3" />
           <h2 className="text-lg font-bold text-slate-900">All Set</h2>
           <p className="text-sm text-slate-600 mt-2">
-            Your quotation{quoteTotal ? ` of ${fmt(quoteTotal)} (grand total)` : ""} and the contract terms are approved.
+            Your quotation{quoteTotalInr ? ` of ${quoteTotalLabel} (grand total)` : ""} and the contract terms are approved.
             Awaiting Amber to request your Proforma Invoice.
           </p>
         </div>
@@ -1983,14 +2053,21 @@ export default function SupplierPortalPage() {
   // returns, so a hook here would change the hook order between the loading render and this one.
   const auctionBestPrice = computeAuctionBestPrice(siblingInvites, lineItems, request?.auctionConfig)
 
+  // The bid form is entered in the vendor's OWN currency; the best price and the threshold are INR.
+  // Everything compared against them must be converted first, or a foreign bid reads as ~85× cheaper
+  // than it is (a $1,00,000 bid was shown as "₹1,00,000" and beat a genuinely cheaper ₹80,00,000 one).
   const itemSubtotal = hasLineItems
     ? computeItemSubtotal(lineItems, itemPrices)
     : Number(price || 0)
   const extrasTotal = computeExtras(freight, packing, service)
   const grandTotal = itemSubtotal + extrasTotal
-  const aboveThreshold = threshold != null && itemSubtotal > threshold
+  const itemSubtotalInr = toInr(itemSubtotal, currency)
+  const grandTotalInr = toInr(grandTotal, currency)
+  // NOTE: the threshold is deliberately still compared against the SUBTOTAL, not the whole quote —
+  // that basis question is a separate finding; only the currency normalisation changed here.
+  const aboveThreshold = threshold != null && itemSubtotalInr > threshold
   const gapToBest =
-    auctionBestPrice != null && grandTotal > auctionBestPrice ? grandTotal - auctionBestPrice : 0
+    auctionBestPrice != null && grandTotalInr > auctionBestPrice ? grandTotalInr - auctionBestPrice : 0
 
   const shellProps = {
     requestNo: request?.requestNo,
@@ -2331,7 +2408,9 @@ export default function SupplierPortalPage() {
     }
     submitQuote(invite.id, quote)
 
-    const priceDisplay = hasLineItems ? fmt(totalPrice) + " total" : fmt(totalPrice)
+    // The bid subtotal is in the vendor's own currency — label it as such in the thread message.
+    const priceText = fmtCurrency(Math.round(totalPrice), currency || "INR")
+    const priceDisplay = hasLineItems ? priceText + " total" : priceText
     const msg: NegotiationMessage = {
       id: `nm-${Date.now()}`,
       by: "supplier",
@@ -2444,7 +2523,9 @@ export default function SupplierPortalPage() {
       <RankSummaryCard
         rank={myRanking?.rank}
         bestPrice={auctionBestPrice}
-        grandTotal={grandTotal}
+        grandTotal={grandTotalInr}
+        nativeGrandTotal={grandTotal}
+        currency={currency}
         aboveThreshold={aboveThreshold}
         threshold={threshold}
         hasExistingQuote={invite.quotes.length > 0}
@@ -2563,7 +2644,8 @@ export default function SupplierPortalPage() {
               {invite.quotes.map((q, idx) => (
                 <div key={q.id} className="px-5 py-3">
                   <div className="flex items-center justify-between mb-1">
-                    <span className="text-sm font-bold text-slate-800">Bid {idx + 1} · {fmt(q.price)}</span>
+                    {/* The vendor's own past bid, in the currency they submitted it in. */}
+                    <span className="text-sm font-bold text-slate-800">Bid {idx + 1} · {fmtCurrency(q.price, q.currency)}</span>
                     <span className="text-xs text-slate-400">{formatTs(q.submittedAt)}</span>
                   </div>
                   <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
@@ -2605,6 +2687,7 @@ export default function SupplierPortalPage() {
                     lineItems={lineItems}
                     linePrices={itemPrices}
                     onLinePrice={(id, v) => setItemPrices(prev => ({ ...prev, [id]: v }))}
+                    currency={currency}
                     showFooter={false}
                   />
                 </div>
@@ -2614,13 +2697,15 @@ export default function SupplierPortalPage() {
                     lineItems={lineItems}
                     linePrices={itemPrices}
                     onLinePrice={(id, v) => setItemPrices(prev => ({ ...prev, [id]: v }))}
+                    currency={currency}
                     showFooter={false}
                   />
                 </div>
               </div>
             ) : (
               <div className="px-5 py-5">
-                <label className={LABEL_REQ}>Item Price (₹)</label>
+                {/* The bid is entered in the vendor's own currency — label it as such, never ₹. */}
+                <label className={LABEL_REQ}>Item Price ({currencySymbol(currency)})</label>
                 <input
                   type="number"
                   value={price}
@@ -2630,10 +2715,12 @@ export default function SupplierPortalPage() {
                   className={[
                     INPUT,
                     "min-h-[44px]",
-                    threshold != null && Number(price) > threshold ? "border-red-400 focus:ring-red-400/40" : "",
+                    aboveThreshold ? "border-red-400 focus:ring-red-400/40" : "",
                   ].join(" ")}
                 />
-                {threshold != null && Number(price) > threshold && (
+                {/* `aboveThreshold` converts the entered price to INR before comparing — the
+                    threshold is an INR ceiling and this input is in the vendor's own currency. */}
+                {aboveThreshold && threshold != null && (
                   <p className="text-xs text-red-600 mt-1 font-medium">Above threshold of {fmt(threshold)}</p>
                 )}
               </div>
@@ -2651,7 +2738,7 @@ export default function SupplierPortalPage() {
                   { label: "Service / Installation", value: service, setter: setService },
                 ].map(({ label, value, setter }) => (
                   <div key={label}>
-                    <label className={LABEL}>{label} <span className="font-normal text-slate-400">(₹)</span></label>
+                    <label className={LABEL}>{label} <span className="font-normal text-slate-400">({currencySymbol(currency)})</span></label>
                     <input type="number" value={value} onChange={e => setter(e.target.value)} placeholder="0" className={`${INPUT} min-h-[44px]`} />
                   </div>
                 ))}
@@ -2761,7 +2848,7 @@ export default function SupplierPortalPage() {
                     Rank: {rankLabel(myRanking.rank)}
                   </span>
                 )}
-                {gapToBest > 0 && grandTotal > 0 && (
+                {gapToBest > 0 && grandTotalInr > 0 && (
                   <span className="text-xs text-slate-500 truncate min-w-0">
                     <span className="sm:hidden">{fmt(gapToBest)} above best</span>
                     <span className="hidden sm:inline">{fmt(gapToBest)} above best price — lower your bid to improve rank</span>

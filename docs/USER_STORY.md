@@ -1,6 +1,6 @@
 # Capex Amber — User Stories
 
-**Last updated:** 2026-07-29
+**Last updated:** 2026-08-15
 
 Living backlog for product requirements. The AI agent maintains this file across chats whenever you describe or change a user story.
 
@@ -586,6 +586,7 @@ Full Brown-Field fulfillment lifecycle. **All scoped to `fieldType === 'brown_fi
 | US-105 | As a **plant head or super admin** approving a budget, I want to **edit the lines and send it FORWARD** to the next stage — not back to the author. "Edit &amp; Send Back" is replaced by **Edit &amp; Send Forward** on both the public plant-head link and the internal admin approvals page; my edits travel with the approval and the next approver can see exactly what I changed. (Budget approvals only — the technical-spec and RFQ send-backs are unaffected.) | done |
 | US-106 | As the **approver of an item request**, I want to see the **whole quotation** — what each line was allocated, what it is expected to cost, and every vendor's offer with its charges and per-line prices — because I could see neither the budget nor the quotations and was being asked to approve a number I couldn't see. | done |
 | US-107 | As the business, when a machine specification goes to the **Technical team**, the **vendor's name must not appear on their link** — it's confidential, and the spec should be judged on technical merit alone. They see an anonymous supplier reference instead; sourcing can still tie it back to the real vendor internally. | done |
+| US-108 | As **sourcing awarding a request**, I need every money figure on the comparison grids to agree about its basis — a foreign vendor's column showed `₹42,75,000` per line and `₹1,00,000` as its total, and the legacy matrix put a vendor at `₹1,00,000` while the shortlist directly beneath said `₹85,50,000` for the same quote. Show the INR value under `₹` with the vendor's own quoted amount alongside, everywhere, and never a native number under a rupee sign. | done |
 | US-092 | As a budget author, I want a new next-FY proposal to open **blank** — the previous year's budget must never be pre-filled — so every line is deliberately re-justified. | done |
 | US-093 | As a budget author/approver, I don't want a **Rate** column in the budget — I enter the Total (Cr) per line directly. | done |
 
@@ -696,4 +697,127 @@ When a story needs acceptance criteria, the agent expands it below using this sh
   - [x] Sourcing sees the reference beside the real vendor name in `TechSpecPanel`, plus a notice to keep the vendor's name out of the notes (the one free-text field that reaches the Technical team)
 - **Verified in the running app:** the page rendered `SPEC-7NEYM5`; a document seeded as `Bosch_Packaging_datasheet_rev2.pdf` displayed as "Specification Document 1 · PDF" with download name `specification-document-1.pdf`; a DOM-wide scan for the vendor name, the original filename and the vendor id found **no** occurrence; Approve still recorded the decision and burned the token.
 
-- **Notes / related files:** `src/lib/types.ts` (`BudgetProposalEdit`), `src/lib/budgetProposalUtils.ts` (`applyApproverEdit`), `src/lib/capexContext.tsx`, `src/lib/paymentUtils.ts`, `src/lib/techSpecUtils.ts`, `src/components/BudgetEditForwardPanel.tsx` (new), `src/components/BudgetProposalBreakdown.tsx`, `src/components/RequestQuotationView.tsx` (new), `src/components/TechSpecPanel.tsx`, `src/app/(public)/approve/[token]/page.tsx`, `src/app/(public)/tech-spec/[token]/page.tsx`, `src/app/(internal)/capex/budget-approvals/page.tsx`, `src/app/(internal)/capex/[id]/page.tsx`. `BudgetCorrectionPanel.tsx` deleted. Verified via `npx tsc --noEmit`, `npm run build`, and the runtime passes above (test records seeded into localStorage and removed afterwards — existing data restored byte-for-byte).
+**US-108 — the award grids agree about currency basis**
+
+- **Acceptance criteria**
+  - [x] `VendorGrid` + `RfqPanel` **swept exhaustively** — every `₹` literal and every `fmtCurrency(` call classified as a comparison figure (INR) or the vendor's own quoted figure (own symbol). No site left on a "we'll do the rest later" list
+  - [x] **That criterion was insufficient and has been corrected.** Grepping `₹` / `fmtCurrency(` cannot find money rendered as a **bare number with no symbol at all** — a value with no symbol is still a money value, and an unlabelled input is still a money input. Sweep by enumerating the money *fields* on `Quote`/`RfqQuote`/`SourcingDecision`/`PurchaseOrder`/`ProformaInvoice` and checking each renders **and** prompts in a stated currency
+  - [x] One shared, tested helper: **`inrWithNative` / `inrWithNativeLabel`** in `currencyUtils.ts`, whose doc comment names the double-conversion trap (`toInr(x,'INR')` is the identity, so feeding it an already-INR figure fails silently)
+  - [x] **D1** — the items grid's `Total Amount` row converts, so each vendor column adds up: line totals + freight + packing + service = total, on one basis. Freight/packing/service attribute rows and the manual **offer columns** (own currency, threaded as `OfferColView.currency`) convert too
+  - [x] **D2** — the legacy `AttributeRowGrid` matrix (`Item Price / Freight / Packing / Service / Total Amount`) converts, so it agrees with the INR-decided `Best` chip and with the Vendor Shortlist directly below it
+  - [x] `RfqPanel` desktop per-line cells, mobile per-line rows, `ATTR_ROWS` charges (both surfaces), vendor `<option>` labels, and quote-carrying history lines converted; `lowestUnit` → **`lowestUnitInr`** so the "↓ Lowest" chip no longer lights up every vendor who quoted the same *number* in a different currency
+  - [x] **Inputs stay native** and carry the right symbol (`$ price`, `unit $`, `$ Freight`) — they hold what is typed and sent to the vendor. Final-Decision price inputs stay `Price (₹)`: `awardUnitPriceInr` stamps them INR by contract
+  - [x] `RequestQuotationView` captions **`incl. GST` / `excl. GST`** from the actual GST (0 whenever no line has an HSN — the common buyer-seeded case), instead of claiming "incl. GST" unconditionally
+  - [x] **The Final-Decision charges are labelled `₹`.** Freight / packing / service in that column rendered as bare numbers with an unlabelled `Enter freight` box, while `computeFinalTotal` (requests list) and `SourcingDecisionBanner` (request detail) add them to INR award prices and print the sum under `₹`. They are **INR by contract** (sourcing types them — there is no source currency to convert from), so they are labelled, never converted: new tested helper **`formatTypedInr`**, prompt `₹ freight` (symbol first so a narrow column can't clip it) + `aria-label`
+  - [x] `VendorGrid`'s **Total Amount** row resolves each line through `quoteLineUnitPrice` — the same fallback the cell above uses — so a quote whose `itemPrices` is missing a key no longer shows `q.price` in the row and counts `0` in the total (the legacy no-`itemPrices` lump-sum branch is kept, or the total would multiply by the line count)
+  - [x] Desktop/mobile parity in `RfqPanel`: the desktop counter unit input and both surfaces' charge inputs carry `currencySymbol(form.currency)`; the mobile per-line row shows the unit's own-currency figure as desktop does; `lowestUnitInr` reads the **live counter form's** currency (new `currencyOf`) instead of pairing a live unit with the stored currency
+- **Verified in the running app** (foreign-vendor fixture seeded, then removed — store restored byte-for-byte at 5,553 chars, 0 requests, 0 invites): the auction items grid showed the USD column as `₹42,75,000 ($50,000 USD)` / `₹8,55,000 ($10,000 USD)` per line, freight `₹17,10,000 ($20,000 USD)`, and **Total Amount `₹85,50,000 ($100,000 USD)`** — previously `₹1,00,000`; the legacy matrix read `₹42,75,000 / ₹25,65,000 / ₹8,55,000 / ₹8,55,000 / ₹85,50,000` against a Vendor Shortlist showing **identical** figures, with `Best`/`Cheapest` both on the ₹80,00,000 INR vendor; the RFQ grid and its 390px card stack both summed to `₹96,27,300 ($112,600 USD)`; the public approval card read `excl. GST` with no HSN and `incl. GST` once HSN was added.
+- **Left deliberately:** `NegotiationMessage.counterPrice`/`counterFreight` have no currency field (schema change); `RfqPanel`'s desktop grand-total cell keys off the stored quote currency mid-counter-edit (display-only); the Final-Decision **currency select** still writes `sourcingDecision.currency` although that column is INR (nothing reads it for money — product call on whether the control goes or starts converting); and the **auction threshold basis** (pre-filled whole-quote, enforced against the subtotal) is an open **product** decision — both figures are INR, so it is not a currency defect.
+- **Known defect, awaiting a product decision:** on `/capex/[id]` the **Vendor Ranking** table (`Bid Subtotal (₹)` — `computeVendorRankings`, the bid's base subtotal) and `VendorGrid`'s **`Best`** chip (`lowestTotalQuoteId` — `inrQuoteGrandTotal`, the whole quote incl. freight/packing/service) sit on the same scroll and **can name two different vendors as cheapest**. Both are INR; the disagreement is one of **basis**, and naming the two bases did not stop both from reading as superlatives to whoever is awarding. Behaviour deliberately unchanged — picking one basis is the same product call as the auction threshold above.
+
+- **Notes / related files:** `src/lib/types.ts` (`BudgetProposalEdit`), `src/lib/budgetProposalUtils.ts` (`applyApproverEdit`), `src/lib/capexContext.tsx`, `src/lib/currencyUtils.ts` (+ `currencyUtils.test.ts`, new), `src/lib/paymentUtils.ts`, `src/lib/techSpecUtils.ts`, `src/components/BudgetEditForwardPanel.tsx` (new), `src/components/BudgetProposalBreakdown.tsx`, `src/components/RequestQuotationView.tsx` (new), `src/components/TechSpecPanel.tsx`, `src/components/{VendorGrid,RfqPanel}.tsx`, `src/app/(public)/approve/[token]/page.tsx`, `src/app/(public)/tech-spec/[token]/page.tsx`, `src/app/(internal)/capex/budget-approvals/page.tsx`, `src/app/(internal)/capex/[id]/page.tsx`. `BudgetCorrectionPanel.tsx` deleted. Verified via `npx tsc --noEmit`, `npm run build`, `npm test`, and the runtime passes above (test records seeded into localStorage and removed afterwards — existing data restored byte-for-byte).
+
+
+### Epic: Role dashboards (US-108 – US-115, 2026-08-15)
+
+The single shared `/capex/dashboard` (total requests / total budget / active sourcing count + a status donut and a recent-requests table) is replaced by four role-resolved dashboards, backed by a pure, unit-tested KPI layer (`src/lib/kpi{Utils,Portfolio,Risk,Queues,Plants,Sourcing,Trends,Snapshots,Routes}.ts`). Every dashboard renders the same three-band anatomy — **① my turn** (an action queue with SLA-breach flags), **② waiting on** (who else is holding the ball, and for how long), **③ outcomes** (KPI tiles + charts) — scoped differently per role. See **Role dashboards (2026-08)** in `CLAUDE.md` for the invariants (canonical `requestValue`/`ValueBasis`, the two `createdBy` conventions, FY attribution, and the measured-forward rule for stock metrics).
+
+### US-108 — Buyer dashboard
+- **As a** buyer (any plant-scoped variant), **I want** a dashboard scoped to only my own requests **so that** I see what needs me and where the rest of my requests are stuck, not the whole portal's traffic.
+- **Priority:** should · **Status:** done
+- **Acceptance criteria**
+  - [x] ① **My turn:** drafts to submit, requests awaiting the plant head (send/chase the link), rejected requests needing rework
+  - [x] ② **Waiting on:** every in-flight request grouped by who currently holds the ball (plant head, sourcing, vendor, Technical team, Plant Accounts, Global Accounts)
+  - [x] ③ **Outcomes:** request counts (total / in flight / completed / rejected), value in flight (with its `ValueBasis` caption) against the linked budget allocation, plant-head and end-to-end turnaround medians, a status donut, and a per-request "who holds the ball" table
+  - [x] Plant-scoped roles (`buyer_jhajjar_p1`, etc.) see only their own plant's requests; the header names the plant ("Jhajjar Plant 1", not the raw role value)
+  - [x] Scoped by `r.createdBy === ROLE_NAMES[role]` — the **display-name** convention (see CLAUDE.md invariant)
+- **Files:** `src/components/dashboards/BuyerDashboard.tsx`, `src/app/(internal)/capex/dashboard/page.tsx`
+
+### US-109 — Sourcing dashboard
+- **As a** sourcing member, **I want** a tabbed cockpit — a desk of everything blocked on me, and a performance tab of what my negotiations delivered **so that** I can work the queue and prove the numbers without digging through the request list.
+- **Priority:** should · **Status:** done
+- **Acceptance criteria**
+  - [x] Tabbed **Desk | Performance**, active tab in `?view=` (`router.replace` — no history entries on tab switch), arrow-key navigable, **Desk is the default tab**
+  - [x] Desk ① **my turn:** new requests to pick up, quotations to review, INCO terms to settle, tech spec to send/revise, ready-to-award, auctions ended but not awarded, trials to review
+  - [x] Desk ② **waiting on:** grouped by vendor / Technical team / plant head / Plant Accounts / Global Accounts
+  - [x] Performance ③ **outcomes:** negotiation + budget savings, auction effectiveness, delay-liability exposure, cycle time (overall + leg-by-leg: invite→first quote, first quote→agreed, tech-spec gate), vendor participation, single-quote-award count, outstanding commitments, spend concentration (top vendor / top-3 share), and a full vendor scorecard — all computed by `sourcingPerformance` in `src/lib/kpiRisk.ts` (via its internal, unexported `spendConcentration` helper — not inline in the component)
+  - [x] A split-award request contributes **one row per award** wherever awards are counted (waiting bands, governance flags, scorecard)
+- **Files:** `src/components/dashboards/SourcingDashboard.tsx`, `src/lib/kpiRisk.ts`, `src/lib/kpiQueues.ts`
+
+### US-110 — Administration dashboard
+- **As a** super admin, **I want** a tabbed view — my approval desk, and a full portfolio of the CAPEX pipeline **so that** I can clear approvals and see budget health across every field type in one place.
+- **Priority:** should · **Status:** done
+- **Acceptance criteria**
+  - [x] Tabbed **My Desk | Portfolio**, active tab in `?view=` (toggles between `?view=desk` and `?view=portfolio`, no history entries, arrow-key navigable)
+  - [x] Desk ① **my turn:** budget proposals to decide, adhoc transfers to decide, proposals awaiting the Global Accounts sign-off link, requests stuck at the plant head past SLA
+  - [x] Desk ② **waiting on:** proposals with the plant head, plus the shared waiting bands (sourcing / vendor / Technical team / Plant Accounts / Global Accounts)
+  - [x] Portfolio ③ **outcomes:** one **FY budget position row per field type** (each with its own FY — `fyBudgetPosition`, one global latest FY per field type, see the CLAUDE.md limitation), over-allocation exposure (scoped **per plant**, unlike the FY table — see CLAUDE.md), approver edit impact, delay liability, rejection rate, a value funnel (requested → approved → awarded → PO issued → paid), live requests by plant, governance flags (single-quote awards, INCO/tech-spec gates left open, final payment released with a trial open), and the longest-waiting live requests
+- **Files:** `src/components/dashboards/AdminDashboard.tsx`, `src/lib/kpiPortfolio.ts`, `src/lib/kpiRisk.ts`
+
+### US-111 — Maintenance (Budget Planning) dashboard
+- **As the** maintenance (budget-author) user, **I want** a dashboard of only the next-FY budget proposals I authored **so that** I know what needs rework and what approvers changed, without seeing anyone else's proposals or the item-request pipeline.
+- **Priority:** should · **Status:** done
+- **Acceptance criteria**
+  - [x] ① **My turn:** drafts to submit, proposals sent back for correction, rejected proposals
+  - [x] ② **Waiting on:** proposals with the plant head / with the admin / with Global Accounts
+  - [x] ③ **Outcomes:** proposed vs. published-live totals (₹ Cr), approver edit trim/increase (labelled and toned correctly in both directions), approval turnaround median, resubmission count, a per-head composition chart for the latest proposal, and a proposal table with stage + age
+  - [x] Scoped by `p.createdBy === 'maintenance'` — the **raw-role-key** convention, deliberately *not* run through `ROLE_NAMES` (see CLAUDE.md invariant; the two `createdBy` conventions differ between `CapexRequest` and `BudgetProposal`)
+- **Files:** `src/components/dashboards/MaintenanceDashboard.tsx`, `src/lib/kpiQueues.ts`
+
+### US-112 — Honest KPI routes (a tile's number and its destination list agree)
+- **As any** dashboard user, **I want** a KPI card to take me to exactly the rows its number counts **so that** I can act on the number instead of hunting for it in an unfiltered list.
+- **Priority:** must · **Status:** done
+- **Acceptance criteria**
+  - [x] `/capex/requests` accepts `?metric=<key>`, `?plant=`, `?vendor=`, `?overdue=1` and still accepts the legacy `?filter=<status>` (the buyer queue buckets and existing bookmarks are unchanged)
+  - [x] **Predicate** cards route with their threshold intact — "Stuck at plant head" → `?metric=stuck_plant_head` (was `?filter=pending_head_approval`, which listed every pending request including the ones the tile excludes)
+  - [x] **Cohort median** cards (the five Sourcing duration tiles) route to **the sample the median was measured over**, and the page states the median, the sample size and the **still-open count it excludes** in words
+  - [x] **Ratio** cards ("Vendor participation", "Rejection rate") route to the **denominator** with the numerator marked per row
+  - [x] Each metric renders its own **evidencing column(s)** — waiting age with the breach named in words, measured duration, `quoted of invited`, or the numerator marker
+  - [x] Params compose (metric AND plant AND vendor AND overdue AND status) with **documented precedence**; a **dismissible chip** names each active filter in words and a **clear-all** returns to the plain list
+  - [x] An unknown/stale `metric`, a non-status `filter` or a malformed `overdue` renders the **unfiltered list plus a visible banner** saying which param was ignored and why — never silently "everything, as though filtered"
+  - [x] Role and plant scoping still bound everything: a plant-scoped buyer cannot reach another plant's rows through any param combination (verified live: `?plant=pune` and every metric+plant+vendor+overdue combination return 0 rows for `buyer_jhajjar_p1`, and the other plant's request number never appears)
+  - [x] The filter predicates **import** the tiles' own derivations (`stuckAtPlantHead`, `stageDaySample`, `inviteLegSample`, `inviteHasQuote`, `ballHolders`, `PARTY_SLA`/`SLA_DAYS`) instead of re-implementing a threshold or a stage traversal; `kpiRoutes.test.ts` asserts each metric's count/median against the corresponding KPI derivation
+- **Files:** `src/lib/kpiRoutes.ts`, `src/lib/kpiRoutes.test.ts`, `src/app/(internal)/capex/requests/page.tsx`, `src/lib/kpiUtils.ts`, `src/lib/kpiQueues.ts`, `src/lib/kpiRisk.ts`, `src/components/dashboards/{Buyer,Sourcing,Admin}Dashboard.tsx`
+
+### US-113 — Dashboard consolidation: one route builder, one heading primitive, a 90-day snapshot horizon
+- **As** whoever maintains this feature, **I want** each cross-cutting rule to exist exactly once **so that** two copies written by concurrent work cannot drift and start contradicting each other on screen.
+- **Priority:** must · **Status:** done
+- **Acceptance criteria**
+  - [x] **One route builder.** `kpiRoutes.metricHref(key, plant?)` builds every dashboard→list href, plant lens included. `kpiSourcing.scopedMetricHref` and `AdminDashboard`'s hand-built `&plant=` are **deleted, with no re-export shim** — they were byte-identical when written and diverged (`%20` vs `+`) inside one review window. The encoding **and the round trip** are unit-tested, including a plant value that `+` and `%20` would spell differently
+  - [x] A tile's number still equals its destination list's count, and a plant-lensed tile lands on a plant-scoped list (verified live: Rejection rate "0 of 4 request(s)" → 4 rows; Vendor participation "6 quoted of 7 invited" → "6 of 7 invited vendors quoted (86%), across 4 requests", both with a `Plant: Jhajjar Plant 1` chip)
+  - [x] **One heading primitive.** `DashboardSection` (`Section.tsx`) serves both dashboards via a `variant` prop; the duplicate `BandHeading` is gone. Real `<h2>`/`<h3>` at an explicit level, `aria-labelledby` wired, **no level skipped** on any tab (verified live: `h1 → h2 → h3 → h4`, every `aria-labelledby` target resolves, no duplicate ids)
+  - [x] **Snapshot retention cut 180 → 90 days.** The 180-day seeded worst case was ~1.92 MiB (~38% of the ~5 MB `localStorage` quota); 90 days measures **1,006,921 chars ≈ 0.96 MiB (~19%)**. The size ceiling raised to accommodate 180 days is restored to its original 1,700,000, and a **per-record** ceiling keeps the "one added field" canary alive. Nothing real was discarded — the oldest stored snapshot was one day old
+  - [x] `/capex/adhoc-budget` accepts `?plant=`, so the plant-scoped "Over-allocation exposure" tile opens the transfers page on the plant it counted; an unusable value is disclosed, not dropped
+  - [x] `PlantComparison`'s charts name what their red means (`overLabel` "Over allocation" / "over allocation") in the legend, the badge and the spoken summary
+- **Files:** `src/lib/kpiRoutes.ts`, `src/lib/kpiRoutes.test.ts`, `src/lib/kpiSourcing.ts`, `src/lib/kpiSourcing.test.ts`, `src/lib/kpiSnapshots.ts`, `src/lib/kpiSnapshots.test.ts`, `src/components/dashboards/{Section,SourcingDashboard,AdminDashboard,PlantComparison}.tsx`, `src/app/(internal)/capex/adhoc-budget/page.tsx`
+
+### US-114 — Trends that are measured, never reconstructed
+- **As a** dashboard user, **I want** a trend line to show only what was actually measured **so that** I am never shown a movement the portal invented from data it does not have.
+- **Priority:** must · **Status:** done
+- **Acceptance criteria**
+  - [x] **Flow** metrics (requests raised / awarded / completed per month) are **derived** from `createdAt` + `statusHistory` — these are facts already on the record, so history is available immediately for any past month (`kpiTrends.ts`)
+  - [x] **Stock** metrics (allocation, commitment, utilisation, over-exposure, open sourcing load) are **measured forward**: `kpiSnapshots.ts` writes one record per (day, field type, plant) on load. What a plant's budget *was* last month is unknowable, so it is never reconstructed
+  - [x] The capture runs **once per calendar day** and is idempotent — `mergeSnapshots` keys on (date, field type, plant) so a same-day re-run **replaces** rather than appends, and a re-render cannot append forever
+  - [x] `kpiSnapshots` is **read-only on the context**: the provider's capture effect is the only writer, because a caller able to write a snapshot could write a value for a day it never measured
+  - [x] **Gaps stay gaps.** `snapshotSeries` never interpolates, zero-fills or carries forward; a metric added later is **absent** from older records, never `0`; there is no backfill by design. `MeasuredSeriesChart` emits **one `<path>` per contiguous measured run**, so a gap is a break in the line *by construction* and cannot silently regress to a smoothed curve
+  - [x] Every chart states its own horizon via `measuredFrom()`, so a thin history reads as "we have only measured since X", not as a decline
+  - [x] A fresh install shows a **sparse** history that thickens with use — that is the correct output, and it is never seeded with demo data to look fuller
+  - [x] **Retention is 90 days** (`SNAPSHOT_RETENTION_DAYS`), because this derived series shares the ~5 MB `localStorage` budget with the **irreplaceable** `requests`/`invites` record; 90-day seeded worst case measures **1,006,921 chars ≈ 0.96 MiB (~19% of quota)** vs ~1.92 MiB at 180. The derived data yields to the primary record
+  - [x] The purge clears `kpiSnapshots` (history describing deleted requests would render the wipe as a cliff that never happened), and the **corrupt-payload salvage is purge-aware** — history is recovered from an unparseable payload only when `cleanSlatePurgeVersion === CLEAN_SLATE_PURGE_V1`. That gate lives inside `CapexProvider`'s load effect, so it has **no unit coverage** and is verified by a live corrupt-payload load
+- **Files:** `src/lib/kpiTrends.ts`, `src/lib/kpiSnapshots.ts`, `src/lib/{kpiTrends,kpiSnapshots}.test.ts`, `src/lib/capexContext.tsx`, `src/components/dashboards/charts.tsx`
+
+### US-115 — Plant lens and plant comparison (Administration)
+- **As a** super admin, **I want** to scope the whole portfolio view to one plant, or compare every plant side by side **so that** I can find the plant that needs attention instead of reading a blended portfolio average.
+- **Priority:** should · **Status:** done
+- **Acceptance criteria**
+  - [x] A **plant lens** control scopes the entire Administration view; the selection lives in the URL (`?plant=`) so the scoped view is shareable and survives a refresh
+  - [x] The lens **survives a tab switch** — `DashboardTabs` rebuilds the query and only sets `view`, because dropping the plant would silently widen every figure back to portfolio-wide with nothing on screen saying so
+  - [x] The lens threads to destinations through the single builder `metricHref(key, plant?)`, including `/capex/requests` and `/capex/adhoc-budget?plant=`; a plant a destination cannot select is **disclosed**, and the tile does not offer a link that would silently widen
+  - [x] An all-plants **comparison** view: sortable per-plant table (every money column states its unit, every derived column its basis), a grouped bar chart and a head-level heatmap
+  - [x] Each plant is measured against **its own live FY** (`liveFyByPlant`) — a global latest FY would render a plant that is merely out of scope for that year as a plant that is under-spending
+  - [x] A plant with **no recorded allocation** renders as *unmeasurable* and is counted in a footnote — `0%` would say "spent nothing of its budget" when the truth is "has no budget recorded"
+  - [x] Chart primitives stay **domain-neutral**: the meaning of the red treatment arrives as a caller-supplied `overLabel`, because a hardcoded "over allocation" produced a wrong legend on an aging chart
+- **Files:** `src/components/dashboards/{PlantLens,PlantComparison,AdminDashboard,DashboardTabs,charts}.tsx`, `src/lib/kpiPlants.ts`, `src/lib/kpiPlants.test.ts`, `src/lib/kpiRoutes.ts`, `src/app/(internal)/capex/adhoc-budget/page.tsx`
+
+- **No dashboard for off-portal roles.** The plant head, Plant Accounts, Global Accounts ("Satish"), and the Technical team have **no dashboard** — none of them has a portal login; each acts entirely through tokenised, emailed public links (`/approve/[token]`, `/po/[token]`, `/po-issue/[token]`, `/tech-spec/[token]`), so there is no role-switcher entry that would ever resolve to one of these four dashboards for them.
+- **Notes / related files:** `src/lib/kpi{Utils,Portfolio,Risk,Queues,Plants,Sourcing,Trends,Snapshots,Routes}.ts`, `src/components/dashboards/useNow.ts`, `src/components/dashboards/format.ts`, `src/components/dashboards/{KpiTile,ActionQueue,DashboardTabs,Section,PlantLens,PlantComparison,charts}.tsx`, `src/app/(internal)/capex/dashboard/page.tsx`. **395 vitest tests across 17 files** (`npm test`). Verified via `npx tsc --noEmit` and `npm run build`; see CLAUDE.md's **Role dashboards (2026-08)** section for the full invariant list.

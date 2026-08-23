@@ -4,8 +4,8 @@ import { useMemo } from 'react'
 import { Paperclip, Wallet } from 'lucide-react'
 import { useCapex } from '@/lib/capexContext'
 import { formatCurrency, isForeignCurrency } from '@/lib/currencyUtils'
-import { inrQuoteGrandTotal, latestQuote, quoteGrandTotal } from '@/lib/paymentUtils'
-import { inrRfqTotal, rfqLineUnitPrice, rfqTotal } from '@/lib/rfqUtils'
+import { inrQuoteGrandTotalInclGst, latestQuote, quoteGrandTotalInclGst, quoteGstAmount } from '@/lib/paymentUtils'
+import { inrRfqTotal, rfqGstAmount, rfqLineUnitPrice, rfqTotal } from '@/lib/rfqUtils'
 import type { CapexLineItem, CapexMasterItem, CapexRequest, VendorInvite } from '@/lib/types'
 
 const CR_TO_INR = 10_000_000
@@ -35,10 +35,18 @@ interface QuotationEntry {
   /** Where the price came from — buyers capture quotes at request creation, sourcing runs RFQ/auction. */
   source: 'Added at request' | 'RFQ quotation' | 'Auction bid'
   currency: string
-  /** Grand total in the quote's own currency. */
+  /** GST-INCLUSIVE grand total in the quote's own currency. */
   total: number
-  /** Grand total on an INR basis, so vendors in different currencies compare honestly. */
+  /** The same GST-inclusive total on an INR basis, so vendors compare honestly across currencies. */
   inrTotal: number
+  /**
+   * GST folded into `total`, in the quote's own currency — ZERO whenever no line carries an HSN
+   * code. That is the common case on the public approval link: only a vendor's RFQ submit ever
+   * writes `hsnCode`, and `capex/new` never does, so a buyer-seeded Digitisation/IT quote reaches
+   * the plant head with no tax in it. The caption keys off this so a GST-exclusive figure is not
+   * captioned "incl. GST".
+   */
+  gst: number
   freight?: number
   packing?: number
   service?: number
@@ -49,6 +57,20 @@ interface QuotationEntry {
   submittedAt?: string
 }
 
+/**
+ * Normalise every invite's offer onto ONE comparison basis: the GST-INCLUSIVE grand total, in INR.
+ *
+ * Both halves matter. Currency, because a $95,000 offer is not cheaper than ₹80,00,000. And GST,
+ * because the two shapes of stored price used to be summed differently — an `rfqQuote` came through
+ * `inrRfqTotal` (GST-inclusive) while a buyer-seeded / auction `Quote` came through
+ * `inrQuoteGrandTotal` (GST-EXCLUSIVE). On a request carrying one of each, the seeded quote was
+ * flagged "Lowest" to the approver purely because its tax had been left off: ₹85,00,000 seeded
+ * (₹1,00,30,000 with 18% GST) beat an RFQ quotation whose ₹80,00,000 subtotal showed as ₹94,40,000.
+ *
+ * GST-inclusive is the right basis to settle on: it is what the RFQ side already showed as each
+ * quote's headline figure, what this card prints, what the company actually pays, and what
+ * `resolveOrderValue` raises the PO for.
+ */
 function buildEntries(
   invites: VendorInvite[],
   lineItems: CapexLineItem[],
@@ -66,6 +88,7 @@ function buildEntries(
         currency: q.currency ?? 'INR',
         total: rfqTotal(q, lineItems),
         inrTotal: inrRfqTotal(q, lineItems),
+        gst: rfqGstAmount(q, lineItems),
         freight: q.freight,
         packing: q.packing,
         service: q.service,
@@ -86,8 +109,9 @@ function buildEntries(
       vendorName: vendorName(inv.vendorId),
       source: q.seededByBuyer ? 'Added at request' : 'Auction bid',
       currency: q.currency ?? 'INR',
-      total: quoteGrandTotal(q),
-      inrTotal: inrQuoteGrandTotal(q),
+      total: quoteGrandTotalInclGst(q, lineItems),
+      inrTotal: inrQuoteGrandTotalInclGst(q, lineItems),
+      gst: quoteGstAmount(q, lineItems),
       freight: q.freight,
       packing: q.packing,
       service: q.service,
@@ -155,6 +179,8 @@ export function RequestQuotationView({
   }, [invites, request.id, vendors, lineItems])
 
   const lowestInr = entries.length ? entries[0].inrTotal : null
+  // Only claim the comparison is GST-inclusive when some quote actually carries GST (see `gst`).
+  const anyGst = entries.some(e => e.gst > 0)
 
   return (
     <div className={`bg-card border border-border rounded-xl p-4 ${className}`}>
@@ -230,6 +256,11 @@ export function RequestQuotationView({
       <div className={showLineBudget ? 'mt-4' : ''}>
         <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-2">
           Vendor Quotations ({entries.length})
+          {entries.length > 1 && (
+            <span className="ml-1.5 font-semibold normal-case tracking-normal">
+              · compared {anyGst ? 'GST-inclusive, ' : ''}on an INR basis
+            </span>
+          )}
         </p>
         {entries.length === 0 ? (
           <p className="text-xs text-muted-foreground border border-dashed border-border rounded-lg px-3 py-3">
@@ -269,6 +300,7 @@ export function RequestQuotationView({
                     </div>
                     <div className="text-right shrink-0">
                       <p className="text-sm font-bold tabular-nums text-foreground">{inr(e.inrTotal)}</p>
+                      <p className="text-[10px] text-muted-foreground">{e.gst > 0 ? 'incl. GST' : 'excl. GST'}</p>
                       {foreign && (
                         <p className="text-[11px] text-muted-foreground tabular-nums">
                           {formatCurrency(e.total, e.currency)}

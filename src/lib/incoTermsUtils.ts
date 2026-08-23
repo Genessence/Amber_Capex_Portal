@@ -119,3 +119,24 @@ export function incoTermsBlocksAward(invite: VendorInvite): boolean {
   if (!status || status === 'not_sent') return false; // never applied to this vendor
   return status !== 'approved';
 }
+
+/**
+ * The ENFORCEABLE subset of `incoTermsBlocksAward`: the questionnaire has actually been answered
+ * and the agreement is still open (either side's turn), or it was rejected outright. This — not
+ * `incoTermsBlocksAward` — is what the award mutations hard-block on.
+ *
+ * `awaiting_vendor` is deliberately excluded. `inviteVendors` seeds it for EVERY foreign vendor,
+ * including one invited straight into a reverse auction, whose bid form never collects Incoterms —
+ * blocking there would make that vendor permanently unawardable with no UI anywhere to settle it,
+ * turning a missing gate into a dead-end. On the RFQ path the questionnaire is submitted atomically
+ * with the quotation (`proposeRfqQuote` refuses one without the other), so a foreign vendor who has
+ * quoted is never left at `awaiting_vendor` — nothing awardable slips through.
+ *
+ * Every state this DOES block has a reachable actor on the RFQ path: `pending_sourcing` → sourcing
+ * in the INCO tracker, `pending_vendor` → the vendor's negotiation card on the supplier portal,
+ * `rejected` → sourcing re-opens it from the tracker.
+ */
+export function incoTermsNegotiationOpen(invite: VendorInvite): boolean {
+  const status = invite.incoTermsStatus;
+  return status === 'pending_sourcing' || status === 'pending_vendor' || status === 'rejected';
+}

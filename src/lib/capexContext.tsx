@@ -37,6 +37,7 @@ import {
   VendorInvite,
 } from './types';
 import { applyApproverEdit, buildMasterItemsFromProposal } from './budgetProposalUtils';
+import { ALLOWED_TRANSITIONS, PRE_PI_REQUEST_STATUSES } from './statusFlow';
 import { generateApprovalToken, generatePoToken, generatePoIssueToken, generateTechSpecToken } from './tokenUtils';
 import { buildDocApprovalPackage, effectiveDocApprovalStatus } from './docPackageUtils';
 import { buildAwardGroups, deriveRequestStatus, isAwardBased, awardedInvites, finalPaymentBlockedByTrial } from './paymentUtils';
@@ -45,6 +46,7 @@ import { toInr } from './currencyUtils';
 import {
   buildBlankIncoTermsDoc,
   effectiveIncoTermsStatus,
+  incoTermsNegotiationOpen,
   incoTermsRequired,
   isIncoDocComplete,
   needsIncoTermsWithQuote,
@@ -59,6 +61,12 @@ import {
   techSpecBlocksAward,
 } from './techSpecUtils';
 import { getAllFiles, putAllFiles, type FileMap } from './fileStore';
+import {
+  buildSnapshots,
+  mergeSnapshots,
+  snapshotDateKey,
+  type KpiSnapshot,
+} from './kpiSnapshots';
 import { effectiveHeadAllocationCr } from './adhocBudgetUtils';
 import { FLAT_MASTER_DIVISION } from './greenFieldConstants';
 import {
@@ -90,42 +98,8 @@ const STORAGE_KEY = 'capex_data_v2';
 const DEFAULT_PLANTS = PLANTS.map((p) => p.value);
 const DEFAULT_CATEGORIES = ['Machinery', 'Infrastructure', 'IT', 'Tooling'];
 
-const ALLOWED_TRANSITIONS: Record<CapexStatus, CapexStatus[]> = {
-  draft:                  ['submitted'],
-  submitted:              ['pending_head_approval', 'sourcing'],
-  pending_head_approval:  ['sourcing', 'rejected'],
-  // RFQ + auction converge into the fulfillment chain directly from sourcing
-  // (auction now mirrors RFQ: finalize winner → request PI, no buyer-approval detour)
-  sourcing:               ['negotiation', 'sourcing_approved', 'pi_requested'],
-  // pi_requested targets below cover legacy/in-flight auction requests parked at
-  // negotiation / sourcing_approved / buyer_approved before the buyer step was dropped
-  negotiation:            ['sourcing_approved', 'pi_requested', 'rejected'],
-  sourcing_approved:      ['buyer_approved', 'pi_requested', 'rejected'],
-  buyer_approved:         ['pi_requested'],
-  // Shared Brown Field fulfillment chain: PI → accounts/PO → payments → completed.
-  // `pi_requested → completed` covers award-based (split-auction) requests, whose granular
-  // fulfillment is tracked per-award on the invites while the request status stays coarse
-  // (pi_requested) until every award completes.
-  pi_requested:           ['pi_submitted', 'completed', 'rejected'],
-  pi_submitted:           ['accounts_processing', 'rejected'],
-  accounts_processing:    ['payment_in_progress', 'rejected'],
-  payment_in_progress:    ['completed'],
-  completed:              [],
-  rejected:               [],
-};
-
-/**
- * Pre-PI states a request can sit in when its award is finalized. `sourcing` is the normal one;
- * the rest are legacy/in-flight states an escalated RFQ can be parked at (the old buyer-approval
- * detour). Awarding from any of them must carry the request into `pi_requested` — every entry has
- * that target in `ALLOWED_TRANSITIONS`.
- */
-const PRE_PI_REQUEST_STATUSES: CapexStatus[] = [
-  'sourcing',
-  'negotiation',
-  'sourcing_approved',
-  'buyer_approved',
-];
+// The status flow (which transitions are legal) lives in `./statusFlow` so UI call sites can ask
+// `canTransitionStatus` BEFORE acting instead of toasting success on a transition this map refuses.
 
 interface CapexContextValue {
   loaded: boolean;
@@ -140,6 +114,12 @@ interface CapexContextValue {
   usedCrMap: Record<string, number>;
   getUsedCr: (plant: string) => number;
   usedAmountByMasterItemId: Record<string, number>;
+  /**
+   * MEASURED daily history of the stock budget metrics — see `kpiSnapshots.ts`. Read-only to
+   * consumers: there is deliberately no mutation, because the only legitimate writer is the
+   * automatic once-a-day capture below. A dashboard that could write here could fabricate history.
+   */
+  kpiSnapshots: KpiSnapshot[];
   setAuctionConfig: (requestId: string, config: AuctionConfig) => void;
   addRequest: (req: CapexRequest) => void;
   updateRequest: (id: string, updates: Partial<CapexRequest>, actor?: string) => void;
@@ -394,10 +374,22 @@ function normalizeInvite(inv: VendorInvite): VendorInvite {
 
 /**
  * One-time wipe of workflow + Brown Field planning data from a browser that already holds it.
- * Drops every request, invite, chat thread, adhoc budget request, budget proposal and Brown Field
- * head allocation override, and empties the IndexedDB blob store. Green Field master / envelopes,
- * vendors, plants and custom heads survive; Brown Field live FY rows are replaced by the (currently
- * empty) seed when `BROWNFIELD_SEED_VERSION` changes. Idempotent via `CLEAN_SLATE_PURGE_V1`.
+ * Drops every request, invite, chat thread, adhoc budget request, budget proposal, Brown Field
+ * head allocation override and measured KPI snapshot, and empties the IndexedDB blob store. Green
+ * Field master / envelopes, vendors, plants and custom heads survive; Brown Field live FY rows are
+ * replaced by the (currently empty) seed when `BROWNFIELD_SEED_VERSION` changes. Idempotent via
+ * `CLEAN_SLATE_PURGE_V1`.
+ *
+ * ── Why `kpiSnapshots` IS purged, even though it is a measurement and not workflow data ──
+ *
+ * Every figure in a snapshot is DERIVED from exactly the records this purge deletes: `committedInr`
+ * / `awardedInr` / `paidInr` come from requests + invites, and `allocatedInr` / `breachedHeads` /
+ * `overExposureCr` from Brown Field master rows that `BROWNFIELD_SEED_VERSION` clears in the same
+ * load pass. Keeping the history would leave a measured series whose earlier points describe a world
+ * that no longer exists, and the chart would draw a cliff from (say) ₹4 Cr committed straight to
+ * zero — a cliff caused by deleting the evidence, not by anything that happened to the business.
+ * That is precisely the confident-but-wrong figure `kpiSnapshots.ts` exists to refuse. Purging
+ * instead lets `measuredFrom` restart honestly at the purge date.
  */
 function applyCleanSlatePurge(): {
   requests: CapexRequest[];
@@ -406,6 +398,7 @@ function applyCleanSlatePurge(): {
   adhocBudgetRequests: AdhocBudgetRequest[];
   budgetProposals: BudgetProposal[];
   brownFieldHeadAllocations: BrownFieldHeadBudget[];
+  kpiSnapshots: KpiSnapshot[];
 } {
   // Blobs are keyed off requests/invites, so with those gone the whole map is orphaned.
   void putAllFiles({});
@@ -416,6 +409,7 @@ function applyCleanSlatePurge(): {
     adhocBudgetRequests: [],
     budgetProposals: [],
     brownFieldHeadAllocations: [],
+    kpiSnapshots: [],
   };
 }
 
@@ -750,6 +744,8 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
   const [budgetProposals, setBudgetProposals] = useState<BudgetProposal[]>([]);
   const [adhocBudgetRequests, setAdhocBudgetRequests] = useState<AdhocBudgetRequest[]>([]);
   const [brownFieldHeadAllocations, setBrownFieldHeadAllocations] = useState<BrownFieldHeadBudget[]>([]);
+  /** Measured daily stock-metric history — the only NEW persisted state in the dashboards work. */
+  const [kpiSnapshots, setKpiSnapshots] = useState<KpiSnapshot[]>([]);
   // Prevents the persist effect from writing back to localStorage when invites
   // were just read FROM localStorage (storage event path). Writing back would
   // trigger the other tab's storage listener, creating an infinite ping-pong.
@@ -762,6 +758,25 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
    * only the blob write waits for hydration.
    */
   const filesHydrated = useRef(false);
+  /**
+   * True when the initial restore threw part-way through. The restore assigns state array by array,
+   * and `setLoaded(true)` runs OUTSIDE the try/catch, so a throw mid-restore (say
+   * `normalizeBudgetProposal` on one malformed record) leaves the app loaded with the EARLIER arrays
+   * correctly restored and the later ones — `kpiSnapshots` and `brownFieldHeadAllocations` among
+   * them — still empty.
+   *
+   * For every other array that is a recoverable annoyance: the localStorage payload is untouched
+   * until something re-persists, and the data can be re-derived or re-entered. For `kpiSnapshots` it
+   * is PERMANENT loss, because a measured day cannot be recomputed after the fact — that is the
+   * whole premise of this file. It would also stamp `breachedHeads`/`overExposureCr` computed with
+   * NO adhoc head overrides as measured fact. So the daily capture refuses to run at all in this
+   * state: skipping a day leaves an honest gap, which is strictly better than writing a wrong point
+   * or truncating the history to it.
+   *
+   * The underlying fragility pre-dates this feature; this guard deliberately contains it rather than
+   * restructuring the load effect.
+   */
+  const restoreFailed = useRef(false);
 
   useEffect(() => {
     try {
@@ -823,6 +838,12 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
         if (!purged && Array.isArray(parsed.adhocBudgetRequests)) setAdhocBudgetRequests(parsed.adhocBudgetRequests);
         if (purged) setBrownFieldHeadAllocations(purged.brownFieldHeadAllocations);
         else if (Array.isArray(parsed.brownFieldHeadAllocations)) setBrownFieldHeadAllocations(parsed.brownFieldHeadAllocations);
+        // Measured snapshot history. Restored HERE, in the same pass that flips `loaded` — the daily
+        // capture effect gates on `loaded` precisely so it can never merge today's point into an
+        // empty store and wipe real history. Purged when the clean slate runs (see the reasoning on
+        // `applyCleanSlatePurge`).
+        if (purged) setKpiSnapshots(purged.kpiSnapshots);
+        else if (Array.isArray(parsed.kpiSnapshots)) setKpiSnapshots(parsed.kpiSnapshots as KpiSnapshot[]);
       } else {
         setRequests(mockRequests.map(normalizeRequest));
         setVendors(mockVendors);
@@ -830,6 +851,37 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
         setCapexMaster(applyMasterMigrations(mockCapexMaster.map(normalizeMasterItem), undefined, undefined, undefined, undefined));
       }
     } catch {
+      // A partial restore may already have applied some arrays and left others empty — suppress the
+      // daily KPI snapshot capture, which would otherwise stamp that half-restored state as a
+      // permanent, unrecomputable measurement. See `restoreFailed`.
+      restoreFailed.current = true;
+      // Suppressing the capture is NECESSARY BUT NOT SUFFICIENT, verified live: if the throw landed
+      // before `kpiSnapshots` was restored, the array is still empty, and the persist effect (which
+      // runs regardless, because `vendors` falls back to a non-empty mock list) writes that empty
+      // array straight over the stored history. Every other array here is recoverable — the measured
+      // history is not. So salvage it on its own, in its own try/catch, so one malformed record
+      // elsewhere in the payload cannot cost the measurements. Combined with the suppressed capture
+      // the outcome is: history intact, no new point, an honest gap for the day.
+      //
+      // The salvage MUST be purge-aware. `purged` is decided early in the try, but `kpiSnapshots` is
+      // not zeroed until near the end of it; a throw in that window (e.g. `dedupeById(parsed.vendors)`
+      // on a truthy non-array, or `applyMasterMigrations` on a malformed master row) lands here with
+      // the PRE-purge payload still in localStorage. Restoring its snapshots would resurrect the
+      // measured history the purge had just decided to delete — and permanently, because
+      // `cleanSlatePurgeVersion` state initialises to `CLEAN_SLATE_PURGE_V1` and the persist stamps
+      // the purge as done, so it never retries. The end state would be a measured series describing
+      // the world the purge deleted, sitting on wiped requests/invites/Brown Field master: exactly
+      // the fake cliff `applyCleanSlatePurge`'s rationale above says must be refused. So salvage only
+      // a payload the purge has already been applied to.
+      try {
+        const salvaged = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}');
+        if (
+          Array.isArray(salvaged.kpiSnapshots)
+          && salvaged.cleanSlatePurgeVersion === CLEAN_SLATE_PURGE_V1
+        ) {
+          setKpiSnapshots(salvaged.kpiSnapshots as KpiSnapshot[]);
+        }
+      } catch { /* nothing recoverable — the payload itself is unparseable */ }
       setRequests(mockRequests.map(normalizeRequest));
       setVendors(mockVendors);
       setInvites(mockInvites);
@@ -866,6 +918,7 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
           budgetProposals,
           adhocBudgetRequests,
           brownFieldHeadAllocations,
+          kpiSnapshots,
           brownfieldSeedVersion,
           cleanSlatePurgeVersion,
           digitisationMigrationVersion,
@@ -880,7 +933,7 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
     // File blobs go to IndexedDB (much larger quota); fire-and-forget. Skipped until hydration
     // has merged the stored blobs back into state — writing the lean map first would wipe them.
     if (filesHydrated.current) void putAllFiles(files);
-  }, [requests, vendors, invites, chatMessages, plants, categories, capexMaster, masterHeads, customPlants, greenFieldBudgetAllocations, budgetProposals, adhocBudgetRequests, brownFieldHeadAllocations, brownfieldSeedVersion, cleanSlatePurgeVersion, digitisationMigrationVersion, flatMasterMigrationVersion, greenFieldSectionMigrationVersion, brownFieldNestedMigrationVersion]);
+  }, [requests, vendors, invites, chatMessages, plants, categories, capexMaster, masterHeads, customPlants, greenFieldBudgetAllocations, budgetProposals, adhocBudgetRequests, brownFieldHeadAllocations, kpiSnapshots, brownfieldSeedVersion, cleanSlatePurgeVersion, digitisationMigrationVersion, flatMasterMigrationVersion, greenFieldSectionMigrationVersion, brownFieldNestedMigrationVersion]);
 
   // Hydrate file blobs from IndexedDB after the initial (lean) load — metadata renders
   // immediately; download links light up once base64 is merged back in.
@@ -1772,6 +1825,28 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
     });
   }
 
+  /**
+   * Incoterms award gate, enforced here (not only in the UI) exactly like the technical-spec gate
+   * above. Returns the vendor ids that CANNOT be awarded because their Incoterms agreement is still
+   * being negotiated (or was rejected).
+   *
+   * SCOPE — `sourcingMode === 'rfq'` ONLY, stated positively on purpose. That is exactly the set of
+   * requests where BOTH actors have an Incoterms surface: sourcing's tracker lives in `RfqPanel`
+   * (rendered only in RFQ mode) and the vendor's negotiation card lives in `RfqSupplierView` (the
+   * supplier portal routes there only for `sourcingMode === 'rfq'`). In auction mode neither surface
+   * exists, so blocking an award there would strand it with no actor able to unblock it — a worse
+   * failure than the missing gate. Surfacing the tracker in auction mode is the follow-up that would
+   * let this widen; see the wave-W report.
+   */
+  function incoTermsBlockedVendorIds(requestId: string, vendorIds: string[]): string[] {
+    const req = requests.find((r) => r.id === requestId);
+    if (req?.sourcingMode !== 'rfq') return [];
+    return vendorIds.filter((vid) => {
+      const inv = invites.find((i) => i.requestId === requestId && i.vendorId === vid);
+      return !!inv && incoTermsNegotiationOpen(inv);
+    });
+  }
+
   function finalizeSplitAward(requestId: string, decision?: SourcingDecision, onlyVendorId?: string) {
     const request = requests.find((r) => r.id === requestId);
     if (!request) {
@@ -1796,6 +1871,12 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
     const blocked = techSpecBlockedVendorIds(requestId, targetVendors);
     if (blocked.length) {
       console.error('[CapexContext] finalizeSplitAward: technical spec not approved for', blocked);
+      return;
+    }
+    // Incoterms agreement is the second hard pre-award gate (foreign vendors, RFQ path).
+    const incoBlocked = incoTermsBlockedVendorIds(requestId, targetVendors);
+    if (incoBlocked.length) {
+      console.error('[CapexContext] finalizeSplitAward: INCO Terms not agreed for', incoBlocked);
       return;
     }
     // When `onlyVendorId` is given, award just that vendor's group (additive — other vendors are
@@ -1829,6 +1910,10 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
   function requestProformaInvoice(requestId: string, vendorId: string, actor: string) {
     if (techSpecBlockedVendorIds(requestId, [vendorId]).length) {
       console.error('[CapexContext] requestProformaInvoice: technical spec not approved for', vendorId);
+      return;
+    }
+    if (incoTermsBlockedVendorIds(requestId, [vendorId]).length) {
+      console.error('[CapexContext] requestProformaInvoice: INCO Terms not agreed for', vendorId);
       return;
     }
     const reqInvites = invites.filter((i) => i.requestId === requestId);
@@ -1887,6 +1972,14 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
     const blocked = techSpecBlockedVendorIds(requestId, targetVendors);
     if (blocked.length) {
       console.error('[CapexContext] awardAndRequestPi: technical spec not approved for', blocked);
+      return;
+    }
+    // Incoterms agreement is the second hard pre-award gate (foreign vendors, RFQ path) — the
+    // documented "a foreign vendor cannot be taken to Proforma Invoice until the terms are
+    // approved" rule, which until now existed only as a hint string.
+    const incoBlocked = incoTermsBlockedVendorIds(requestId, targetVendors);
+    if (incoBlocked.length) {
+      console.error('[CapexContext] awardAndRequestPi: INCO Terms not agreed for', incoBlocked);
       return;
     }
     setInvites((prev) =>
@@ -2303,7 +2396,10 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
     const map: Record<string, number> = {};
     requests.forEach((req) => {
       if (req.status === 'rejected') return;
-      if (req.masterItemId) {
+      // Either/or, mirroring `allocatedForRequest` in kpiUtils. `req.masterItemId` is a copy of the
+      // FIRST line's master link and `req.budget` is the WHOLE request total, so counting both
+      // would charge every other line's spend against the first line's head as well.
+      if (req.masterItemId && !req.lineItems?.length) {
         map[req.masterItemId] = (map[req.masterItemId] ?? 0) + (req.budget ?? 0);
       }
       req.lineItems?.forEach((line) => {
@@ -2313,6 +2409,78 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
     });
     return map;
   }, [requests]);
+
+  /**
+   * Automatic once-a-day capture of the MEASURED stock-metric snapshot (`kpiSnapshots.ts`). This is
+   * the ONLY writer of `kpiSnapshots` — there is no exposed mutation, because a caller that could
+   * write here could fabricate history.
+   *
+   * ── The guard, and why `loaded` is the right one ──
+   *
+   * `loaded` flips to `true` at the end of the initial localStorage-restore effect, in the SAME
+   * batched state update that restores `kpiSnapshots`, `capexMaster`, `requests` and `invites`. So
+   * when this effect first runs, `prev` inside the updater is the STORED history, not `[]`. That is
+   * the property that matters: `mergeSnapshots` keys on (date, field type, plant) and returns only
+   * what it is given, so running it against an empty `prev` would persist today's point as the
+   * entire history and destroy every earlier day. Gating on `loaded` makes that unreachable.
+   *
+   * `filesHydrated` — the ref the blob write waits on — is deliberately NOT part of this guard, and
+   * it does not need to be. It exists because the in-memory state is LEAN until IndexedDB is read
+   * back, so an early `putAllFiles` would overwrite the blob map with `{}`. Two reasons that hazard
+   * cannot reach snapshots: (1) nothing measured here comes from a base64 blob — every figure is
+   * derived from `capexMaster` / `requests` / `invites` / `usedAmountByMasterItemId`, all of which
+   * are fully restored from localStorage by the time `loaded` is true, and stripping base64 changes
+   * none of them; (2) the `putAllFiles` call is still guarded by `filesHydrated.current` inside the
+   * persist effect, so the state change this effect triggers writes localStorage only, exactly like
+   * every other pre-hydration state change already does. Waiting for hydration would add a
+   * dependency on IndexedDB being available for a measurement that does not use it.
+   *
+   * It is ALSO suppressed when `restoreFailed` is set — see that ref: a half-restored load would
+   * otherwise be stamped as permanent measured fact, and truncate the history to it.
+   *
+   * The ref makes this run once per MOUNT (a plain `[loaded]` dep with a `setState` inside would
+   * re-fire forever, since `mergeSnapshots` returns a fresh array). "Once per calendar day" is
+   * enforced by the `prev.some(...)` check plus `mergeSnapshots`'s same-day replacement, so even a
+   * double-invoke (React StrictMode) or several reloads in one day leave exactly one record per
+   * scope per day.
+   *
+   * ── Multi-tab, precisely ──
+   *
+   * `CapexProvider` also mounts in the `(public)` layout, so a supplier opening a tokenised link
+   * captures too, and the cross-tab `storage` listener deliberately does NOT re-sync `kpiSnapshots`
+   * (adding it would make that listener's firing condition effectively always-true, changing when
+   * `skipNextPersist` is set for a marginal gain). Consequence, stated exactly: a long-lived tab's
+   * next persist writes its own `kpiSnapshots` and DOES destroy a day that another tab captured
+   * after this tab loaded. Everything present at this tab's load survives, so the outcome is a
+   * missing day — a GAP, never a wrong figure — which is precisely what this layer's gap semantics
+   * are built to represent honestly.
+   */
+  const snapshotCapturedRef = useRef(false);
+  useEffect(() => {
+    if (!loaded || snapshotCapturedRef.current || restoreFailed.current) return;
+    snapshotCapturedRef.current = true;
+    const now = Date.now();
+    const today = snapshotDateKey(now);
+    setKpiSnapshots((prev) => {
+      // Already measured today → return the SAME array so no re-render and no re-persist happens.
+      if (prev.some((s) => s.date === today)) return prev;
+      const todays = buildSnapshots({
+        capexMaster,
+        requests,
+        invites,
+        headOverrides: brownFieldHeadAllocations,
+        usedAmountByMasterItemId,
+        now,
+      });
+      // Nothing budgeted anywhere yet (clean slate) → nothing to measure. Writing an empty pass
+      // would be a no-op anyway; returning `prev` keeps it a true no-op.
+      if (!todays.length) return prev;
+      return mergeSnapshots(prev, todays, now);
+    });
+    // Intentionally keyed on `loaded` alone: this is a once-per-load capture of the state as it was
+    // restored, not a live subscription that should re-measure on every edit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded]);
 
   function setAuctionConfig(requestId: string, config: AuctionConfig) {
     setRequests((prev) =>
@@ -2850,6 +3018,14 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
+  /**
+   * Nuclear reset. `localStorage.clear()` takes the whole `capex_data_v2` payload, so `kpiSnapshots`
+   * goes with it — the measured history does NOT survive a reset, and the shape is simply re-created
+   * empty on the next load, where the daily capture writes a fresh first point. `measuredFrom` will
+   * then report that day, so the dashboards say "measured from <reset date>" rather than implying a
+   * history they no longer have. Nothing needs adding here; this comment exists so the interaction is
+   * explicit rather than incidental.
+   */
   function resetData() {
     localStorage.clear();
     window.location.replace('/login');
@@ -2870,6 +3046,7 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
         usedCrMap,
         getUsedCr,
         usedAmountByMasterItemId,
+        kpiSnapshots,
         setAuctionConfig,
         addRequest,
         updateRequest,

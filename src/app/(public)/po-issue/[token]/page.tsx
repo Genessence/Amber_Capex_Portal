@@ -19,7 +19,7 @@ import { resolvePoTarget } from '@/lib/tokenUtils'
 import { SUPPLIER_CARD } from '@/lib/uiTokens'
 import { FIELD_TYPE_LABELS } from '@/lib/types'
 import { PLANTS, STATUS_LABELS, GLOBAL_ACCOUNTS_NAME } from '@/lib/constants'
-import { buildMilestonesFromVendor } from '@/lib/paymentUtils'
+import { buildMilestonesFromVendor, resolveOrderValue } from '@/lib/paymentUtils'
 import type { PurchaseOrder } from '@/lib/types'
 
 const MAX_PO_DOC_BYTES = 500 * 1024
@@ -32,7 +32,8 @@ const PO_DOC_ACCEPT =
 /** The actor stamped on the PO issued from this public link (no portal login). */
 const PO_ISSUER_ACTOR = `Global Accounts (${GLOBAL_ACCOUNTS_NAME})`
 
-const fmt = (n: number) => '₹' + n.toLocaleString('en-IN')
+/** Rupees only — every amount reaching this page is resolved on an INR basis. */
+const fmt = (n: number) => '₹' + Math.round(n).toLocaleString('en-IN')
 
 type PoDocDraft = { id: string; base64: string; name: string; mimeType: string }
 
@@ -77,6 +78,13 @@ export default function PoIssuePage() {
   const request = target?.request
   const invite = target?.kind === 'award' ? target.invite : undefined
 
+  /** Scoped to THIS request, the way AccountsPanel is called internally — a vendor can hold
+   *  invites on several requests, and the order value must resolve against this one. */
+  const reqInvites = useMemo(
+    () => (request ? invites.filter(i => i.requestId === request.id) : []),
+    [invites, request],
+  )
+
   const vendor = useMemo(() => {
     if (!target) return undefined
     if (target.kind === 'award') return vendors.find(v => v.id === target.invite.vendorId)
@@ -97,7 +105,10 @@ export default function PoIssuePage() {
   }, [request, invite])
 
   const faCodes = (invite ? invite.faCodes : request?.faCodes) ?? {}
-  const amount = invite?.awardAmount ?? request?.purchaseOrder?.amount ?? request?.budget ?? 0
+  // The negotiated order value (INR), resolved exactly as AccountsPanel does it internally — NOT
+  // the buyer's `request.budget` estimate, which this page used to fall back to and then build the
+  // PO amount and every payment milestone from.
+  const amount = request ? resolveOrderValue(request, reqInvites, invite) : 0
   const status = (invite ? invite.awardStatus : request?.status) ?? ''
   const existingPo = invite ? invite.purchaseOrder : request?.purchaseOrder
   const trialRequired = !!(invite ? invite.trialRequired : request?.trialRequired)
@@ -119,7 +130,7 @@ export default function PoIssuePage() {
     prefilled.current = true
     const suffix = invite ? `-${vendor?.vendorCode ?? vendor?.vendorName?.slice(0, 4) ?? 'AW'}` : ''
     setPoNumber(`PO-${request.requestNo ?? request.id.slice(0, 6)}${suffix}`)
-    setPoAmount(String(amount || ''))
+    setPoAmount(amount ? String(Math.round(amount)) : '')
   }, [request, invite, vendor, amount])
 
   function handlePoDocFiles(e: React.ChangeEvent<HTMLInputElement>) {

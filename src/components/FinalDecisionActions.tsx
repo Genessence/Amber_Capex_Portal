@@ -1,12 +1,13 @@
 'use client'
 
 import { toast } from 'sonner'
-import { CheckCheck, FileInput, BadgeCheck, ClipboardCheck } from 'lucide-react'
+import { CheckCheck, FileInput, BadgeCheck, ClipboardCheck, ScrollText } from 'lucide-react'
 import { useCapex } from '@/lib/capexContext'
 import { ROLE_NAMES } from '@/lib/constants'
 import { buildAwardGroups } from '@/lib/paymentUtils'
 import { fmtCurrency } from '@/lib/auctionTheme'
 import { TECH_SPEC_STATUS_LABELS, effectiveTechSpecStatus, techSpecBlocksAward } from '@/lib/techSpecUtils'
+import { INCO_TERMS_STATUS_LABELS, effectiveIncoTermsStatus, incoTermsNegotiationOpen } from '@/lib/incoTermsUtils'
 import type { CapexRequest, Vendor, VendorInvite } from '@/lib/types'
 
 const AWARD_STATUS_LABEL: Record<string, string> = {
@@ -65,18 +66,42 @@ export function FinalDecisionActions({
     const inv = inviteFor(vendorId)
     return !inv || techSpecBlocksAward(inv)
   }
+  // Incoterms are the second hard pre-award gate — same enforcement, same scope as the context's
+  // `incoTermsBlockedVendorIds`: RFQ mode only, because that is the only mode where both sides have
+  // a surface to settle the agreement on.
+  const incoBlocked = (vendorId: string) => {
+    if (request.sourcingMode !== 'rfq') return false
+    const inv = inviteFor(vendorId)
+    return !!inv && incoTermsNegotiationOpen(inv)
+  }
+  const anyBlocked = (vendorId: string) => specBlocked(vendorId) || incoBlocked(vendorId)
   const blockedPending = pending.filter(g => specBlocked(g.vendorId))
+  const incoBlockedPending = pending.filter(g => incoBlocked(g.vendorId))
   const allBlocked = blockedPending.length === pending.length && pending.length > 0
+  const blockReason = (vendorId: string) =>
+    specBlocked(vendorId)
+      ? 'Technical specification is not approved for this vendor yet'
+      : incoBlocked(vendorId)
+        ? 'INCO Terms are not agreed with this vendor yet'
+        : undefined
 
   function go(vendorId?: string) {
     if (!allLinesDecided) {
       toast.error('Select a vendor and final price for every line first.')
       return
     }
-    const blocked = (vendorId ? [vendorId] : pending.map(g => g.vendorId)).filter(specBlocked)
+    const targets = vendorId ? [vendorId] : pending.map(g => g.vendorId)
+    const blocked = targets.filter(specBlocked)
     if (blocked.length) {
       toast.error(
         `Technical specification not approved for ${blocked.map(vendorName).join(', ')} — send it to the Technical team first.`,
+      )
+      return
+    }
+    const inco = targets.filter(incoBlocked)
+    if (inco.length) {
+      toast.error(
+        `INCO Terms are not agreed with ${inco.map(vendorName).join(', ')} — settle them in the INCO Terms tracker first.`,
       )
       return
     }
@@ -113,12 +138,20 @@ export function FinalDecisionActions({
         </div>
         <button
           type="button"
-          disabled={!canAward || !allLinesDecided || pending.length === 0 || blockedPending.length > 0}
+          disabled={
+            !canAward ||
+            !allLinesDecided ||
+            pending.length === 0 ||
+            blockedPending.length > 0 ||
+            incoBlockedPending.length > 0
+          }
           onClick={() => go()}
           title={
             blockedPending.length
               ? `Technical specification pending for ${blockedPending.map(g => vendorName(g.vendorId)).join(', ')}`
-              : undefined
+              : incoBlockedPending.length
+                ? `INCO Terms not agreed with ${incoBlockedPending.map(g => vendorName(g.vendorId)).join(', ')}`
+                : undefined
           }
           className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#171717] hover:bg-black text-white text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed">
           <CheckCheck className="w-4 h-4" /> Approve &amp; Request PI — All{pending.length ? ` (${pending.length})` : ''}
@@ -130,6 +163,14 @@ export function FinalDecisionActions({
           {allBlocked ? 'Technical specification approval is pending' : 'Technical specification approval is pending for'}{' '}
           <span className="font-semibold">{blockedPending.map(g => vendorName(g.vendorId)).join(', ')}</span>
           {' '}— send the machine spec to Amber&apos;s Technical team above and award once it is approved.
+        </p>
+      )}
+      {incoBlockedPending.length > 0 && (
+        <p className="text-xs text-amber-700">
+          INCO Terms are still open with{' '}
+          <span className="font-semibold">{incoBlockedPending.map(g => vendorName(g.vendorId)).join(', ')}</span>
+          {' '}— settle the agreement in the INCO Terms tracker above; a foreign vendor cannot be taken to
+          Proforma Invoice until the terms are agreed.
         </p>
       )}
       {request.trialRequired && (
@@ -158,10 +199,15 @@ export function FinalDecisionActions({
                       <ClipboardCheck className="w-3 h-3" /> {TECH_SPEC_STATUS_LABELS[effectiveTechSpecStatus(inv)]}
                     </span>
                   )}
+                  {inv && incoBlocked(g.vendorId) && (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-700 border border-amber-200 bg-amber-50 px-1.5 py-0.5 rounded-full">
+                      <ScrollText className="w-3 h-3" /> {INCO_TERMS_STATUS_LABELS[effectiveIncoTermsStatus(inv)]}
+                    </span>
+                  )}
                   <button
                     type="button"
-                    disabled={!canAward || specBlocked(g.vendorId)}
-                    title={specBlocked(g.vendorId) ? 'Technical specification is not approved for this vendor yet' : undefined}
+                    disabled={!canAward || anyBlocked(g.vendorId)}
+                    title={blockReason(g.vendorId)}
                     onClick={() => go(g.vendorId)}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50 text-slate-800 text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed">
                     <FileInput className="w-3.5 h-3.5" /> Approve &amp; Request PI

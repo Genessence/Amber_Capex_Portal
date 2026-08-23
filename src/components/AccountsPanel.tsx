@@ -30,6 +30,7 @@ import type {
 } from '@/lib/types'
 import {
   resolveFinalVendor,
+  resolveOrderValue,
   totalOutstanding,
   totalPaid,
   isAwardBased,
@@ -80,7 +81,10 @@ export function AccountsPanel({
             vendor={vendors.find(v => v.id === inv.vendorId)}
             pi={inv.proformaInvoice}
             lineItems={lineItems.filter(li => inv.awardedItemIds?.includes(li.id))}
-            amount={inv.awardAmount ?? 0}
+            /* One resolver for the order value across the internal tracker and both public PO
+               pages — this used to inline `inv.awardAmount ?? 0`, dropping the issued PO's own
+               amount that `resolveOrderValue` falls back to. */
+            amount={resolveOrderValue(request, invites, inv)}
             faCodes={inv.faCodes ?? {}}
             status={inv.awardStatus ?? 'pi_submitted'}
             po={inv.purchaseOrder}

@@ -80,14 +80,16 @@ export default function LoginPage() {
           <p className="text-[11px] font-bold tracking-[0.2em] text-[#93C5FD] uppercase">
             Capital Expenditure Management
           </p>
-          <h1 className="text-[52px] leading-[1.05] font-black text-white tracking-tight">
+          {/* Marketing copy, not the page heading: this block is `hidden lg:flex`, so an <h1>
+              here left every screen below lg with no <h1>. The page heading is "Sign in". */}
+          <p className="text-[52px] leading-[1.05] font-black text-white tracking-tight">
             Full pipeline<br />
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-blue-600">
               visibility
             </span>
             , from<br />
             request to closure.
-          </h1>
+          </p>
           <p className="text-white/45 text-[15px] leading-relaxed">
             Track vendor sourcing, quote negotiation, and approvals across all Amber CAPEX requests.
           </p>
@@ -105,7 +107,7 @@ export default function LoginPage() {
         <div className="w-full max-w-md bg-white/10 backdrop-blur-2xl border border-white/15 rounded-3xl p-6 sm:p-8 shadow-2xl">
 
           <div className="mb-8">
-            <h2 className="text-[22px] font-bold text-white leading-tight">Sign in</h2>
+            <h1 className="text-[22px] font-bold text-white leading-tight">Sign in</h1>
             <p className="text-white/40 text-sm mt-1">Amber Enterprises CAPEX Portal</p>
           </div>
 

@@ -30,6 +30,7 @@ import {
   RFQ_STATUS_LABELS,
   canRequestPi,
   effectiveRfqStatus,
+  inrRfqTotal,
   lowestRfqTotal,
   rfqGstAmount,
   rfqLineGstRate,
@@ -60,7 +61,7 @@ const INCO_TRACKER_HINT: Record<IncoTermsStatus, string> = {
   pending_sourcing: 'Your turn — review the vendor’s Incoterms.',
   pending_vendor: 'Sent back to the vendor for confirmation.',
   approved: 'Agreed — this vendor can be awarded.',
-  rejected: 'Declined — this vendor cannot be awarded until the terms are agreed.',
+  rejected: 'Declined — this vendor cannot be awarded. Edit and re-open to restart the agreement.',
 }
 import { gstRateForHsn } from '@/lib/hsnGst'
 import {
@@ -70,7 +71,8 @@ import {
   FOCUS_RING,
   fmtCurrency,
 } from '@/lib/auctionTheme'
-import { toInr, isForeignCurrency } from '@/lib/currencyUtils'
+import { currencySymbol, inrWithNative, inrWithNativeLabel, toInr, isForeignCurrency } from '@/lib/currencyUtils'
+import { awardUnitPriceInr, isAwardBased, splitAwardInProgress } from '@/lib/paymentUtils'
 
 const SOURCING_ROLES = ['sourcing_member', 'super_admin']
 const FULFILLMENT_STATUSES = ['pi_requested', 'pi_submitted', 'accounts_processing', 'payment_in_progress', 'completed']
@@ -128,11 +130,18 @@ function formTotal(f: QuoteForm, gridItems: CapexLineItem[]): number | null {
 }
 
 // Footer attribute rows (rendered beneath the line-item rows), mirroring the auction grid.
+// The three money rows render on the INR comparison basis with the vendor's own-currency figure in
+// brackets — they sit between INR-converted line prices and an INR-converted grand total, and a raw
+// foreign charge under a ₹ sign made the column disagree with itself. Rendered on BOTH the desktop
+// grid and the mobile cards, hence the single string.
 type AttrKey = 'freight' | 'packing' | 'service' | 'deliveryWeeks' | 'warranty' | 'currency'
-const ATTR_ROWS: { key: AttrKey; label: string; select?: boolean; display: (q?: RfqQuote) => string }[] = [
-  { key: 'freight', label: 'Transportation / Freight', display: q => (q?.freight != null ? fmtCurrency(q.freight) : '—') },
-  { key: 'packing', label: 'Packing / Forwarding', display: q => (q?.packing != null ? fmtCurrency(q.packing) : '—') },
-  { key: 'service', label: 'Service / Installation', display: q => (q?.service != null ? fmtCurrency(q.service) : '—') },
+// `money: true` rows carry an amount in the VENDOR's currency (the Currency row below), so their
+// input must show that symbol — an unlabelled number box is still a money box, and the reader of
+// the row above it sees ₹-converted figures.
+const ATTR_ROWS: { key: AttrKey; label: string; select?: boolean; money?: boolean; display: (q?: RfqQuote) => string }[] = [
+  { key: 'freight', label: 'Transportation / Freight', money: true, display: q => (q?.freight != null ? inrWithNativeLabel(q.freight, q.currency) : '—') },
+  { key: 'packing', label: 'Packing / Forwarding', money: true, display: q => (q?.packing != null ? inrWithNativeLabel(q.packing, q.currency) : '—') },
+  { key: 'service', label: 'Service / Installation', money: true, display: q => (q?.service != null ? inrWithNativeLabel(q.service, q.currency) : '—') },
   { key: 'deliveryWeeks', label: 'Delivery Lead Time (Weeks)', display: q => (q?.deliveryWeeks != null ? String(q.deliveryWeeks) : '—') },
   { key: 'warranty', label: 'Warranty (Years)', display: q => (q?.warranty != null ? String(q.warranty) : '—') },
   { key: 'currency', label: 'Currency', select: true, display: q => q?.currency ?? '—' },
@@ -192,6 +201,15 @@ export function RfqPanel({
 
   const inFulfillment = FULFILLMENT_STATUSES.includes(request.status)
   const finalInvite = request.finalVendorId ? invites.find(i => i.vendorId === request.finalVendorId) : undefined
+  // RFQ does split awards too: awarding ONE vendor bumps the request to `pi_requested`, which is in
+  // FULFILLMENT_STATUSES above — so `inFulfillment` flips true while other line items still have no
+  // winner, and the tech-spec + award panels vanish. The remaining vendors could then never be
+  // awarded and their items were silently never ordered (the request even auto-completes once the
+  // first award's payments finish). Same `|| awardBased` escape the auction path already carries at
+  // `capex/[id]`, but narrowed to "still awardable" so a FINISHED award keeps the panels hidden.
+  const awardInProgress = splitAwardInProgress(request.lineItems ?? [], invites)
+  const awardBased = isAwardBased(invites)
+  const showAwardSurfaces = !inFulfillment || awardInProgress
 
   // Grid rows: real line items, or a single synthetic row for legacy/simple requests.
   const hasLines = !!request.lineItems?.length
@@ -234,8 +252,15 @@ export function RfqPanel({
     if (val) {
       const inv = invites.find(i => i.vendorId === val)
       const u = inv ? unitFor(inv, itemId) : null
-      if (u != null) {
-        nextPrices = { ...finalPrices, [`${itemId}-price`]: String(u) }
+      if (inv && u != null) {
+        // Store the award price in INR (converts a foreign quote), so the award/PO/milestone
+        // amounts are INR — mirrors the auction path in `VendorGrid.onSetFinalVendor`.
+        // The currency MUST be read through `currencyOf`, which switches to the live counter form
+        // on exactly the branch where `unitFor` returns the live form value (`editingId === inv.id`).
+        // The vendor <select> stays enabled mid-edit, so pairing a counter typed in INR with the
+        // STORED quote's USD code converted it a second time and persisted a ~85× award price into
+        // `finalPrices` → `buildAwardGroups` → `awardAmount` → the PO and every payment milestone.
+        nextPrices = { ...finalPrices, [`${itemId}-price`]: awardUnitPriceInr(u, currencyOf(inv)) }
         setFinalPrices(nextPrices)
       }
     }
@@ -273,6 +298,15 @@ export function RfqPanel({
     })
   }
 
+  // The currency a vendor's figures are in RIGHT NOW — the live counter form's while sourcing is
+  // editing that vendor's column (the form carries its own Currency field), the stored quote's
+  // otherwise. Every figure read through `unitFor` / `grandTotalOf` switches to the form on edit,
+  // so its currency must switch with it: pairing a live form amount with the STORED currency
+  // silently converts a counter typed in USD as if it were rupees.
+  function currencyOf(inv: VendorInvite): string {
+    return (editingId === inv.id ? getForm(inv).currency : inv.rfqQuote?.currency) ?? 'INR'
+  }
+
   // Unit price a vendor offers for a line (live form value while editing; legacy price fallback).
   function unitFor(inv: VendorInvite, itemId: string): number | null {
     if (editingId === inv.id) {
@@ -287,19 +321,21 @@ export function RfqPanel({
   function qtyOf(item: CapexLineItem): number {
     return parseFloat(item.quantity) || 1
   }
-  // Lowest unit price across vendors for a given line (for the green "Lowest" highlight).
-  // Compared on an INR basis so a foreign-currency unit isn't wrongly flagged lowest; returns the
-  // vendor's own-currency unit that is lowest in INR terms (matches what the cell renders).
-  function lowestUnit(itemId: string): number | null {
+  // Lowest unit price across vendors for a given line, IN INR (for the green "Lowest" highlight,
+  // and matching the INR figure each cell renders). Returning the winner's own-currency unit and
+  // comparing cells against that by raw equality flagged every vendor who happened to quote the
+  // same number in a different currency — a $1,00,000 unit and a ₹1,00,000 unit both lit up.
+  function lowestUnitInr(itemId: string): number | null {
     let minInr: number | null = null
-    let minUnit: number | null = null
     for (const inv of invites) {
       const u = unitFor(inv, itemId)
       if (u == null || u <= 0) continue
-      const inr = toInr(u, inv.rfqQuote?.currency)
-      if (minInr == null || inr < minInr) { minInr = inr; minUnit = u }
+      // `unitFor` returns the LIVE form value for the vendor being countered, so read the currency
+      // the same way (`currencyOf`) — the stored quote's currency belongs to the stored unit.
+      const inr = toInr(u, currencyOf(inv))
+      if (minInr == null || inr < minInr) minInr = inr
     }
-    return minUnit
+    return minInr
   }
   function grandTotalOf(inv: VendorInvite): number | null {
     if (editingId === inv.id) return formTotal(getForm(inv), gridItems)
@@ -315,8 +351,7 @@ export function RfqPanel({
   function inrGrandTotalOf(inv: VendorInvite): number | null {
     const t = grandTotalOf(inv)
     if (t == null) return null
-    const cur = editingId === inv.id ? getForm(inv).currency : inv.rfqQuote?.currency
-    return toInr(t, cur)
+    return toInr(t, currencyOf(inv))
   }
   const liveLowestTotal = useMemo(() => {
     const totals: number[] = []
@@ -332,8 +367,22 @@ export function RfqPanel({
 
   // Incoterms gate FOREIGN vendors (international shipping terms), not one-time vendors.
   const isForeign = (inv: VendorInvite) => !!vendors.find(v => v.id === inv.vendorId)?.foreign
+  // The tracker must list anyone the AWARD GATE can block, and that gate
+  // (`incoTermsBlocksAward`/`incoTermsNegotiationOpen`) is keyed on `invite.incoTermsStatus` alone,
+  // not `Vendor.foreign` — so key this list the same way. Today the two never disagree (the status
+  // is only ever seeded for a vendor that was foreign at invite time, and `proposeRfqQuote` refuses
+  // an INCO doc for a non-foreign vendor), but if a vendor is ever un-flagged foreign after being
+  // invited, filtering on `Vendor.foreign` here would drop that invite from the one screen that can
+  // settle its INCO status — leaving it permanently unawardable with no control anywhere to fix it
+  // (the exact shape of a bug fixed elsewhere in this codebase today). Still include plain
+  // `isForeign` vendors so a newly invited foreign vendor shows before they've quoted (their status
+  // is still the `not_sent`/`awaiting_vendor` default at that point).
   const foreignInvites = useMemo(
-    () => invites.filter(inv => vendors.find(v => v.id === inv.vendorId)?.foreign),
+    () => invites.filter(inv => {
+      const foreign = vendors.find(v => v.id === inv.vendorId)?.foreign
+      const started = !!inv.incoTermsStatus && inv.incoTermsStatus !== 'not_sent'
+      return foreign || started
+    }),
     [invites, vendors],
   )
 
@@ -440,8 +489,18 @@ export function RfqPanel({
     setEditingId(null)
     toast.success(`Counter sent to ${vendorName(inv.vendorId)}`)
   }
+  /**
+   * A finalized vendor's quotation total for INTERNAL display: INR (the basis the order value, PO
+   * and milestones are built on via `resolveFinalVendor`), with the vendor's own-currency figure
+   * alongside. Printing the raw own-currency total under a ₹ sign made a $1,20,000 quotation read
+   * as "₹1,20,000" beside an AccountsPanel order value of ₹1,02,60,000 for the same order.
+   */
+  function approvedTotalLabel(inv: VendorInvite): string {
+    if (!inv.rfqQuote) return '—'
+    return inrWithNativeLabel(rfqTotal(inv.rfqQuote, gridItems), inv.rfqQuote.currency)
+  }
   function acceptQuote(inv: VendorInvite) {
-    if (!window.confirm(`Accept ${vendorName(inv.vendorId)}'s quotation of ${inv.rfqQuote ? fmtCurrency(rfqTotal(inv.rfqQuote, gridItems)) : '—'}? This finalizes this vendor and sends the approval documents for sign-off.`)) return
+    if (!window.confirm(`Accept ${vendorName(inv.vendorId)}'s quotation of ${approvedTotalLabel(inv)}? This finalizes this vendor and sends the approval documents for sign-off.`)) return
     respondToRfqQuote(inv.id, 'approved', 'sourcing', senderName)
     toast.success(`Accepted ${vendorName(inv.vendorId)} — documents sent for approval`)
   }
@@ -465,6 +524,12 @@ export function RfqPanel({
   }
   function startAuction() {
     if (quotedCount < 2) { toast.error('Need at least 2 vendor quotes to start an auction.'); return }
+    // Belt-and-braces alongside the render gate: never escalate a request that is already awarded
+    // or in fulfillment.
+    if (inFulfillment || awardBased) {
+      toast.error('This request is already awarded — it can no longer be escalated to an auction.')
+      return
+    }
     if (!window.confirm('Escalate this RFQ to a live reverse auction? The current best price drops 5% to become the new price to beat, and every vendor’s rank resets — vendors must submit a fresh bid to reveal their rank.')) return
     seedAuctionFromRfq(request.id)
     setSourcingMode(request.id, 'auction')
@@ -476,10 +541,13 @@ export function RfqPanel({
       .catch(() => toast.error('Could not copy link'))
   }
 
+  // Cheapest-first ordering for the mobile card stack. Sorted on an INR basis — raw grand totals in
+  // different currencies are not comparable, so a $80,000 quote (₹68.4 L) used to sort behind an
+  // ₹80,00,000 one purely on face value.
   const invitesByPrice = useMemo(() => {
     return [...invites].sort((a, b) => {
-      const ta = a.rfqQuote ? rfqTotal(a.rfqQuote, gridItems) : Infinity
-      const tb = b.rfqQuote ? rfqTotal(b.rfqQuote, gridItems) : Infinity
+      const ta = a.rfqQuote ? inrRfqTotal(a.rfqQuote, gridItems) : Infinity
+      const tb = b.rfqQuote ? inrRfqTotal(b.rfqQuote, gridItems) : Infinity
       return ta - tb
     })
   }, [invites, gridItems])
@@ -549,7 +617,7 @@ export function RfqPanel({
             <div>
               <p className="text-sm font-semibold text-slate-900">{vendorName(finalInvite.vendorId)}</p>
               <p className="text-xs text-slate-500">
-                Approved RFQ total: <span className="tabular-nums font-semibold text-slate-900">{finalInvite.rfqQuote ? fmtCurrency(rfqTotal(finalInvite.rfqQuote, gridItems)) : '—'}</span>
+                Approved RFQ total: <span className="tabular-nums font-semibold text-slate-900">{approvedTotalLabel(finalInvite)}</span>
               </p>
             </div>
             <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-800">
@@ -784,6 +852,9 @@ export function RfqPanel({
                               {isForeign(inv) && incoTermsBlocksAward(inv) && (
                                 <span className="text-[9px] font-semibold text-slate-200 leading-tight max-w-[130px]">INCO Terms open — settle before award</span>
                               )}
+                              {effectiveDocApprovalStatus(inv.docApprovalStatus) === 'rejected' && (
+                                <span className="text-[9px] font-semibold text-red-200 leading-tight max-w-[130px]">Contract documents declined — re-send to unlock quoting</span>
+                              )}
                               {canManage && !isEditing && (s === 'pending_sourcing' || s === 'pending_vendor') && (
                                 <button
                                   onClick={() => startCounter(inv)}
@@ -817,7 +888,7 @@ export function RfqPanel({
                     {/* Line-item rows */}
                     {gridItems.map((item, idx) => {
                       const qty = qtyOf(item)
-                      const low = lowestUnit(item.id)
+                      const lowInr = lowestUnitInr(item.id)
                       return (
                         <tr key={item.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-[#FAFAFA]'}>
                           <td className={`sticky left-0 z-10 px-3 py-2 ${idx % 2 === 0 ? 'bg-white' : 'bg-[#FAFAFA]'}`}>
@@ -841,11 +912,17 @@ export function RfqPanel({
                           {invites.map(inv => {
                             const isEditing = editingId === inv.id
                             if (isEditing) {
+                              const form = getForm(inv)
                               return (
                                 <td key={inv.id} className="px-2 py-1.5 border-l border-slate-100 bg-slate-50/40">
+                                  {/* Same treatment as the mobile counter input below: the counter is
+                                      typed in the vendor's own currency (the Currency attribute row),
+                                      so the placeholder carries THAT symbol — the cell it replaces
+                                      renders ₹, and a bare box left sourcing guessing which. */}
                                   <input
-                                    type="number" min="0" inputMode="decimal" placeholder="0"
-                                    value={getForm(inv).lines[item.id] ?? ''}
+                                    type="number" min="0" inputMode="decimal"
+                                    placeholder={`unit ${currencySymbol(form.currency)}`}
+                                    value={form.lines[item.id] ?? ''}
                                     onChange={e => setLine(inv.id, item.id, e.target.value)}
                                     aria-label={`${vendorName(inv.vendorId)} — unit price for ${item.description}`}
                                     className={`${INPUT_RIGHT} py-1`}
@@ -853,28 +930,45 @@ export function RfqPanel({
                                 </td>
                               )
                             }
+                            // `unit` and every `breakdown.*` figure are in the VENDOR's currency;
+                            // they render on the INR comparison basis (the basis the "↓ Lowest"
+                            // chip, the grand-total row and the Final-Decision auto-fill all use)
+                            // with the quoted figure beneath.
                             const unit = unitFor(inv, item.id)
-                            const isLow = unit != null && unit > 0 && low != null && unit === low
+                            // `unit` (and `breakdown` below, via `vendorQuote`) come from the LIVE
+                            // counter form while sourcing is editing this vendor's column, so the
+                            // currency is read the same way — `currencyOf` switches on the identical
+                            // `editingId === inv.id` branch. Reading the STORED quote's currency here
+                            // put this cell on a different basis than `lowestUnitInr` computes `lowInr`
+                            // on (it already uses `currencyOf`), so mid-edit the `↓ Lowest` chip could
+                            // land on the wrong vendor — a decision signal that steers the award, not
+                            // decoration. The mobile card at `lineCur` already read it this way.
+                            const cur = currencyOf(inv)
+                            const isLow = unit != null && unit > 0 && lowInr != null && toInr(unit, cur) === lowInr
                             const vendorQuote = editingId === inv.id ? quoteFromForm(getForm(inv), gridItems) : inv.rfqQuote
                             const breakdown = vendorQuote && unit != null && unit > 0 ? rfqLineBreakdown(vendorQuote, item) : null
+                            const unitD  = unit != null ? inrWithNative(unit, cur) : null
+                            const lineD  = breakdown ? inrWithNative(breakdown.lineTotalInclGst, cur) : null
                             return (
                               <td key={inv.id} className={`px-3 py-2 text-center border-l border-slate-100 ${isLow ? 'bg-emerald-50' : ''}`}>
-                                {unit != null && unit > 0 ? (
+                                {unit != null && unit > 0 && unitD ? (
                                   <>
-                                    <p className={`font-bold text-[12px] ${isLow ? 'text-emerald-700' : 'text-slate-800'}`}>{fmtCurrency(unit)}</p>
+                                    <p className={`font-bold text-[12px] ${isLow ? 'text-emerald-700' : 'text-slate-800'}`}>{unitD.inr}</p>
+                                    {unitD.native && <p className="text-[10px] text-slate-400">{unitD.native}</p>}
                                     {breakdown && (
                                       <>
                                         <p className={`text-[11px] ${isLow ? 'text-emerald-600' : 'text-slate-500'}`}>
-                                          Subtotal: {fmtCurrency(breakdown.taxableSubtotal)}
+                                          Subtotal: {fmtCurrency(toInr(breakdown.taxableSubtotal, cur))}
                                         </p>
                                         {breakdown.gstAmount > 0 && (
                                           <p className={`text-[10px] ${isLow ? 'text-emerald-600' : 'text-slate-500'}`}>
-                                            + {fmtCurrency(breakdown.gstAmount)} GST
+                                            + {fmtCurrency(toInr(breakdown.gstAmount, cur))} GST
                                           </p>
                                         )}
                                         <p className={`text-[11px] font-semibold ${isLow ? 'text-emerald-700' : 'text-slate-700'}`}>
-                                          Total: {fmtCurrency(breakdown.lineTotalInclGst)}
+                                          Total: {lineD!.inr}
                                         </p>
+                                        {lineD!.native && <p className="text-[10px] text-slate-400">{lineD!.native}</p>}
                                       </>
                                     )}
                                     {isLow && <span className="inline-block mt-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 leading-none">↓ Lowest</span>}
@@ -910,9 +1004,14 @@ export function RfqPanel({
                                 className="w-full text-[11px] border border-slate-200 rounded px-1.5 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-slate-400 text-slate-700"
                               >
                                 <option value="">Select vendor…</option>
+                                {/* One dropdown listing every vendor's unit for this line — a
+                                    comparison, so INR leads, with the quoted figure in brackets.
+                                    Currency via `currencyOf` for the same reason `setFinalVendor`
+                                    uses it: `unitFor` returns the live counter-form unit mid-edit,
+                                    and this label must not drift from the price that select writes. */}
                                 {quotedInvites.map(inv => {
                                   const u = unitFor(inv, item.id)
-                                  return <option key={inv.id} value={inv.vendorId}>{vendorName(inv.vendorId)}{u != null ? ` — ${fmtCurrency(u)}` : ''}</option>
+                                  return <option key={inv.id} value={inv.vendorId}>{vendorName(inv.vendorId)}{u != null ? ` — ${inrWithNativeLabel(u, currencyOf(inv))}` : ''}</option>
                                 })}
                               </select>
                               <p className="text-[11px] font-bold text-slate-700 text-right mt-1">Price × Qty: {fmtCurrency(fdNet(item))}</p>
@@ -941,6 +1040,7 @@ export function RfqPanel({
                                   </select>
                                 ) : (
                                   <input type="number" min="0" inputMode="decimal"
+                                    placeholder={attr.money ? `${currencySymbol(form.currency)} 0` : '0'}
                                     value={form[attr.key]}
                                     onChange={e => setForm(inv.id, { [attr.key]: e.target.value } as Partial<Omit<QuoteForm, 'lines'>>)}
                                     aria-label={`${vendorName(inv.vendorId)} — ${attr.label}`} className={`${INPUT_RIGHT} py-1`} />
@@ -965,6 +1065,10 @@ export function RfqPanel({
                         const total = grandTotalOf(inv)
                         const gst = gstOf(inv)
                         // Foreign quotes: show the INR value (converted), with the original currency amount below.
+                        // NOTE: this deliberately reads the STORED quote's currency, not `currencyOf(inv)`
+                        // — the known mid-edit flicker documented in CLAUDE.md ("Still own-currency-
+                        // under-₹, deliberately"), parked as display-only. `currencyOf` is the one-line
+                        // fix if that is ever ratified.
                         const cur = inv.rfqQuote?.currency ?? 'INR'
                         const foreign = isForeignCurrency(cur)
                         const inrTot = total != null ? toInr(total, cur) : null
@@ -1001,8 +1105,14 @@ export function RfqPanel({
                   const s = effectiveRfqStatus(inv)
                   const isEditing = editingId === inv.id
                   const form = getForm(inv)
+                  // Mirrors the desktop grand-total row: compare (and display) on an INR basis, with
+                  // the vendor's own-currency total beneath. `liveLowestTotal` is INR, so comparing
+                  // the own-currency total against it flagged nobody as L1 on a mixed-currency RFQ.
                   const total = grandTotalOf(inv)
-                  const isLowest = total != null && liveLowestTotal != null && total === liveLowestTotal
+                  const cardCur = currencyOf(inv)
+                  const cardForeign = isForeignCurrency(cardCur)
+                  const inrTotal = inrGrandTotalOf(inv)
+                  const isLowest = inrTotal != null && liveLowestTotal != null && inrTotal === liveLowestTotal
                   return (
                     <div key={inv.id} className="rounded-lg border border-slate-200 bg-white p-3 space-y-2.5">
                       <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -1010,6 +1120,9 @@ export function RfqPanel({
                           <p className="text-sm font-semibold text-slate-900">{vendorName(inv.vendorId)}</p>
                           {isForeign(inv) && incoTermsBlocksAward(inv) && (
                             <p className="text-[10px] font-semibold text-slate-700">INCO Terms open — settle before award</p>
+                          )}
+                          {effectiveDocApprovalStatus(inv.docApprovalStatus) === 'rejected' && (
+                            <p className="text-[10px] font-semibold text-red-700">Contract documents declined — re-send to unlock quoting</p>
                           )}
                         </div>
                         <div className="flex items-center gap-2">
@@ -1034,16 +1147,23 @@ export function RfqPanel({
                             return (
                               <div key={item.id} className="flex items-center gap-2">
                                 <span className="flex-1 text-[12px] text-slate-700 truncate">{item.description} <span className="text-slate-400">×{item.quantity}</span></span>
-                                <input type="number" min="0" inputMode="decimal" placeholder="unit ₹"
+                                {/* The counter is entered in the vendor's own currency (the Currency
+                                    attribute below), so the placeholder carries THAT symbol. */}
+                                <input type="number" min="0" inputMode="decimal" placeholder={`unit ${currencySymbol(form.currency)}`}
                                   value={form.lines[item.id] ?? ''} onChange={e => setLine(inv.id, item.id, e.target.value)}
                                   aria-label={`${vendorName(inv.vendorId)} — unit price for ${item.description}`}
                                   className={`${INPUT_RIGHT} w-28 py-1`} />
                               </div>
                             )
                           }
+                          // Same INR basis as the desktop per-line cells above — these are the same
+                          // own-currency figures, and the card's grand total below is already INR.
                           const unit = unitFor(inv, item.id)
                           const vendorQuote = isEditing ? quoteFromForm(form, gridItems) : inv.rfqQuote
                           const breakdown = vendorQuote && unit != null && unit > 0 ? rfqLineBreakdown(vendorQuote, item) : null
+                          const lineCur = currencyOf(inv)
+                          const unitD = unit != null ? inrWithNative(unit, lineCur) : null
+                          const lineD = breakdown ? inrWithNative(breakdown.lineTotalInclGst, lineCur) : null
                           return (
                             <div key={item.id} className="flex items-center justify-between gap-2 text-[12px]">
                               <span className="text-slate-600 truncate">
@@ -1053,12 +1173,23 @@ export function RfqPanel({
                                   : <span className="text-[10px] text-amber-600 ml-1">Awaiting HSN</span>}
                               </span>
                               <span className="text-slate-800 font-semibold tabular-nums shrink-0 text-right">
-                                {unit != null && unit > 0 && breakdown ? (
+                                {unit != null && unit > 0 && breakdown && unitD && lineD ? (
                                   <>
-                                    <span>{fmtCurrency(unit)}</span>
+                                    <span>{unitD.inr}</span>
+                                    {/* The vendor's own-currency figure sits under EACH figure it
+                                        belongs to, as on desktop — the unit under the unit, the line
+                                        total under the line total. Showing only the line total's
+                                        native amount left the unit above it reading as if the
+                                        quotation had been made in rupees. */}
+                                    {unitD.native && (
+                                      <span className="block text-[10px] text-slate-400">{unitD.native}</span>
+                                    )}
                                     <span className="block text-[10px] text-slate-500">
-                                      {fmtCurrency(breakdown.lineTotalInclGst)} incl. GST
+                                      {lineD.inr} incl. GST
                                     </span>
+                                    {lineD.native && (
+                                      <span className="block text-[10px] text-slate-400">{lineD.native}</span>
+                                    )}
                                   </>
                                 ) : '—'}
                               </span>
@@ -1081,6 +1212,7 @@ export function RfqPanel({
                                   </select>
                                 ) : (
                                   <input type="number" min="0" inputMode="decimal" value={form[attr.key]}
+                                    placeholder={attr.money ? `${currencySymbol(form.currency)} 0` : '0'}
                                     onChange={e => setForm(inv.id, { [attr.key]: e.target.value } as Partial<Omit<QuoteForm, 'lines'>>)}
                                     aria-label={`${vendorName(inv.vendorId)} — ${attr.label}`} className={`${INPUT_RIGHT} py-1`} />
                                 )}
@@ -1098,11 +1230,14 @@ export function RfqPanel({
                       <div className="flex items-center justify-between gap-2 border-t border-slate-100 pt-2">
                         <div className="flex flex-col">
                           <span className="text-[11px] font-semibold text-slate-500">Grand total <span className="font-normal text-slate-400">(incl. GST)</span></span>
-                          {gstOf(inv) > 0 && <span className="text-[10px] text-slate-400">incl. {fmtCurrency(gstOf(inv))} GST</span>}
+                          {gstOf(inv) > 0 && <span className="text-[10px] text-slate-400">incl. {fmtCurrency(toInr(gstOf(inv), cardCur))} GST</span>}
                         </div>
-                        <span className={`text-sm font-bold tabular-nums px-1.5 rounded ${isLowest ? 'text-emerald-700 bg-emerald-50' : 'text-slate-900'}`}>
-                          {total != null ? fmtCurrency(total) : '—'}
+                        <span className={`text-sm font-bold tabular-nums px-1.5 rounded text-right ${isLowest ? 'text-emerald-700 bg-emerald-50' : 'text-slate-900'}`}>
+                          {inrTotal != null ? fmtCurrency(inrTotal) : '—'}
                           {isLowest && <span className="ml-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800">L1</span>}
+                          {cardForeign && total != null && (
+                            <span className="block text-[10px] font-normal text-slate-500">{fmtCurrency(total, cardCur)} {cardCur}</span>
+                          )}
                         </span>
                       </div>
 
@@ -1170,9 +1305,13 @@ export function RfqPanel({
                       const isReviewing = incoReviewId === inv.id
                       // Sourcing's turn to act; other statuses are read-only but still viewable.
                       const needsReview = incoStatus === 'pending_sourcing'
+                      // A rejected agreement BLOCKS the award (enforced in `awardAndRequestPi`), so
+                      // sourcing must be able to re-open it or the vendor is dead on this request.
+                      // `proposeIncoTerms` carries no turn guard, so edit-and-resend revives the loop.
+                      const canReopen = incoStatus === 'rejected'
                       const hasAnswers = !!inv.incoTermsDoc && incoStatus !== 'not_sent' && incoStatus !== 'awaiting_vendor'
                       const doc = incoDoc(inv)
-                      const editable = canManage && needsReview
+                      const editable = canManage && (needsReview || canReopen)
                       return (
                         <li key={inv.id} className="px-3 py-2.5">
                           <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -1201,9 +1340,11 @@ export function RfqPanel({
                           {hasAnswers && isReviewing && (
                             <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50/60 p-3 space-y-3">
                               <p className="text-[11px] text-slate-500">
-                                {editable
-                                  ? 'Review the vendor’s answers below. Approve them, edit any field and send it back for the vendor to confirm, or reject.'
-                                  : 'The Incoterms currently on the table. You can act on them when it is your turn.'}
+                                {canReopen
+                                  ? 'These terms were rejected, so this vendor cannot be awarded. Edit the answers and re-open the agreement to send it back to the vendor.'
+                                  : editable
+                                    ? 'Review the vendor’s answers below. Approve them, edit any field and send it back for the vendor to confirm, or reject.'
+                                    : 'The Incoterms currently on the table. You can act on them when it is your turn.'}
                               </p>
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                 {INCO_TERMS_QUESTIONS.map(q => {
@@ -1247,21 +1388,25 @@ export function RfqPanel({
                               )}
                               {editable && (
                                 <div className="flex flex-wrap items-center gap-2 pt-1">
-                                  <button onClick={() => approveInco(inv)}
-                                    aria-label={`Approve INCO Terms for ${vendorName(inv.vendorId)}`}
-                                    className={`flex items-center gap-1 px-3 py-1.5 text-[11px] font-semibold bg-slate-600 hover:bg-slate-700 text-white rounded-lg ${FOCUS_RING}`}>
-                                    <CheckCircle2 className="w-3.5 h-3.5" /> Approve
-                                  </button>
+                                  {needsReview && (
+                                    <button onClick={() => approveInco(inv)}
+                                      aria-label={`Approve INCO Terms for ${vendorName(inv.vendorId)}`}
+                                      className={`flex items-center gap-1 px-3 py-1.5 text-[11px] font-semibold bg-slate-600 hover:bg-slate-700 text-white rounded-lg ${FOCUS_RING}`}>
+                                      <CheckCircle2 className="w-3.5 h-3.5" /> Approve
+                                    </button>
+                                  )}
                                   <button onClick={() => editResendInco(inv)}
                                     aria-label={`Edit and send INCO Terms back to ${vendorName(inv.vendorId)}`}
                                     className={`flex items-center gap-1 px-3 py-1.5 text-[11px] font-semibold bg-[#171717] hover:bg-[#000000] text-white rounded-lg ${FOCUS_RING}`}>
-                                    <Send className="w-3.5 h-3.5" /> Edit &amp; send back
+                                    <Send className="w-3.5 h-3.5" /> {canReopen ? 'Edit & re-open with vendor' : 'Edit & send back'}
                                   </button>
-                                  <button onClick={() => rejectInco(inv)}
-                                    aria-label={`Reject INCO Terms for ${vendorName(inv.vendorId)}`}
-                                    className={`flex items-center gap-1 px-3 py-1.5 text-[11px] font-medium text-red-600 hover:text-red-700 ${FOCUS_RING} rounded`}>
-                                    <X className="w-3.5 h-3.5" /> Reject
-                                  </button>
+                                  {needsReview && (
+                                    <button onClick={() => rejectInco(inv)}
+                                      aria-label={`Reject INCO Terms for ${vendorName(inv.vendorId)}`}
+                                      className={`flex items-center gap-1 px-3 py-1.5 text-[11px] font-medium text-red-600 hover:text-red-700 ${FOCUS_RING} rounded`}>
+                                      <X className="w-3.5 h-3.5" /> Reject
+                                    </button>
+                                  )}
                                 </div>
                               )}
                             </div>
@@ -1274,7 +1419,7 @@ export function RfqPanel({
               )}
 
               {/* Technical spec sign-off — the gate that must clear BEFORE the award below */}
-              {quotedCount >= 1 && !inFulfillment && (
+              {quotedCount >= 1 && showAwardSurfaces && (
                 <TechSpecPanel
                   request={request}
                   invites={invites}
@@ -1285,7 +1430,7 @@ export function RfqPanel({
               )}
 
               {/* Unified Final-Decision approve + Request-PI (split award; bulk or per-vendor) */}
-              {canManage && quotedCount >= 1 && !inFulfillment && (
+              {canManage && quotedCount >= 1 && showAwardSurfaces && (
                 <FinalDecisionActions
                   request={request}
                   invites={invites}
@@ -1295,8 +1440,11 @@ export function RfqPanel({
                 />
               )}
 
-              {/* Start Reverse Auction CTA */}
-              {canManage && quotedCount >= 1 && (
+              {/* Start Reverse Auction CTA — escalation is a PRE-AWARD action only. Once a vendor is
+                  awarded or the request is in fulfillment, escalating re-seeds opening bids, flips
+                  every vendor's supplier screen and switches the whole page to the auction view,
+                  corrupting an order that is already being processed and paid. */}
+              {canManage && quotedCount >= 1 && !inFulfillment && !awardBased && (
                 <div className="rounded-lg bg-[#F4F4F5] border border-[#171717]/20 p-4 flex items-center justify-between gap-4 flex-wrap">
                   <div className="flex items-start gap-3">
                     <div className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-lg bg-[#171717]/10 text-[#171717]">
@@ -1343,7 +1491,9 @@ export function RfqPanel({
                         <li key={`${m.inviteId}-${m.id}`} className="px-3 py-2 text-[11px] text-slate-600">
                           <span className="font-semibold text-slate-900">{m.vendor}</span>{' · '}
                           <span className="capitalize">{m.by}</span> {m.action}
-                          {m.quote ? <span className="tabular-nums"> {fmtCurrency(rfqTotal(m.quote, gridItems))}</span> : m.price != null ? <span className="tabular-nums"> {fmtCurrency(m.price)}</span> : ''}
+                          {/* A thread quotation carries its own currency, so it converts. The legacy
+                              lump-sum `m.price` has no currency on the message and stays as stored. */}
+                          {m.quote ? <span className="tabular-nums"> {inrWithNativeLabel(rfqTotal(m.quote, gridItems), m.quote.currency)}</span> : m.price != null ? <span className="tabular-nums"> {fmtCurrency(m.price)}</span> : ''}
                           {m.message ? ` — ${m.message}` : ''}
                           <span className="text-slate-400"> · {new Date(m.at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
                         </li>
@@ -1422,6 +1572,38 @@ function VendorActions({
           className={`flex items-center justify-center gap-1 px-2 py-1.5 text-[11px] font-semibold bg-white border border-slate-200 text-slate-600 rounded-lg ${FOCUS_RING}`}
         >
           <X className="w-3.5 h-3.5" /> Cancel
+        </button>
+      </div>
+    )
+  }
+
+  // Contract documents are sent WITH the RFQ invite and gate the quotation form (docs-before-price).
+  // A vendor who declines them is locked out of quoting, so their RFQ status stays `awaiting_quote`
+  // forever — and the Re-send control used to live ONLY inside the `approved` branch below, which
+  // requires a price agreement that can never happen. Both sides were stuck. Surface the decline and
+  // the re-send at every pre-approval status; the `approved` branch keeps its own copy.
+  if (canManage && docStatus === 'rejected' && status !== 'approved') {
+    return (
+      <div className="flex flex-col items-stretch gap-1.5">
+        <span className={`self-center text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${DOC_APPROVAL_STATUS_COLORS[docStatus]}`}>
+          {DOC_APPROVAL_STATUS_LABELS[docStatus]}
+        </span>
+        <p className="text-[10px] text-red-700 bg-red-50 border border-red-200 rounded-lg px-2 py-1 leading-snug">
+          Vendor declined the contract documents — their quotation form is locked until you re-send them.
+        </p>
+        <button
+          onClick={onResendDocs}
+          aria-label={`Re-send approval documents to ${vendorLabel}`}
+          className={`flex items-center justify-center gap-1 px-2 py-1.5 text-[11px] font-semibold bg-[#171717] hover:bg-[#000000] text-white rounded-lg ${FOCUS_RING}`}
+        >
+          <Send className="w-3.5 h-3.5" /> Re-send documents
+        </button>
+        <button
+          onClick={onCopyLink}
+          aria-label={`Copy quotation link for ${vendorLabel}`}
+          className={`flex items-center justify-center gap-1 px-2 py-1 text-[11px] font-medium text-slate-500 hover:text-slate-700 ${FOCUS_RING} rounded`}
+        >
+          <Link2 className="w-3 h-3" /> Copy link
         </button>
       </div>
     )

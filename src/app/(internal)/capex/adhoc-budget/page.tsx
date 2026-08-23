@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { toast } from 'sonner'
 import { ArrowLeftRight, Send } from 'lucide-react'
 import { useCapex } from '@/lib/capexContext'
@@ -24,8 +24,9 @@ function fmtCr(n: number) {
   return `₹${n.toFixed(2)} Cr`
 }
 
-export default function AdhocBudgetPage() {
+function AdhocBudgetForm() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const {
     capexMaster, customPlants, usedAmountByMasterItemId,
     brownFieldHeadAllocations, adhocBudgetRequests, createAdhocBudgetRequest,
@@ -61,6 +62,34 @@ export default function AdhocBudgetPage() {
     return list
   }, [customPlants, rolePlant])
   const plantLabel = (v: string) => allPlants.find(p => p.value === v)?.label ?? v
+
+  /**
+   * `?plant=` — arrived from a PLANT-SCOPED dashboard tile (Administration's "Over-allocation
+   * exposure" with the plant lens set). A tile that counts one plant's breached heads and then lands
+   * on a page showing a different plant's picker default is the tile↔destination contradiction this
+   * whole feature removed, so the lens is honoured here.
+   *
+   * Applied ONCE, from an effect rather than as the `useState` initial value, for two reasons:
+   * `customPlants` arrives from the provider AFTER first render, so a runtime-created plant is not in
+   * `allPlants` yet on mount; and once the user touches the picker their choice must win over the URL
+   * (which `router` does not rewrite here). The ref is what makes "once" true across re-renders.
+   *
+   * A value this page cannot select is DISCLOSED, never silently dropped — the same rule
+   * `buildRequestListView`'s `ignored` follows. A plant-scoped role has no say in its plant, so the
+   * param is ignored outright for one (no such role can reach this page today — `ALLOWED` is
+   * sourcing/admin — but the guard states the precedence rather than relying on that staying true).
+   */
+  const requestedPlant = searchParams.get('plant')?.trim() || null
+  const paramApplied = useRef(false)
+  const paramSelectable = !!requestedPlant && allPlants.some(p => p.value === requestedPlant)
+
+  useEffect(() => {
+    if (paramApplied.current || !requestedPlant || rolePlant || !paramSelectable) return
+    paramApplied.current = true
+    setPlant(requestedPlant)
+  }, [requestedPlant, rolePlant, paramSelectable])
+
+  const ignoredPlantParam = requestedPlant && !rolePlant && !paramSelectable ? requestedPlant : null
 
   const heads = useMemo(
     () => (plant ? headsForScope(capexMaster, plant, fy, projectType) : []),
@@ -126,6 +155,13 @@ export default function AdhocBudgetPage() {
         </select>
       </div>
 
+      {ignoredPlantParam && (
+        <p role="status" className="shrink-0 text-[11px] font-medium text-amber-700">
+          The link asked for plant &ldquo;{ignoredPlantParam}&rdquo;, which is not one this page can
+          transfer budget for — pick a plant above instead.
+        </p>
+      )}
+
       {plant && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 flex-1 min-h-0">
           {/* Form */}
@@ -187,5 +223,17 @@ export default function AdhocBudgetPage() {
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * `useSearchParams` needs a Suspense boundary or the App Router build fails on this route — the same
+ * shape `/capex/requests` and `/capex/dashboard` already use.
+ */
+export default function AdhocBudgetPage() {
+  return (
+    <Suspense fallback={<div className="p-5 text-muted-foreground">Loading…</div>}>
+      <AdhocBudgetForm />
+    </Suspense>
   )
 }

@@ -33,12 +33,47 @@ export function awardedInvites(invites: VendorInvite[]): VendorInvite[] {
 }
 
 /**
+ * Line items no award covers yet. A split award is additive — sourcing awards one vendor at a
+ * time — so between the first award and the last, some lines still have no winner.
+ */
+export function unawardedLineItemIds(
+  lineItems: { id: string }[],
+  invites: VendorInvite[],
+): string[] {
+  const covered = new Set<string>();
+  for (const inv of invites) {
+    if (!inv.awarded) continue;
+    for (const id of inv.awardedItemIds ?? []) covered.add(id);
+  }
+  return lineItems.map((li) => li.id).filter((id) => !covered.has(id));
+}
+
+/**
+ * A split award has started but is NOT finished — at least one vendor is awarded and at least one
+ * line item still has no winner.
+ *
+ * This is the "still awardable" escape the award surfaces need. Awarding the first vendor bumps the
+ * request to `pi_requested`, which reads as fulfillment everywhere; without this, the panels that
+ * award the REMAINING vendors disappear and their line items are silently never ordered (the
+ * request even auto-completes once the first award's payments finish). It is deliberately narrower
+ * than `isAwardBased`: once every line has a winner there is nothing left to award, so a finished
+ * single-vendor award correctly hides the surfaces again.
+ */
+export function splitAwardInProgress(
+  lineItems: { id: string }[],
+  invites: VendorInvite[],
+): boolean {
+  return isAwardBased(invites) && unawardedLineItemIds(lineItems, invites).length > 0;
+}
+
+/**
  * Group the Final-Decision selections (per-line vendor + price/disc) into one award per vendor,
  * computing each award's GST-inclusive amount. Mirrors VendorGrid's per-line `net` (price ×
  * (1-disc/100) × qty) and folds in item-wise GST via the line item's HSN code.
  */
 export function buildAwardGroups(
   lineItems: CapexLineItem[],
+  /** `finalPrices` are INR by contract — both write paths (`VendorGrid`, `RfqPanel`) apply `toInr`. */
   finalPrices: Record<string, string>,
   finalVendorPerItem: Record<string, string>,
 ): AwardGroup[] {
@@ -61,6 +96,39 @@ export function buildAwardGroups(
     itemIds: g.itemIds,
     amount: Math.round(g.amount),
   }));
+}
+
+/**
+ * The Final-Decision price for one unit, normalised to INR.
+ *
+ * `finalPrices` is INR by contract (see `buildAwardGroups`), but the auto-fill on both award
+ * surfaces reads a unit price in the VENDOR's currency. Both paths must convert through here —
+ * they were once hand-copied expressions and drifted, which silently inflated every award-basis
+ * figure on the RFQ path.
+ */
+export function awardUnitPriceInr(rawUnit: number, currency?: string): string {
+  return String(Math.round(toInr(rawUnit, currency)));
+}
+
+/**
+ * Whether THIS invite owns a fulfillment track — i.e. whether the vendor holding this link is
+ * entitled to see the PI request, the issued purchase order, the payment milestones and the trial
+ * gate for this request.
+ *
+ * Two award shapes, both checked, because handling one and not the other is how a losing bidder
+ * ends up looking at someone else's purchase order:
+ *  - split award  → the invite itself is `awarded` and carries its own PO / milestones;
+ *  - single vendor → the request names the winner in `finalVendorId` (RFQ and auction alike).
+ *
+ * A vendor who quoted and lost owns NOTHING here, even though `request.status` has moved into
+ * fulfillment for the winner. Fails closed: with no winner recorded, nobody owns the track.
+ */
+export function ownsFulfillmentTrack(
+  request: Pick<CapexRequest, 'finalVendorId'>,
+  invite: Pick<VendorInvite, 'awarded' | 'vendorId'>,
+): boolean {
+  if (invite.awarded) return true;
+  return !!request.finalVendorId && invite.vendorId === request.finalVendorId;
 }
 
 /**
@@ -149,6 +217,30 @@ export function resolveFinalVendor(
   return { amount: request.budget ?? 0 };
 }
 
+/**
+ * The order value of ONE fulfillment track, on an INR basis — the figure the PO is raised for and
+ * every payment milestone is computed from.
+ *
+ * Pass `invite` for a split-award track (its own awarded amount); omit it for the single-vendor
+ * RFQ/auction track, which resolves through `resolveFinalVendor` — the negotiated, GST-inclusive
+ * INR total. This is the same resolution `AccountsPanel` shows internally, so the internal tracker
+ * and the public Plant-Accounts / PO-issue pages can never disagree about the same order.
+ *
+ * NOTE ON THE FALLBACK: `resolveFinalVendor` returns `request.budget` — the buyer's ex-ante
+ * ESTIMATE — only when the finalized vendor has no quotation at all. That is a genuine last resort
+ * so the page still renders a number; it is never a substitute for an agreed price. The public PO
+ * pages previously reached that estimate directly, which issued POs at the estimate rather than the
+ * negotiated total (e.g. ₹1.00 Cr against a ₹1.044 Cr agreed order).
+ */
+export function resolveOrderValue(
+  request: CapexRequest,
+  invites: VendorInvite[],
+  invite?: VendorInvite,
+): number {
+  if (invite) return invite.awardAmount ?? invite.purchaseOrder?.amount ?? 0;
+  return resolveFinalVendor(request, invites).amount;
+}
+
 export function isFulfillmentStatus(status: string): boolean {
   return FULFILLMENT_STATUSES.includes(status);
 }
@@ -166,6 +258,40 @@ export function quoteGrandTotal(quote?: Quote): number {
 export function inrQuoteGrandTotal(quote?: Quote): number {
   if (!quote) return 0;
   return toInr(quoteGrandTotal(quote), quote.currency);
+}
+
+/**
+ * Item-wise GST on an auction / buyer-seeded `Quote`, in the quote's OWN currency — the `Quote`
+ * counterpart of `rfqGstAmount`. GST comes from each LINE ITEM's own HSN code applied to that
+ * line's `itemPrices[id] × qty`; footer charges are not taxed, exactly as on the RFQ side.
+ *
+ * A quote with no `itemPrices` (legacy lump-sum) yields 0 — there is no per-line price to tax —
+ * which is the same answer `rfqGstAmount` gives for a quotation with no line prices.
+ */
+export function quoteGstAmount(quote?: Quote, items?: CapexLineItem[]): number {
+  if (!quote || !items?.length) return 0;
+  return items.reduce((sum, it) => {
+    const unit = quote.itemPrices?.[it.id];
+    if (unit == null || !it.hsnCode) return sum;
+    return sum + gstAmount(unit * (parseFloat(it.quantity) || 1), it.hsnCode);
+  }, 0);
+}
+
+/**
+ * GST-INCLUSIVE grand total of a `Quote`, in its own currency: subtotal + freight/packing/service
+ * + item-wise GST. Mirrors `rfqTotal`, so a `Quote` and an `RfqQuote` on the same request can be
+ * compared on one basis. Comparing `quoteGrandTotal` (GST-exclusive) against `rfqTotal`
+ * (GST-inclusive) is how a dearer seeded quote came to be flagged "Lowest" to an approver.
+ */
+export function quoteGrandTotalInclGst(quote?: Quote, items?: CapexLineItem[]): number {
+  if (!quote) return 0;
+  return quoteGrandTotal(quote) + quoteGstAmount(quote, items);
+}
+
+/** Same, on an INR basis — the figure to compare across vendors and currencies. */
+export function inrQuoteGrandTotalInclGst(quote?: Quote, items?: CapexLineItem[]): number {
+  if (!quote) return 0;
+  return toInr(quoteGrandTotalInclGst(quote, items), quote.currency);
 }
 
 /** The quote that represents a vendor's current position: latest bid, else their opening bid. */

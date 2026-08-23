@@ -18,6 +18,7 @@
 import type { CapexLineItem, RfqQuote } from "@/lib/types";
 import { useMemo } from "react";
 import { INPUT_RIGHT, fmtCurrency } from "@/lib/auctionTheme";
+import { currencySymbol } from "@/lib/currencyUtils";
 import { rfqTotal, rfqGstAmount, rfqLineGstRate, rfqLineUnitPrice, rfqLineBreakdown, rfqLineSubtotal } from "@/lib/rfqUtils";
 import { HSN_GST_OPTIONS, gstRateForHsn } from "@/lib/hsnGst";
 import { TABLE_WRAP } from "@/lib/uiTokens";
@@ -35,15 +36,21 @@ export interface SupplierQuoteTableProps {
   /** Controlled per-line HSN selections for the entry variant (vendor sets HSN per line). */
   hsnByItem?: Record<string, string>;
   onHsnChange?: (itemId: string, value: string) => void;
+  /**
+   * The currency these figures are IN. Every amount on this table is the vendor's own quotation —
+   * what they contractually offer — so it renders in their currency, never converted. Read mode
+   * falls back to the stored quote's currency; entry/bid must pass the live form selection.
+   */
+  currency?: string;
   /** Whether to render the read-mode attribute rows + grand-total footer (default true). */
   showFooter?: boolean;
 }
 
 /** Read-mode attribute rows beneath the line items (freight/packing/service/etc.). */
-const ATTR_ROWS: Array<{ label: string; value: (q?: RfqQuote, gst?: number) => string }> = [
-  { label: "Transportation / Freight", value: q => (q?.freight != null ? fmtCurrency(q.freight) : "—") },
-  { label: "Packing / Forwarding", value: q => (q?.packing != null ? fmtCurrency(q.packing) : "—") },
-  { label: "Service / Installation", value: q => (q?.service != null ? fmtCurrency(q.service) : "—") },
+const ATTR_ROWS: Array<{ label: string; value: (q: RfqQuote | undefined, gst: number, cur: string) => string }> = [
+  { label: "Transportation / Freight", value: (q, _gst, cur) => (q?.freight != null ? fmtCurrency(q.freight, cur) : "—") },
+  { label: "Packing / Forwarding", value: (q, _gst, cur) => (q?.packing != null ? fmtCurrency(q.packing, cur) : "—") },
+  { label: "Service / Installation", value: (q, _gst, cur) => (q?.service != null ? fmtCurrency(q.service, cur) : "—") },
   {
     label: "Delivery Lead Time",
     value: q => (q?.deliveryWeeks != null ? `${q.deliveryWeeks} week${q.deliveryWeeks !== 1 ? "s" : ""}` : "—"),
@@ -52,8 +59,8 @@ const ATTR_ROWS: Array<{ label: string; value: (q?: RfqQuote, gst?: number) => s
     label: "Warranty",
     value: q => (q?.warranty != null ? `${q.warranty} year${q.warranty !== 1 ? "s" : ""}` : "—"),
   },
-  { label: "GST (as per HSN)", value: (_q, gst) => ((gst ?? 0) > 0 ? fmtCurrency(gst ?? 0) : "—") },
-  { label: "Currency", value: q => q?.currency ?? "INR" },
+  { label: "GST (as per HSN)", value: (_q, gst, cur) => (gst > 0 ? fmtCurrency(gst, cur) : "—") },
+  { label: "Currency", value: (_q, _gst, cur) => cur },
 ];
 
 const TH = "px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider";
@@ -66,9 +73,14 @@ export function SupplierQuoteTable({
   onLinePrice,
   hsnByItem,
   onHsnChange,
+  currency,
   showFooter = true,
 }: SupplierQuoteTableProps) {
   const isRead = variant === "read";
+  // Own-currency throughout: the vendor's quotation is what they offer. Cross-vendor comparison and
+  // anything Accounts consume convert to INR elsewhere (`inrRfqTotal`), never here.
+  const cur = currency ?? quote?.currency ?? "INR";
+  const sym = currencySymbol(cur);
 
   const hasLinePrices = !!quote?.linePrices && Object.keys(quote.linePrices).length > 0;
 
@@ -118,7 +130,7 @@ export function SupplierQuoteTable({
             <th scope="col" className={`${TH} text-center w-16`}>UOM</th>
             <th scope="col" className={`${TH} text-center ${onHsnChange ? "w-44" : "w-28"} border-l border-white/15`}>HSN / GST</th>
             <th scope="col" className={`${TH} text-right w-36 border-l border-white/15`}>
-              Unit Price (₹){!isRead && <span className="text-red-300"> *</span>}
+              Unit Price ({sym}){!isRead && <span className="text-red-300"> *</span>}
             </th>
             <th scope="col" className={`${TH} text-right w-32 border-l border-white/15`}>Line Total</th>
           </tr>
@@ -159,7 +171,7 @@ export function SupplierQuoteTable({
                     <div className="text-xs text-slate-700">
                       <p className="font-semibold">{hsn} <span className="font-semibold">· {breakdown.gstRate}%</span></p>
                       {breakdown.gstAmount > 0 && (
-                        <p className="text-[10px] text-slate-500 mt-0.5">GST {fmtCurrency(breakdown.gstAmount)}</p>
+                        <p className="text-[10px] text-slate-500 mt-0.5">GST {fmtCurrency(breakdown.gstAmount, cur)}</p>
                       )}
                     </div>
                   ) : (
@@ -168,7 +180,7 @@ export function SupplierQuoteTable({
                 </td>
                 <td className="px-3 py-3 align-top border-l border-slate-100">
                   {isRead ? (
-                    <p className="text-right tabular-nums text-slate-700">{hasLinePrices ? fmtCurrency(unit) : "—"}</p>
+                    <p className="text-right tabular-nums text-slate-700">{hasLinePrices ? fmtCurrency(unit, cur) : "—"}</p>
                   ) : (
                     <input
                       type="number"
@@ -187,9 +199,9 @@ export function SupplierQuoteTable({
                 <td className="px-3 py-3 text-right text-sm font-bold tabular-nums text-slate-800 align-top border-l border-slate-100">
                   {breakdown.taxableSubtotal > 0 ? (
                     <div>
-                      <p>{fmtCurrency(breakdown.lineTotalInclGst)}</p>
+                      <p>{fmtCurrency(breakdown.lineTotalInclGst, cur)}</p>
                       <p className="text-[10px] font-normal text-slate-500">
-                        {fmtCurrency(breakdown.taxableSubtotal)} + {fmtCurrency(breakdown.gstAmount)} GST
+                        {fmtCurrency(breakdown.taxableSubtotal, cur)} + {fmtCurrency(breakdown.gstAmount, cur)} GST
                       </p>
                     </div>
                   ) : "—"}
@@ -207,7 +219,7 @@ export function SupplierQuoteTable({
                     {attr.label}
                   </th>
                   <td className="px-3 py-2 text-right text-[12px] text-slate-700 tabular-nums border-l border-slate-100">
-                    {attr.value(quote, gst)}
+                    {attr.value(quote, gst, cur)}
                   </td>
                 </tr>
               ))}
@@ -216,8 +228,8 @@ export function SupplierQuoteTable({
                   Grand Total <span className="font-normal text-slate-400">(incl. GST)</span>
                 </th>
                 <td className="px-3 py-2.5 text-right border-l border-slate-100">
-                  <p className="font-black tabular-nums text-[#2563EB]">{total > 0 ? fmtCurrency(total) : "—"}</p>
-                  {total > 0 && gst > 0 && <p className="text-[10px] font-normal text-slate-500 mt-0.5">incl. {fmtCurrency(gst)} GST</p>}
+                  <p className="font-black tabular-nums text-[#2563EB]">{total > 0 ? fmtCurrency(total, cur) : "—"}</p>
+                  {total > 0 && gst > 0 && <p className="text-[10px] font-normal text-slate-500 mt-0.5">incl. {fmtCurrency(gst, cur)} GST</p>}
                 </td>
               </tr>
             </>

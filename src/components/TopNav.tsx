@@ -3,6 +3,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Building2, ChevronDown, ChevronRight, MessageCircle, X, SendHorizonal } from 'lucide-react'
 import { usePathname, useRouter } from 'next/navigation'
 import { useCapex } from '@/lib/capexContext'
+import { PLANTS, ROLE_NAMES, getPlantForRole } from '@/lib/constants'
 
 const ROLE_GROUPS = [
   {
@@ -94,7 +95,6 @@ export function TopNav() {
 
   const [showRolePicker, setShowRolePicker] = useState(false)
   const [currentRole,    setCurrentRole]    = useState("buyer")
-  const [currentPlant,   setCurrentPlant]   = useState("jhajjar_p1")
   const [chatOpen,       setChatOpen]       = useState(false)
   const [selectedContact, setSelectedContact] = useState<string | null>(null)
   const [msgText,        setMsgText]        = useState("")
@@ -109,13 +109,6 @@ export function TopNav() {
     const onRoleChange = (e: CustomEvent) => setCurrentRole(e.detail)
     window.addEventListener('capex_rolechange', onRoleChange as EventListener)
     return () => window.removeEventListener('capex_rolechange', onRoleChange as EventListener)
-  }, [])
-
-  useEffect(() => {
-    setCurrentPlant(localStorage.getItem('capex_plant') ?? 'jhajjar_p1')
-    const onPlantChange = (e: CustomEvent) => setCurrentPlant(e.detail)
-    window.addEventListener('capex_plantchange', onPlantChange as EventListener)
-    return () => window.removeEventListener('capex_plantchange', onPlantChange as EventListener)
   }, [])
 
   // Scroll thread to bottom when messages change or contact selected
@@ -169,8 +162,25 @@ export function TopNav() {
     setMsgText("")
   }
 
-  const active    = ALL_ROLES.find(r => r.value === currentRole) ?? ALL_ROLES[0]
+  // A role that has no ROLE_GROUPS entry (the unscoped `buyer`, or any role added to
+  // ROLE_NAMES but not registered here) must NOT fall back to ALL_ROLES[0] — that
+  // impersonated another user, showing "Arjun Mehta / Jhajjar Plant 1" while the plant
+  // badge beside it correctly read "All Plants". Fall back to the role's real name and
+  // show no area rather than a fabricated one.
+  const active    = ALL_ROLES.find(r => r.value === currentRole)
+    ?? { value: currentRole, name: ROLE_NAMES[currentRole] ?? currentRole, area: '' }
   const contacts  = ALL_ROLES.filter(r => r.value !== currentRole)
+
+  // Plant badge is derived from the current role's plant scope, not from a switcher —
+  // there is no plant-switching UI in the product. Global roles (sourcing, maintenance,
+  // super_admin, the unscoped buyer) have no plant, so the badge reads "All Plants".
+  const rolePlant = getPlantForRole(currentRole)
+  const plantLabel = rolePlant
+    ? (PLANTS.find(p => p.value === rolePlant)?.label
+        ?? customPlants.find(p => p.value === rolePlant)?.label
+        ?? PLANT_LABELS[rolePlant]
+        ?? rolePlant)
+    : "All Plants"
   const pageMeta  = PAGE_LABELS[pathname]
     ?? (pathname.startsWith("/capex/") ? { label: "CAPEX Detail", sub: "Request view" } : { label: "Portal" })
 
@@ -208,10 +218,12 @@ export function TopNav() {
         <div className="flex items-center gap-2.5 min-w-0">
           <span className="hidden sm:flex items-center gap-1 text-[11px] font-semibold text-primary bg-accent px-2.5 py-1 rounded-lg shrink-0 border border-primary/10">
             <Building2 className="w-3 h-3" aria-hidden="true" />
-            {PLANT_LABELS[currentPlant] ?? currentPlant}
+            {plantLabel}
           </span>
           <div className="hidden sm:block w-px h-4 bg-border shrink-0" />
-          <h1 className="text-[15px] font-bold text-foreground tracking-tight truncate">{pageMeta.label}</h1>
+          {/* Chrome, not the page heading: every route renders its own <h1>, and a second one
+              here gave every internal page two <h1>s. Kept visually identical. */}
+          <div className="text-[15px] font-bold text-foreground tracking-tight truncate">{pageMeta.label}</div>
           {pageMeta.sub && (
             <>
               <ChevronRight className="w-3.5 h-3.5 text-slate-300 shrink-0" />
@@ -258,7 +270,7 @@ export function TopNav() {
               </span>
               <span className="hidden sm:flex flex-col items-start leading-none min-w-0">
                 <span className="text-slate-800 font-semibold text-[12px] truncate max-w-[100px]">{active.name}</span>
-                <span className="text-slate-400 text-[10px] truncate max-w-[100px]">{active.area}</span>
+                {active.area && <span className="text-slate-400 text-[10px] truncate max-w-[100px]">{active.area}</span>}
               </span>
               <ChevronDown aria-hidden="true" className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-150 shrink-0 ${showRolePicker ? "rotate-180" : ""}`} />
             </button>

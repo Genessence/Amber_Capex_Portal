@@ -31,13 +31,15 @@ import {
   deliveryLeadDays,
   expectedFinalPaymentDate,
   finalPaymentBlockedByTrial,
+  resolveOrderValue,
 } from '@/lib/paymentUtils'
 import type { PaymentMilestone } from '@/lib/types'
 
 /** The actor stamped on every mutation made from this public link (no portal login). */
 const PLANT_ACCOUNTS_ACTOR = 'Plant Accounts (email)'
 
-const fmt = (n: number) => '₹' + n.toLocaleString('en-IN')
+/** Rupees only — every amount reaching this page is resolved on an INR basis. */
+const fmt = (n: number) => '₹' + Math.round(n).toLocaleString('en-IN')
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
@@ -106,6 +108,13 @@ export default function PlantAccountsPage() {
   const request = target?.request
   const invite = target?.kind === 'award' ? target.invite : undefined
 
+  /** Scoped to THIS request, the way AccountsPanel is called internally — a vendor can hold
+   *  invites on several requests, and the order value must resolve against this one. */
+  const reqInvites = useMemo(
+    () => (request ? invites.filter(i => i.requestId === request.id) : []),
+    [invites, request],
+  )
+
   const vendor = useMemo(() => {
     if (!target) return undefined
     if (target.kind === 'award') return vendors.find(v => v.id === target.invite.vendorId)
@@ -129,7 +138,10 @@ export default function PlantAccountsPage() {
     () => (invite ? invite.faCodes : request?.faCodes) ?? {},
     [invite, request],
   )
-  const amount = invite?.awardAmount ?? request?.purchaseOrder?.amount ?? request?.budget ?? 0
+  // The negotiated order value (INR), resolved exactly as AccountsPanel does it internally — NOT
+  // the buyer's `request.budget` estimate, which this page used to fall back to and then quote to
+  // Global Accounts in the PO-request email. The issued PO's own amount is shown separately below.
+  const amount = request ? resolveOrderValue(request, reqInvites, invite) : 0
   const status = (invite ? invite.awardStatus : request?.status) ?? ''
   const existingPo = invite ? invite.purchaseOrder : request?.purchaseOrder
   const poIssued = !!existingPo?.issuedAt

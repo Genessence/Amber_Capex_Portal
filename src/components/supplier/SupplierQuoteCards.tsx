@@ -15,6 +15,7 @@
 import type { CapexLineItem, RfqQuote } from "@/lib/types";
 import { useMemo } from "react";
 import { INPUT_RIGHT, LABEL, fmtCurrency } from "@/lib/auctionTheme";
+import { currencySymbol } from "@/lib/currencyUtils";
 import { rfqTotal, rfqGstAmount, rfqLineGstRate, rfqLineUnitPrice, rfqLineBreakdown, rfqLineSubtotal } from "@/lib/rfqUtils";
 import { HSN_GST_OPTIONS, gstRateForHsn } from "@/lib/hsnGst";
 import type { SupplierQuoteVariant } from "./SupplierQuoteTable";
@@ -27,14 +28,16 @@ export interface SupplierQuoteCardsProps {
   onLinePrice?: (itemId: string, value: string) => void;
   hsnByItem?: Record<string, string>;
   onHsnChange?: (itemId: string, value: string) => void;
+  /** See `SupplierQuoteTableProps.currency` — own-currency figures, never converted. */
+  currency?: string;
   /** Read-mode only: render the charges block + grand-total summary below the cards (default true). */
   showFooter?: boolean;
 }
 
-const ATTR_ROWS: Array<{ label: string; value: (q?: RfqQuote, gst?: number) => string }> = [
-  { label: "Transportation / Freight", value: q => (q?.freight != null ? fmtCurrency(q.freight) : "—") },
-  { label: "Packing / Forwarding", value: q => (q?.packing != null ? fmtCurrency(q.packing) : "—") },
-  { label: "Service / Installation", value: q => (q?.service != null ? fmtCurrency(q.service) : "—") },
+const ATTR_ROWS: Array<{ label: string; value: (q: RfqQuote | undefined, gst: number, cur: string) => string }> = [
+  { label: "Transportation / Freight", value: (q, _gst, cur) => (q?.freight != null ? fmtCurrency(q.freight, cur) : "—") },
+  { label: "Packing / Forwarding", value: (q, _gst, cur) => (q?.packing != null ? fmtCurrency(q.packing, cur) : "—") },
+  { label: "Service / Installation", value: (q, _gst, cur) => (q?.service != null ? fmtCurrency(q.service, cur) : "—") },
   {
     label: "Delivery Lead Time",
     value: q => (q?.deliveryWeeks != null ? `${q.deliveryWeeks} week${q.deliveryWeeks !== 1 ? "s" : ""}` : "—"),
@@ -43,8 +46,8 @@ const ATTR_ROWS: Array<{ label: string; value: (q?: RfqQuote, gst?: number) => s
     label: "Warranty",
     value: q => (q?.warranty != null ? `${q.warranty} year${q.warranty !== 1 ? "s" : ""}` : "—"),
   },
-  { label: "GST (as per HSN)", value: (_q, gst) => ((gst ?? 0) > 0 ? fmtCurrency(gst ?? 0) : "—") },
-  { label: "Currency", value: q => q?.currency ?? "INR" },
+  { label: "GST (as per HSN)", value: (_q, gst, cur) => (gst > 0 ? fmtCurrency(gst, cur) : "—") },
+  { label: "Currency", value: (_q, _gst, cur) => cur },
 ];
 
 export function SupplierQuoteCards({
@@ -55,9 +58,12 @@ export function SupplierQuoteCards({
   onLinePrice,
   hsnByItem,
   onHsnChange,
+  currency,
   showFooter = true,
 }: SupplierQuoteCardsProps) {
   const isRead = variant === "read";
+  const cur = currency ?? quote?.currency ?? "INR";
+  const sym = currencySymbol(cur);
   const hasLinePrices = !!quote?.linePrices && Object.keys(quote.linePrices).length > 0;
 
   const previewQuote = useMemo((): RfqQuote | undefined => {
@@ -129,7 +135,7 @@ export function SupplierQuoteCards({
                 <div className="text-xs text-slate-700 text-right">
                   <p>{hsn} <span className="font-semibold">· {breakdown.gstRate}%</span></p>
                   {breakdown.gstAmount > 0 && (
-                    <p className="text-[10px] text-slate-500 mt-0.5">GST {fmtCurrency(breakdown.gstAmount)}</p>
+                    <p className="text-[10px] text-slate-500 mt-0.5">GST {fmtCurrency(breakdown.gstAmount, cur)}</p>
                   )}
                 </div>
               ) : (
@@ -140,10 +146,10 @@ export function SupplierQuoteCards({
             {/* Unit price */}
             <div className="flex items-center justify-between gap-3">
               <span className={LABEL + " mb-0"}>
-                Unit Price (₹){!isRead && <span className="text-red-500"> *</span>}
+                Unit Price ({sym}){!isRead && <span className="text-red-500"> *</span>}
               </span>
               {isRead ? (
-                <span className="text-sm font-semibold tabular-nums text-slate-800">{hasLinePrices ? fmtCurrency(unit) : "—"}</span>
+                <span className="text-sm font-semibold tabular-nums text-slate-800">{hasLinePrices ? fmtCurrency(unit, cur) : "—"}</span>
               ) : (
                 <input
                   type="number"
@@ -165,11 +171,11 @@ export function SupplierQuoteCards({
               <span className="text-xs font-semibold text-slate-500">Line Total <span className="font-normal text-slate-400">(incl. GST)</span></span>
               <div className="text-right">
                 <span className="text-sm font-bold tabular-nums text-slate-900">
-                  {breakdown.taxableSubtotal > 0 ? fmtCurrency(breakdown.lineTotalInclGst) : "—"}
+                  {breakdown.taxableSubtotal > 0 ? fmtCurrency(breakdown.lineTotalInclGst, cur) : "—"}
                 </span>
                 {breakdown.gstAmount > 0 && (
                   <p className="text-[10px] text-slate-500">
-                    {fmtCurrency(breakdown.taxableSubtotal)} + {fmtCurrency(breakdown.gstAmount)} GST
+                    {fmtCurrency(breakdown.taxableSubtotal, cur)} + {fmtCurrency(breakdown.gstAmount, cur)} GST
                   </p>
                 )}
               </div>
@@ -184,15 +190,15 @@ export function SupplierQuoteCards({
           {ATTR_ROWS.map(attr => (
             <div key={attr.label} className="flex items-center justify-between px-4 py-2 border-b border-slate-100 text-sm">
               <span className="text-slate-500">{attr.label}</span>
-              <span className="font-semibold tabular-nums text-slate-800">{attr.value(quote, gst)}</span>
+              <span className="font-semibold tabular-nums text-slate-800">{attr.value(quote, gst, cur)}</span>
             </div>
           ))}
           <div className="flex items-center justify-between px-4 py-3 bg-[#F4F4F5]">
             <div className="flex flex-col">
               <span className="text-sm font-bold text-slate-700">Grand Total <span className="font-normal text-slate-400">(incl. GST)</span></span>
-              {total > 0 && gst > 0 && <span className="text-[10px] text-slate-400">incl. {fmtCurrency(gst)} GST</span>}
+              {total > 0 && gst > 0 && <span className="text-[10px] text-slate-400">incl. {fmtCurrency(gst, cur)} GST</span>}
             </div>
-            <span className="text-xl font-black text-[#2563EB] tabular-nums">{total > 0 ? fmtCurrency(total) : "—"}</span>
+            <span className="text-xl font-black text-[#2563EB] tabular-nums">{total > 0 ? fmtCurrency(total, cur) : "—"}</span>
           </div>
         </div>
       )}

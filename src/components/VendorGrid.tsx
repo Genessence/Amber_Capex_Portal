@@ -6,10 +6,12 @@ import { Copy, FileSpreadsheet, Paperclip, Mail, X, Users } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useCapex } from "@/lib/capexContext"
 import { buildSupplierLink } from "@/lib/tokenUtils"
-import { isAuctionExpired } from "@/lib/auctionUtils"
-import { isAwardBased } from "@/lib/paymentUtils"
-import { toInr } from "@/lib/currencyUtils"
-import { INVITE_STATUS_COLORS, INVITE_STATUS_ICONS, SOURCING_ENGINEERS, ROLE_NAMES } from "@/lib/constants"
+import { isAuctionExpired, lowestInrUnitIndex, quoteLineUnitPrice } from "@/lib/auctionUtils"
+import { awardUnitPriceInr, inrQuoteGrandTotal, isAwardBased, quoteGrandTotal } from "@/lib/paymentUtils"
+import { currencySymbol, formatTypedInr, inrWithNative, inrWithNativeLabel, isForeignCurrency, toInr } from "@/lib/currencyUtils"
+import { fmtCurrency } from "@/lib/auctionTheme"
+import { canTransitionStatus } from "@/lib/statusFlow"
+import { INVITE_STATUS_COLORS, INVITE_STATUS_ICONS, SOURCING_ENGINEERS, ROLE_NAMES, STATUS_LABELS } from "@/lib/constants"
 import type { CapexRequest, CapexLineItem, VendorInvite, Vendor, Quote, SourcingDecision } from "@/lib/types"
 
 const INVITE_STATUS_LABELS: Record<string, string> = {
@@ -124,6 +126,13 @@ interface OfferCol {
   sent?: boolean
 }
 
+/**
+ * An offer column plus the currency sourcing picked for it (which lives in `offerAttrs`, keyed by
+ * column id). Merged before the column is handed to the memoized rows so every money cell in the
+ * column can be labelled with the currency its numbers are actually in.
+ */
+type OfferColView = OfferCol & { currency: string }
+
 type VendorCol = { inv: VendorInvite; vendor: Vendor | undefined; latestQuote: Quote | null }
 
 function vendorLabel(v: { vendorCode: string; vendorName: string }) {
@@ -136,7 +145,7 @@ interface ItemBodyRowProps {
   idx: number
   vendorCols: VendorCol[]
   lowestItemColIdx: number | undefined
-  visibleOfferCols: OfferCol[]
+  visibleOfferCols: OfferColView[]
   isSourcing: boolean
   isLocked: boolean
   finalPrice: string
@@ -182,9 +191,14 @@ const ItemBodyRow = React.memo(function ItemBodyRow({
       {vendorCols.map(({ inv, latestQuote }, colIdx) => {
         const isLowestItem = lowestItemColIdx === colIdx && !!latestQuote
         const isApproved   = inv.status === "approved"
-        const price = latestQuote ? (latestQuote.itemPrices?.[item.id] ?? latestQuote.price) : 0
+        // INR basis, matching `lowestPerItem` and the Final-Decision auto-fill (`awardUnitPriceInr`).
+        // The vendor's own-currency figure is shown beneath EACH figure it belongs to — one line
+        // under the unit, one under the line total — so neither can be read as the other.
+        const nativeUnit = quoteLineUnitPrice(latestQuote, item.id) ?? 0
+        const currency = latestQuote?.currency ?? "INR"
         const qty   = parseFloat(item.quantity) || 1
-        const total = price * qty
+        const unitDisplay  = inrWithNative(nativeUnit, currency)
+        const totalDisplay = inrWithNative(nativeUnit * qty, currency)
         return (
           <td key={inv.id}
             className={["px-2 py-2 text-center text-xs",
@@ -194,11 +208,13 @@ const ItemBodyRow = React.memo(function ItemBodyRow({
             {latestQuote ? (
               <>
                 <p className={["font-bold text-[12px]", isLowestItem ? "text-emerald-700" : "text-slate-800"].join(" ")}>
-                  ₹{price.toLocaleString("en-IN")}
+                  {unitDisplay.inr}
                 </p>
+                {unitDisplay.native && <p className="text-[10px] text-slate-400">{unitDisplay.native}</p>}
                 <p className={["text-[11px]", isLowestItem ? "text-emerald-600" : "text-slate-500"].join(" ")}>
-                  Total: ₹{total.toLocaleString("en-IN")}
+                  Total: {totalDisplay.inr}
                 </p>
+                {totalDisplay.native && <p className="text-[10px] text-slate-400">{totalDisplay.native}</p>}
                 {isLowestItem && (
                   <span className="inline-block mt-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 leading-none">↓ Lowest</span>
                 )}
@@ -213,29 +229,36 @@ const ItemBodyRow = React.memo(function ItemBodyRow({
         )
       })}
 
-      {/* Offer col cells */}
+      {/* Offer col cells — sourcing types the price in the column's own currency (Currency row
+          below); every figure is shown on the same INR basis as the vendor columns, with that
+          own-currency number beneath, so the Total Amount row compares like with like. */}
       {visibleOfferCols.map(col => {
         const price = col.prices[item.id] ?? ""
         const qty   = parseFloat(item.quantity) || 1
-        const total = Number(price) * qty
+        const nativeUnit  = Number(price)
+        const nativeTotal = nativeUnit * qty
+        const unitDisplay  = inrWithNative(nativeUnit, col.currency)
+        const totalDisplay = inrWithNative(nativeTotal, col.currency)
         const cellBg = col.sent ? "bg-slate-50/70" : "bg-slate-50/60"
         return (
           <td key={col.id} className={`px-2 py-2 text-center text-xs ${cellBg}`} style={OFFER_BORDER}>
             {col.sent ? (
               <>
                 <p className={["font-bold text-[12px]", price ? "text-slate-800" : "text-slate-300"].join(" ")}>
-                  {price ? "₹" + Number(price).toLocaleString("en-IN") : "₹0"}
+                  {price ? unitDisplay.inr : "₹0"}
                 </p>
-                {price && <p className="text-[11px] text-slate-600 font-semibold">Total: ₹{total.toLocaleString("en-IN")}</p>}
+                {price && <p className="text-[11px] text-slate-600 font-semibold">Total: {totalDisplay.inr}</p>}
+                {price && totalDisplay.native && <p className="text-[10px] text-slate-400">{totalDisplay.native}</p>}
               </>
             ) : (
               <>
                 <input type="number" value={price}
                   onChange={e => onSetOfferPrice(col.id, item.id, e.target.value)}
-                  placeholder="₹ price"
+                  placeholder={`${currencySymbol(col.currency)} price`}
                   className="w-full text-xs text-right border border-slate-300 rounded px-1.5 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-slate-400 placeholder:text-slate-300"
                 />
-                {price && <p className="text-[11px] text-slate-700 font-semibold mt-0.5">Total: ₹{total.toLocaleString("en-IN")}</p>}
+                {price && <p className="text-[11px] text-slate-700 font-semibold mt-0.5">Total: {totalDisplay.inr}</p>}
+                {price && totalDisplay.native && <p className="text-[10px] text-slate-400">{totalDisplay.native}</p>}
               </>
             )}
           </td>
@@ -366,13 +389,19 @@ function ItemRowGrid({ request, invites, vendors, currentRole, onSelectFinal, au
   // award-based request stays editable here too; each awarded vendor shows as awarded in the
   // Final Decision bar below the grid.
   //
-  // The legacy `sourcing_approved`/`buyer_approved` lock likewise does not apply in auction mode:
-  // those states are reachable from the old footer, and locking there left sourcing with a
-  // read-only column, no Save footer and no way to award.
-  const isLocked =
-    (!!approvedInviteId && !isAwardBased(invites)) ||
-    (!isAuctionMode &&
-      (request.status === "sourcing_approved" || request.status === "buyer_approved"))
+  // The legacy `sourcing_approved`/`buyer_approved` status lock is GONE for every mode, not just
+  // auction mode. It was self-inflicted: the footer's own "✓ Approve" button writes
+  // `sourcing_approved`, which then locked the Final Decision column read-only and hid both footers
+  // — and `ALLOWED_TRANSITIONS` has no edge back to `sourcing`. A Green Field / Digitisation / IT
+  // request whose Final Decision had not been filled first was stranded with no path forward at all
+  // (`FinalDecisionActions` renders only its "pick a vendor…" placeholder, with no button, when
+  // there is no decision to group). Both statuses can still reach `pi_requested`
+  // (`PRE_PI_REQUEST_STATUSES`), so keeping the column editable is what lets the award finish.
+  //
+  // The legacy single-vendor lock that `approveInvite` relies on is untouched: an `approved` invite
+  // still freezes the column, except in a split award (where each award stamps its invite `approved`
+  // as it goes and would otherwise freeze the still-unawarded lines).
+  const isLocked = !!approvedInviteId && !isAwardBased(invites)
 
   const saved = request.sourcingDecision
 
@@ -432,9 +461,9 @@ function ItemRowGrid({ request, invites, vendors, currentRole, onSelectFinal, au
       // Fall back to the seeded opening bid — after an auction start, ranks reset (quotes[] empty)
       // until a vendor re-bids, but the opening bid still carries the award price.
       const q = inv?.quotes[inv.quotes.length - 1] ?? inv?.openingQuote
-      const rawUnit = q ? (q.itemPrices?.[itemId] ?? q.price) : undefined
+      const rawUnit = quoteLineUnitPrice(q, itemId)
       // Store the award price in INR (converts a foreign quote), so the PO/milestone amounts are INR.
-      if (rawUnit != null) setFinalPrices(p => ({ ...p, [`${itemId}-price`]: String(Math.round(toInr(rawUnit, q?.currency))) }))
+      if (rawUnit != null) setFinalPrices(p => ({ ...p, [`${itemId}-price`]: awardUnitPriceInr(rawUnit, q?.currency) }))
     }
   }, [invites])
 
@@ -543,23 +572,24 @@ function ItemRowGrid({ request, invites, vendors, currentRole, onSelectFinal, au
   const TH_Q     = "px-2 py-2 text-center min-w-[120px] bg-[#171717] text-white"
   const TH_FD    = "sticky right-0 z-20 px-3 py-2 min-w-[210px] bg-[#171717] text-white text-left"
 
+  // Per-line "↓ Lowest" column, compared on an INR basis (`lowestInrUnitIndex`). Raw own-currency
+  // prices are not comparable, and this grid steers the award — matches `computeVendorRankings`
+  // (INR) and the `awardUnitPriceInr` auto-fill (INR) on the same screen.
   const lowestPerItem = useMemo(() => {
     const result: Record<string, number> = {}
+    const quotes = vendorCols.map(c => c.latestQuote)
     for (const item of items) {
-      let min = Infinity, minIdx = -1
-      vendorCols.forEach(({ latestQuote }, i) => {
-        if (!latestQuote) return
-        const p = latestQuote.itemPrices?.[item.id] ?? latestQuote.price
-        if (p < min) { min = p; minIdx = i }
-      })
-      if (minIdx >= 0) result[item.id] = minIdx
+      const idx = lowestInrUnitIndex(quotes, item.id)
+      if (idx !== null) result[item.id] = idx
     }
     return result
   }, [items, vendorCols])
 
-  const visibleOfferCols = useMemo(
-    () => offerCols.filter(col => !col.vendorId || !vendorCols.some(vc => vc.inv.vendorId === col.vendorId)),
-    [offerCols, vendorCols]
+  const visibleOfferCols = useMemo<OfferColView[]>(
+    () => offerCols
+      .filter(col => !col.vendorId || !vendorCols.some(vc => vc.inv.vendorId === col.vendorId))
+      .map(col => ({ ...col, currency: offerAttrs[col.id]?.currency ?? "INR" })),
+    [offerCols, vendorCols, offerAttrs]
   )
 
   const fdGrand = useMemo(() =>
@@ -714,35 +744,63 @@ function ItemRowGrid({ request, invites, vendors, currentRole, onSelectFinal, au
               />
             ))}
 
-            {/* ── Attribute rows ── */}
+            {/* ── Attribute rows ──
+                `money` rows carry an amount in the column's currency, so they render on the same
+                INR basis as the line items and the Total Amount row (own-currency figure beneath).
+                Left bare, a USD freight of 1,000 sat between ₹-converted line prices and a
+                ₹-converted total in a column that then did not add up. */}
             {[
-              { key: "freight",  label: "Transportation / Freight",   placeholder: "Enter freight",            getVal: (q: Quote) => q.freight  != null ? String(q.freight)  : "0" },
-              { key: "packing",  label: "Packing / Forwarding",       placeholder: "Enter packing charges",    getVal: (q: Quote) => q.packing  != null ? String(q.packing)  : "0" },
-              { key: "service",  label: "Service / Installation",     placeholder: "Enter service / install",  getVal: (q: Quote) => q.service  != null ? String(q.service)  : "0" },
-              { key: "delivery", label: "Delivery Lead Time (Days)", placeholder: "Enter delivery lead time", getVal: (q: Quote) => String(q.deliveryDays) },
-              { key: "warranty", label: "Warranty (Years)",           placeholder: "Enter warranty",           getVal: (q: Quote) => q.warranty != null ? String(q.warranty) : "0" },
-            ].map((attr, attrIdx) => (
+              // `placeholder` is the Final-Decision input's prompt. The money rows lead with ₹ (the
+              // column is INR by contract — see below), symbol FIRST like the offer columns' "₹ price",
+              // so a narrow sticky column truncating the text can never clip the unit off the end.
+              { key: "freight",  money: true,  label: "Transportation / Freight",   placeholder: "₹ freight",                getVal: (q: Quote) => q.freight  ?? 0 },
+              { key: "packing",  money: true,  label: "Packing / Forwarding",       placeholder: "₹ packing charges",        getVal: (q: Quote) => q.packing  ?? 0 },
+              { key: "service",  money: true,  label: "Service / Installation",     placeholder: "₹ service / install",      getVal: (q: Quote) => q.service  ?? 0 },
+              { key: "delivery", money: false, label: "Delivery Lead Time (Days)", placeholder: "Enter delivery lead time", getVal: (q: Quote) => q.deliveryDays },
+              { key: "warranty", money: false, label: "Warranty (Years)",           placeholder: "Enter warranty",           getVal: (q: Quote) => q.warranty ?? 0 },
+            ].map((attr, attrIdx) => {
+              // Final-Decision figure for this row. The money ones (freight / packing / service) are
+              // INR BY CONTRACT: sourcing types them here, and both consumers — `computeFinalTotal`
+              // on the requests list and `SourcingDecisionBanner` on the detail — add them to the
+              // per-line award prices (already INR via `awardUnitPriceInr`) and print the sum under ₹.
+              // Rendered bare they were a number with no symbol on a screen of ₹ figures: nothing
+              // told the user which unit to type, while the totals assumed rupees. So they are
+              // LABELLED ₹, never converted — there is no source currency to convert from.
+              const fdRaw = fdAttr[attr.key as keyof typeof fdAttr]
+              const fdDisplay = attr.money ? formatTypedInr(fdRaw) : (fdRaw || null)
+              return (
               <tr key={attr.key} className={attrIdx % 2 === 0 ? "bg-slate-50/70" : "bg-white"}>
                 <td colSpan={3}
                   className="sticky left-0 z-10 px-3 py-2 text-xs font-semibold text-slate-600 bg-slate-100 whitespace-nowrap"
                   style={ATTR_LABEL_STYLE}>
                   {attr.label}
                 </td>
-                {vendorCols.map(({ inv, latestQuote }, colIdx) => (
-                  <td key={inv.id}
-                    className="px-2 py-2 text-center text-xs text-slate-600"
-                    style={colIdx === 0 ? ATTR_Q_FIRST : ATTR_Q_REST}>
-                    {latestQuote ? attr.getVal(latestQuote) : <span className="text-slate-300">0</span>}
-                  </td>
-                ))}
+                {vendorCols.map(({ inv, latestQuote }, colIdx) => {
+                  const raw = latestQuote ? attr.getVal(latestQuote) : null
+                  const display = raw != null && attr.money ? inrWithNative(raw, latestQuote?.currency) : null
+                  return (
+                    <td key={inv.id}
+                      className="px-2 py-2 text-center text-xs text-slate-600"
+                      style={colIdx === 0 ? ATTR_Q_FIRST : ATTR_Q_REST}>
+                      {raw == null ? <span className="text-slate-300">0</span> : display ? display.inr : String(raw)}
+                      {display?.native && <p className="text-[10px] text-slate-400">{display.native}</p>}
+                    </td>
+                  )
+                })}
                 {visibleOfferCols.map(col => {
                   const val = offerAttrs[col.id]?.[attr.key] ?? ""
+                  const sentDisplay = attr.money ? inrWithNative(Number(val || 0), col.currency) : null
                   return (
                     <td key={col.id}
                       className={["px-2 py-2 text-center", col.sent ? "bg-slate-50/50" : "bg-slate-50/40"].join(" ")}
                       style={OFFER_BORDER}>
                       {col.sent ? (
-                        <p className={["text-xs font-semibold text-center", val ? "text-slate-800" : "text-slate-300"].join(" ")}>{val || "0"}</p>
+                        <>
+                          <p className={["text-xs font-semibold text-center", val ? "text-slate-800" : "text-slate-300"].join(" ")}>
+                            {sentDisplay ? sentDisplay.inr : (val || "0")}
+                          </p>
+                          {val && sentDisplay?.native && <p className="text-[10px] text-slate-400">{sentDisplay.native}</p>}
+                        </>
                       ) : (
                         <input type="number" placeholder="0" value={val}
                           onChange={e => setOfferAttr(col.id, attr.key, e.target.value)}
@@ -757,12 +815,13 @@ function ItemRowGrid({ request, invites, vendors, currentRole, onSelectFinal, au
                   <td className="sticky right-0 z-10 px-3 py-2 bg-slate-100 min-w-[190px]" style={FD_BODY_STYLE}>
                     {isLocked ? (
                       <p className="text-xs font-semibold text-slate-900 text-right">
-                        {fdAttr[attr.key as keyof typeof fdAttr] || <span className="text-slate-300">—</span>}
+                        {fdDisplay ?? <span className="text-slate-300">—</span>}
                       </p>
                     ) : (
                       <input type="number"
                         placeholder={attr.placeholder}
-                        value={fdAttr[attr.key as keyof typeof fdAttr]}
+                        aria-label={`Final decision — ${attr.label}${attr.money ? " (₹)" : ""}`}
+                        value={fdRaw}
                         onChange={e => setFdAttrField(attr.key as keyof typeof fdAttr, e.target.value)}
                         className={FD_INPUT}
                       />
@@ -770,7 +829,8 @@ function ItemRowGrid({ request, invites, vendors, currentRole, onSelectFinal, au
                   </td>
                 )}
               </tr>
-            ))}
+              )
+            })}
 
             {/* Currency row */}
             <tr className="bg-slate-50/70">
@@ -829,22 +889,42 @@ function ItemRowGrid({ request, invites, vendors, currentRole, onSelectFinal, au
               </td>
               {vendorCols.map(({ inv, latestQuote }, colIdx) => {
                 const q = latestQuote
-                const total = q
+                // OWN-CURRENCY whole-quote total, summed from exactly the per-line figures rendered
+                // above plus the untaxed footer charges — so the column adds up on screen.
+                const nativeTotal = q
                   ? (() => {
+                      // Per line, resolve the unit EXACTLY as the cell above does — through
+                      // `quoteLineUnitPrice`, whose `?? quote.price` fallback the cell relies on.
+                      // Reading `itemPrices[id] ?? 0` here instead meant a quote priced line-by-line
+                      // but missing one key (a buyer-seeded quote only carries the lines that vendor
+                      // was quoted for) rendered that line at `q.price` and counted it as zero: the
+                      // rows on screen did not add up to the total beneath them.
+                      // The legacy branch stays: a quote with NO `itemPrices` is a lump sum, and
+                      // `q.price` is the whole quote — spreading it across every line through the
+                      // same fallback would multiply the total by the line count.
                       const itemSubtotal = q.itemPrices
                         ? items.reduce(
-                            (s, item) => s + (q.itemPrices![item.id] ?? 0) * (parseFloat(item.quantity) || 1),
+                            (s, item) =>
+                              s + (quoteLineUnitPrice(q, item.id) ?? 0) * (parseFloat(item.quantity) || 1),
                             0,
                           )
                         : q.price
                       return itemSubtotal + (q.freight ?? 0) + (q.packing ?? 0) + (q.service ?? 0)
                     })()
                   : 0
+                // Rendered on the same INR basis as the per-line cells above (`:price`). Printing the
+                // raw own-currency sum under ₹ made a USD column read ₹42,75,000 per line and
+                // ₹1,00,000 in total — 85x apart, on the screen that steers the award.
+                const currency = q?.currency ?? "INR"
+                const display = inrWithNative(nativeTotal, currency)
                 return (
                   <td key={inv.id}
                     className="px-2 py-2 text-center text-xs font-bold text-slate-800 bg-slate-100"
                     style={colIdx === 0 ? TOTAL_Q_FIRST : TOTAL_Q_REST}>
-                    {total > 0 ? "₹" + Math.round(total).toLocaleString("en-IN") : <span className="text-slate-400">₹0</span>}
+                    {nativeTotal > 0 ? display.inr : <span className="text-slate-400">₹0</span>}
+                    {nativeTotal > 0 && display.native && (
+                      <p className="text-[10px] font-normal text-slate-500">{display.native}</p>
+                    )}
                   </td>
                 )
               })}
@@ -854,10 +934,14 @@ function ItemRowGrid({ request, invites, vendors, currentRole, onSelectFinal, au
                 const packing   = Number(offerAttrs[col.id]?.packing ?? 0)
                 const service   = Number(offerAttrs[col.id]?.service ?? 0)
                 const grand     = itemTotal + freight + packing + service
+                const display   = inrWithNative(grand, col.currency)
                 return (
                   <td key={col.id} className="px-2 py-2 text-center text-xs font-bold bg-slate-100"
                     style={OFFER_TOTAL}>
-                    {grand > 0 ? <span className="text-slate-800">₹{Math.round(grand).toLocaleString("en-IN")}</span> : <span className="text-slate-400">₹0</span>}
+                    {grand > 0 ? <span className="text-slate-800">{display.inr}</span> : <span className="text-slate-400">₹0</span>}
+                    {grand > 0 && display.native && (
+                      <p className="text-[10px] font-normal text-slate-500">{display.native}</p>
+                    )}
                   </td>
                 )
               })}
@@ -939,6 +1023,13 @@ function ItemRowGrid({ request, invites, vendors, currentRole, onSelectFinal, au
           <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={() => {
+                // `updateRequest` silently refuses an illegal transition (console only), so ASK
+                // first — this button used to toast "Request rejected" over a request that was
+                // still live, at every status with no `rejected` edge.
+                if (!canTransitionStatus(request.status, "rejected")) {
+                  toast.error(`A request at "${STATUS_LABELS[request.status]}" can no longer be rejected here.`)
+                  return
+                }
                 updateRequest(request.id, { status: "rejected" }, ROLE_NAMES[currentRole] ?? currentRole)
                 toast.error("Request rejected")
               }}
@@ -955,7 +1046,24 @@ function ItemRowGrid({ request, invites, vendors, currentRole, onSelectFinal, au
             </button>
             <button
               onClick={() => {
-                handleSave()
+                // Persist pending edits without a toast of its own — the single toast below
+                // reports the actual outcome. Calling `handleSave()` here duplicated "Changes
+                // saved" (it toasts, then this handler toasted a second "Changes saved" on the
+                // illegal-transition branch) and, on a same-status no-op, went on to claim
+                // "Request approved — sent to buyer" over a transition that never happened.
+                updateRequest(request.id, { sourcingDecision: buildDecision() })
+                if (request.status === "sourcing_approved") {
+                  // Already there — approving again is a no-op, not a fresh approval.
+                  toast.success("Changes saved — request is already approved")
+                  return
+                }
+                // Same honesty guard as Reject: now that the column is no longer locked at
+                // `sourcing_approved`/`buyer_approved`, this button stays on screen at statuses it
+                // cannot legally reach, and must name the blocking status rather than claim success.
+                if (!canTransitionStatus(request.status, "sourcing_approved")) {
+                  toast.error(`A request at "${STATUS_LABELS[request.status]}" can no longer be approved here.`)
+                  return
+                }
                 updateRequest(request.id, { status: "sourcing_approved" }, ROLE_NAMES[currentRole] ?? currentRole)
                 toast.success("Request approved — sent to buyer")
               }}
@@ -1013,11 +1121,12 @@ function AttributeRowGrid({ request, invites, vendors, currentRole, onSelectFina
     [filteredInvites]
   )
 
+  // Cross-vendor "lowest" on an INR basis — same reason as `lowestPerItem` in the items grid.
   const lowestTotalQuoteId = useMemo(() => {
     if (allQuotes.length < 2) return null
     let minTotal = Infinity, minId = ""
     allQuotes.forEach(({ quote }) => {
-      const total = quote.price + (quote.freight ?? 0) + (quote.packing ?? 0) + (quote.service ?? 0)
+      const total = inrQuoteGrandTotal(quote)
       if (total < minTotal) { minTotal = total; minId = quote.id }
     })
     return minId || null
@@ -1028,12 +1137,20 @@ function AttributeRowGrid({ request, invites, vendors, currentRole, onSelectFina
     (Number(finalForm.packing) || 0) + (Number(finalForm.service) || 0),
   [finalForm])
 
+  // `total` is the INR grand total (the basis the "↓ Cheapest" ordering must use); `nativeTotal`
+  // is the same figure in the vendor's own currency, shown beneath so the row stays readable.
   const finalDecisionRows = useMemo(() =>
     invites.filter(inv => inv.quotes.length > 0).map(inv => {
       const vendor = vendors.find(v => v.id === inv.vendorId)
       const quote  = inv.quotes[inv.quotes.length - 1]
-      const total  = quote.price + (quote.freight ?? 0) + (quote.packing ?? 0) + (quote.service ?? 0)
-      return { inv, vendor, quote, total }
+      return {
+        inv,
+        vendor,
+        quote,
+        currency: quote.currency ?? "INR",
+        nativeTotal: quoteGrandTotal(quote),
+        total: inrQuoteGrandTotal(quote),
+      }
     }).sort((a, b) => a.total - b.total),
   [invites, vendors])
 
@@ -1177,24 +1294,34 @@ function AttributeRowGrid({ request, invites, vendors, currentRole, onSelectFina
               )}
               {invites.length > 0 && (
                 <>
+                  {/* `amount` rows are money and render on an INR basis (the basis
+                      `lowestTotalQuoteId` and the Vendor Shortlist below already use), with the
+                      vendor's own-currency figure beneath. Printed raw under ₹, this matrix showed
+                      "A ₹80,00,000 [Best]" beside "B ₹1,00,000" while the Shortlist directly below
+                      — correctly converted — put B at ₹85,50,000: the highlight was right and the
+                      numbers were unreadable. The Final Decision column is the vendor's COUNTER, so
+                      its inputs stay in the vendor's own currency (that is what is sent to them). */}
                   {[
-                    { label: "Item Price (₹)", key: "price",    bg: "bg-white",       getValue: (q: Quote) => `₹${q.price.toLocaleString("en-IN")}`, getFD: () => <input type="number" value={finalForm.price}    onChange={e => setFinalForm(f => ({ ...f, price:    e.target.value }))} placeholder="₹ Price"   className={FD_INPUT} /> },
-                    { label: "Freight (₹)",    key: "freight",  bg: "bg-slate-50/40", getValue: (q: Quote) => q.freight  != null ? `₹${q.freight.toLocaleString("en-IN")}` : "—",  getFD: () => <input type="number" value={finalForm.freight}  onChange={e => setFinalForm(f => ({ ...f, freight:  e.target.value }))} placeholder="₹ Freight" className={FD_INPUT} /> },
-                    { label: "Packing (₹)",    key: "packing",  bg: "bg-white",       getValue: (q: Quote) => q.packing  != null ? `₹${q.packing.toLocaleString("en-IN")}` : "—",  getFD: () => <input type="number" value={finalForm.packing}  onChange={e => setFinalForm(f => ({ ...f, packing:  e.target.value }))} placeholder="₹ Packing" className={FD_INPUT} /> },
-                    { label: "Service (₹)",    key: "service",  bg: "bg-slate-50/40", getValue: (q: Quote) => q.service  != null ? `₹${q.service.toLocaleString("en-IN")}` : "—",  getFD: () => <input type="number" value={finalForm.service}  onChange={e => setFinalForm(f => ({ ...f, service:  e.target.value }))} placeholder="₹ Service" className={FD_INPUT} /> },
-                    { label: "Delivery (days)", key: "delivery", bg: "bg-white",       getValue: (q: Quote) => `${q.deliveryDays} days`, getFD: () => <input type="number" value={finalForm.delivery} onChange={e => setFinalForm(f => ({ ...f, delivery: e.target.value }))} placeholder="Days"    className={FD_INPUT} /> },
-                    { label: "Warranty (yrs)", key: "warranty", bg: "bg-slate-50/40", getValue: (q: Quote) => q.warranty != null ? `${q.warranty} yr${q.warranty !== 1 ? "s" : ""}` : "—", getFD: () => <input type="number" value={finalForm.warranty} onChange={e => setFinalForm(f => ({ ...f, warranty: e.target.value }))} placeholder="Years"    className={FD_INPUT} /> },
+                    { label: "Item Price (₹)", key: "price",    bg: "bg-white",       amount: (q: Quote) => q.price,   getFD: () => <input type="number" value={finalForm.price}    onChange={e => setFinalForm(f => ({ ...f, price:    e.target.value }))} placeholder={`${currencySymbol(finalForm.currency)} Price`}   className={FD_INPUT} /> },
+                    { label: "Freight (₹)",    key: "freight",  bg: "bg-slate-50/40", amount: (q: Quote) => q.freight ?? null,  getFD: () => <input type="number" value={finalForm.freight}  onChange={e => setFinalForm(f => ({ ...f, freight:  e.target.value }))} placeholder={`${currencySymbol(finalForm.currency)} Freight`} className={FD_INPUT} /> },
+                    { label: "Packing (₹)",    key: "packing",  bg: "bg-white",       amount: (q: Quote) => q.packing ?? null,  getFD: () => <input type="number" value={finalForm.packing}  onChange={e => setFinalForm(f => ({ ...f, packing:  e.target.value }))} placeholder={`${currencySymbol(finalForm.currency)} Packing`} className={FD_INPUT} /> },
+                    { label: "Service (₹)",    key: "service",  bg: "bg-slate-50/40", amount: (q: Quote) => q.service ?? null,  getFD: () => <input type="number" value={finalForm.service}  onChange={e => setFinalForm(f => ({ ...f, service:  e.target.value }))} placeholder={`${currencySymbol(finalForm.currency)} Service`} className={FD_INPUT} /> },
+                    { label: "Delivery (days)", key: "delivery", bg: "bg-white",       text: (q: Quote) => `${q.deliveryDays} days`, getFD: () => <input type="number" value={finalForm.delivery} onChange={e => setFinalForm(f => ({ ...f, delivery: e.target.value }))} placeholder="Days"    className={FD_INPUT} /> },
+                    { label: "Warranty (yrs)", key: "warranty", bg: "bg-slate-50/40", text: (q: Quote) => q.warranty != null ? `${q.warranty} yr${q.warranty !== 1 ? "s" : ""}` : "—", getFD: () => <input type="number" value={finalForm.warranty} onChange={e => setFinalForm(f => ({ ...f, warranty: e.target.value }))} placeholder="Years"    className={FD_INPUT} /> },
                   ].map(row => (
                     <tr key={row.key} className={row.bg}>
                       <td className={LABEL_TD_CLASS} style={LABEL_TD_STYLE}>{row.label}</td>
                       {allQuotes.map(({ invite, quote }) => {
                         const isLowest = quote.id === lowestTotalQuoteId
+                        const native = row.amount ? row.amount(quote) : null
+                        const display = native != null ? inrWithNative(native, quote.currency) : null
                         return (
                           <td key={quote.id}
                             className={["px-4 py-2.5 text-center text-sm", isLowest ? "bg-emerald-50 text-emerald-700 font-semibold" : "text-slate-700"].join(" ")}
                             style={quoteCellStyle(quote.id, lowestTotalQuoteId, invite.status)}>
-                            {row.getValue(quote)}
+                            {row.text ? row.text(quote) : display ? display.inr : "—"}
                             {isLowest && row.key === "price" && <LowestChip />}
+                            {display?.native && <p className="text-[11px] font-normal text-slate-500">{display.native}</p>}
                           </td>
                         )
                       })}
@@ -1212,15 +1339,17 @@ function AttributeRowGrid({ request, invites, vendors, currentRole, onSelectFina
                     </td>
                     {allQuotes.map(({ invite, quote }) => {
                       const isLowest = quote.id === lowestTotalQuoteId
-                      const total = quote.price + (quote.freight ?? 0) + (quote.packing ?? 0) + (quote.service ?? 0)
+                      // Same whole-quote figure `lowestTotalQuoteId` decides the "Best" chip on.
+                      const display = inrWithNative(quoteGrandTotal(quote), quote.currency)
                       return (
                         <td key={quote.id}
                           className={["px-4 py-3 text-center text-sm font-bold", isLowest ? "bg-emerald-50 text-emerald-700" : "text-slate-800"].join(" ")}
                           style={isLowest ? { borderLeft: "3px solid #059669", borderTop: "2px solid #e2e8f0", borderBottom: "1px solid #e2e8f0" }
                             : invite.status === "approved" ? { borderLeft: "3px solid #64748B", borderTop: "2px solid #e2e8f0", borderBottom: "1px solid #e2e8f0" }
                             : { borderLeft: "1px solid #e2e8f0", borderTop: "2px solid #e2e8f0", borderBottom: "1px solid #e2e8f0" }}>
-                          ₹{total.toLocaleString("en-IN")}
+                          {display.inr}
                           {isLowest && <LowestChip label="Best" />}
+                          {display.native && <p className="text-[11px] font-normal text-slate-500">{display.native}</p>}
                         </td>
                       )
                     })}
@@ -1231,8 +1360,19 @@ function AttributeRowGrid({ request, invites, vendors, currentRole, onSelectFina
                     {isSourcing && (
                       <td className="sticky right-0 z-10 px-4 py-3 bg-slate-100 min-w-[200px]"
                         style={{ borderLeft: "2px solid #171717", borderTop: "2px solid #e2e8f0", borderBottom: "1px solid #e2e8f0" }}>
+                        {/* The counter is entered in the vendor's own currency (auto-filled from
+                            their quote); the TOTAL renders on the INR basis of the row it sits in,
+                            with that own-currency figure beneath. It used to print the raw native
+                            sum under ₹ with the currency code below contradicting it. */}
                         {finalTotal > 0
-                          ? <p className="text-sm font-bold text-slate-900 text-right">₹{finalTotal.toLocaleString("en-IN")}<span className="block text-xs font-normal text-slate-500 mt-0.5">{finalForm.currency || "INR"}</span></p>
+                          ? (() => {
+                              const d = inrWithNative(finalTotal, finalForm.currency || "INR")
+                              return (
+                                <p className="text-sm font-bold text-slate-900 text-right">{d.inr}
+                                  <span className="block text-xs font-normal text-slate-500 mt-0.5">{d.native ?? (finalForm.currency || "INR")}</span>
+                                </p>
+                              )
+                            })()
                           : <p className="text-xs text-slate-400 text-right">—</p>}
                       </td>
                     )}
@@ -1306,7 +1446,7 @@ function AttributeRowGrid({ request, invites, vendors, currentRole, onSelectFina
                   <div className="px-4 py-3 text-xs text-slate-600 space-y-3">
                     {latestQ ? (
                       <div className="rounded-lg bg-slate-50 border border-slate-100 px-3 py-2.5 space-y-2">
-                        {[{ label: "Unit Price", value: "₹" + latestQ.price.toLocaleString("en-IN"), bold: true }, { label: "Delivery", value: `${latestQ.deliveryDays} days`, bold: false }, { label: "Valid Until", value: new Date(latestQ.validUntil).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }), bold: false }].map(({ label, value, bold }) => (
+                        {[{ label: "Unit Price", value: inrWithNativeLabel(latestQ.price, latestQ.currency), bold: true }, { label: "Delivery", value: `${latestQ.deliveryDays} days`, bold: false }, { label: "Valid Until", value: new Date(latestQ.validUntil).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }), bold: false }].map(({ label, value, bold }) => (
                           <div key={label} className="flex gap-2"><span className="text-[10px] font-bold text-slate-400 uppercase w-20 shrink-0">{label}</span><span className={bold ? "text-sm font-bold text-slate-800" : "text-xs text-slate-700"}>{value}</span></div>
                         ))}
                       </div>
@@ -1333,9 +1473,13 @@ function AttributeRowGrid({ request, invites, vendors, currentRole, onSelectFina
                 ))}
               </tr></thead>
               <tbody>
-                {finalDecisionRows.map(({ inv, vendor, quote, total }, idx) => {
+                {finalDecisionRows.map(({ inv, vendor, quote, total, nativeTotal, currency }, idx) => {
                   const isLowest   = idx === 0
                   const isApproved = inv.id === approvedInviteId
+                  // Money columns render on an INR basis so the ₹ figures across rows are
+                  // comparable; the vendor's own-currency grand total sits under their name.
+                  const foreign = isForeignCurrency(currency)
+                  const inrOf = (n: number) => `₹${Math.round(toInr(n, currency)).toLocaleString("en-IN")}`
                   return (
                     <tr key={inv.id} className={["border-b border-slate-100 last:border-b-0", isApproved ? "border-l-4 border-l-slate-600 bg-slate-50/30" : isLowest ? "border-l-4 border-l-emerald-500 bg-emerald-50/50" : "border-l-4 border-l-transparent"].join(" ")}>
                       <td className="px-4 py-3">
@@ -1344,13 +1488,16 @@ function AttributeRowGrid({ request, invites, vendors, currentRole, onSelectFina
                         {quote.seededByBuyer && (
                           <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-900 border border-slate-300 mt-0.5 inline-block">Added at request</span>
                         )}
+                        {foreign && (
+                          <p className="text-[11px] text-slate-500">{fmtCurrency(nativeTotal, currency)} {currency} total</p>
+                        )}
                         {isLowest && !isApproved && <span className="text-xs font-semibold text-emerald-600 block">↓ Cheapest</span>}
                       </td>
-                      <td className="px-4 py-3 text-right font-medium text-slate-700">₹{quote.price.toLocaleString("en-IN")}</td>
-                      <td className="px-4 py-3 text-right text-slate-600">{quote.freight != null ? `₹${quote.freight.toLocaleString("en-IN")}` : "—"}</td>
-                      <td className="px-4 py-3 text-right text-slate-600">{quote.packing != null ? `₹${quote.packing.toLocaleString("en-IN")}` : "—"}</td>
-                      <td className="px-4 py-3 text-right text-slate-600">{quote.service != null ? `₹${quote.service.toLocaleString("en-IN")}` : "—"}</td>
-                      <td className="px-4 py-3 text-right font-bold text-slate-800">₹{total.toLocaleString("en-IN")}</td>
+                      <td className="px-4 py-3 text-right font-medium text-slate-700">{inrOf(quote.price)}</td>
+                      <td className="px-4 py-3 text-right text-slate-600">{quote.freight != null ? inrOf(quote.freight) : "—"}</td>
+                      <td className="px-4 py-3 text-right text-slate-600">{quote.packing != null ? inrOf(quote.packing) : "—"}</td>
+                      <td className="px-4 py-3 text-right text-slate-600">{quote.service != null ? inrOf(quote.service) : "—"}</td>
+                      <td className="px-4 py-3 text-right font-bold text-slate-800">₹{Math.round(total).toLocaleString("en-IN")}</td>
                       <td className="px-4 py-3 text-center text-slate-600">{quote.deliveryDays} days</td>
                       <td className="px-4 py-3 text-center text-slate-600">{quote.warranty != null ? `${quote.warranty} yr${quote.warranty !== 1 ? "s" : ""}` : "—"}</td>
                       <td className="px-4 py-3 text-center"><span className={["inline-flex items-center gap-1.5 text-xs font-semibold px-2 py-0.5 rounded-full", INVITE_STATUS_COLORS[inv.status] ?? "bg-slate-200 text-slate-600"].join(" ")}>{(() => { const I = INVITE_STATUS_ICONS[inv.status]; return I ? <I className="w-3.5 h-3.5 shrink-0" strokeWidth={2.25} aria-hidden /> : null })()}{INVITE_STATUS_LABELS[inv.status] ?? inv.status}</span></td>

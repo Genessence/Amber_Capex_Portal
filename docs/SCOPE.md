@@ -1,6 +1,6 @@
 # Capex Amber — Product Scope Document
 
-**Last updated:** 2026-06-19  
+**Last updated:** 2026-08-15  
 **Status:** Living document — reflects implemented features and planned roadmap  
 **Related:** [USER_STORY.md](./USER_STORY.md) · [CLAUDE.md](../CLAUDE.md)
 
@@ -65,14 +65,30 @@ Role switching is available from the top navigation without re-login (demo conve
 - **Collapsible sidebar** — role-filtered navigation links
 - **Internal chat** — role-to-role messaging in top nav (buyer ↔ sourcing ↔ plant head)
 
-### 4.2 Dashboard (`/capex/dashboard`)
+### 4.2 Role dashboards (`/capex/dashboard`, 2026-08)
 
-- Summary KPI cards: total requests, total budget, active sourcing count
-- **Requests by status** — donut chart with status breakdown
-- **Requests by plant** — horizontal bar chart
-- **Money saved** — savings vs. budget for completed sourcing decisions
-- **Recent requests** table with status badges
-- Plant filter dropdown
+`/capex/dashboard` is a **role resolver**: it renders one of four purpose-built dashboards depending on the signed-in role, swapping live (no reload) on a role-switch. There is no single shared dashboard any more — each role sees only what it can act on.
+
+- **Buyer** (every `buyer*` variant, plant-scoped where applicable) — own requests only.
+- **Sourcing** (`sourcing_member`) — a tabbed **Desk | Performance** view: the desk is the action queue, Performance is a negotiation/vendor/spend analytics tab.
+- **Administration** (`super_admin`) — a tabbed **My Desk | Portfolio** view: the desk is budget/adhoc approvals, Portfolio is the cross-field-type FY budget position, value funnel, and governance flags.
+- **Maintenance** (`maintenance`) — own next-FY budget proposals only.
+
+The **plant head, Plant Accounts, Global Accounts, and the Technical team have no dashboard** — none of them has a portal login; they act entirely through emailed, tokenised public links.
+
+**Three-band anatomy.** Every dashboard renders the same three bands, differently scoped per role: **① my turn** (what is blocked on this role right now — a queue of items with SLA-breach flags), **② waiting on** (who else is currently holding the ball on this role's in-flight items, and for how long), and **③ outcomes** (KPI tiles and charts — money in flight, savings, cycle time, delay-liability exposure, and a vendor scorecard on Sourcing's Performance tab; a cross-field-type FY budget table and value funnel on Administration's Portfolio tab).
+
+**Tabbed surfaces.** Sourcing and Administration are tabbed, with the active tab tracked in the `?view=` query param (so the tab survives a refresh, and switching tabs never adds a browser-history entry); the tabs are keyboard-navigable with the arrow keys.
+
+**Plant lens (Administration).** A plant filter scopes the whole Administration view to one plant; the selection lives in the URL (`?plant=`), so a scoped view is shareable, survives a refresh, and **survives a tab switch**. It threads onward to every destination a tile links to, including `/capex/requests` and `/capex/adhoc-budget`. An all-plants **comparison** view ranks every plant side by side (sortable table + grouped bars + a head-level heatmap); a plant with no recorded allocation is shown as *unmeasurable* rather than as `0%`.
+
+**Honest routes.** Every KPI tile that links to a list lands on **the rows its own number counts**. A threshold tile carries its threshold into the destination (not just a status), and a *median* tile lands on the sample it was measured over with the still-running count stated in words — because a median over completed work alone reads fastest exactly when the most work is stuck. Params that cannot be applied (an unknown metric, a stale plant, a bad status) are **reported in a banner**, never silently dropped.
+
+**Underlying data layer.** All KPI derivation is a pure, unit-tested library (`src/lib/kpiUtils.ts`, `kpiPortfolio.ts`, `kpiRisk.ts`, `kpiQueues.ts`, `kpiPlants.ts`, `kpiSourcing.ts`, `kpiTrends.ts`, `kpiSnapshots.ts`, `kpiRoutes.ts`) with no React or I/O — the dashboards are thin presentational consumers of it. A request's money figure always carries a disclosed basis (`awarded`/`approved`/`quoted`/`estimated`/`allocated`/`none`) rather than a silent fallback.
+
+**Trends: measured only, never reconstructed.** Two kinds of history are distinguished. **Flow** figures (requests raised / awarded / completed per month) are historical facts already on the record, so they are derived from `createdAt` + `statusHistory` for any past month. **Stock** figures (allocation, commitment, utilisation, over-exposure, open sourcing load) have no such record — what a plant's budget *was* last month is genuinely unknowable — so the portal **measures one snapshot per day going forward** and charts state the date measurement began. **Gaps stay gaps:** nothing is interpolated, zero-filled or back-dated, and a metric added later is simply absent from older records. A fresh install therefore shows a thin history that thickens with use; that is the intended, honest behaviour. Retention is 90 days, deliberately capped so this derived series cannot crowd the irreplaceable request/invite record out of the browser's ~5 MB storage budget.
+
+**Known limitation — Portfolio FY table scope.** The Administration Portfolio FY table is scoped to **one global latest FY per field type**, so on a portfolio where plants have published next-FY budgets at different times, a plant still on an earlier FY is omitted from that table (the FY column names the year shown as the only cue). Per-plant figures elsewhere (the plant lens, the comparison view, over-allocation exposure) each use **that plant's own** live FY instead, so a plant that is merely out of scope for a year is never rendered as a plant that is under-spending.
 
 ### 4.3 CAPEX request lifecycle
 
