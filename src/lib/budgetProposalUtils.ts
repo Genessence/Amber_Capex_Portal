@@ -10,9 +10,16 @@ import type {
   BudgetProposalItem,
   BudgetProposalStatus,
   CapexMasterItem,
+  FieldType,
+  GreenFieldBudgetAllocations,
   ProjectType,
 } from './types';
-import { FLAT_MASTER_DIVISION, resolveProjectType } from './greenFieldConstants';
+import {
+  FLAT_MASTER_DIVISION,
+  GREEN_FIELD_SECTION_ORDER,
+  isGreenFieldSection,
+  resolveProjectType,
+} from './greenFieldConstants';
 import type { ParsedMasterRow } from './bulkMasterImport';
 
 export const BUDGET_PROPOSAL_STATUS_LABELS: Record<BudgetProposalStatus, string> = {
@@ -44,6 +51,16 @@ export function nextFyCode(fy: string): string {
   return `${start}-${String(end).padStart(2, '0')}`;
 }
 
+/**
+ * The FY that contains `now`, on the Indian April–March financial year (2026-08 → "2026-27").
+ * Green Field budgets seed a brand-new plant, so there is usually no prior Green Field year to take
+ * "next FY" from — the live year is the right default, not a blank field the admin must guess at.
+ */
+export function currentFyCode(now: Date = new Date()): string {
+  const year = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+  return `${year}-${String((year + 1) % 100).padStart(2, '0')}`;
+}
+
 /** Latest Brown Field FY among master rows, optionally scoped to a plant + project type. */
 export function getLatestBrownFieldFy(
   capexMaster: CapexMasterItem[],
@@ -60,8 +77,42 @@ export function getLatestBrownFieldFy(
   return fys[0] ?? '';
 }
 
+/**
+ * Which budget a proposal authors. Proposals written before Green Field planning existed carry no
+ * `fieldType`, and every one of them is Brown Field — so the fallback is not a guess.
+ */
+export function proposalFieldType(proposal: Pick<BudgetProposal, 'fieldType'>): FieldType {
+  return proposal.fieldType ?? 'brown_field';
+}
+
+/** Green Field publishes straight from the admin's upload — no plant-head / accounts chain. */
+export function publishesDirectly(proposal: Pick<BudgetProposal, 'fieldType'>): boolean {
+  return proposalFieldType(proposal) === 'green_field';
+}
+
+/**
+ * Latest FY of the field type this proposal authors, scoped to the plant + project type. Green
+ * Field has its own FY line (a published Brown Field year must never move the Green Field one), so
+ * the lookup is field-scoped rather than reusing the Brown Field helper.
+ */
+export function getLatestFyForProposal(
+  capexMaster: CapexMasterItem[],
+  fieldType: FieldType,
+  plant?: string,
+  projectType?: ProjectType,
+): string {
+  const scoped = capexMaster.filter((m) => {
+    if ((m.fieldType ?? 'brown_field') !== fieldType) return false;
+    if (plant && m.plant !== plant) return false;
+    if (projectType && resolveProjectType(m) !== projectType) return false;
+    return true;
+  });
+  const fys = [...new Set(scoped.map((m) => m.fy))].sort((a, b) => b.localeCompare(a));
+  return fys[0] ?? '';
+}
+
 /** A blank proposal item for manual add. */
-export function emptyProposalItem(head: string): BudgetProposalItem {
+export function emptyProposalItem(head: string, division?: string): BudgetProposalItem {
   return {
     id: `bpi-${crypto.randomUUID()}`,
     head,
@@ -69,12 +120,16 @@ export function emptyProposalItem(head: string): BudgetProposalItem {
     subParticulars: '',
     rate: 0,
     totalCost: 0,
-    division: FLAT_MASTER_DIVISION,
+    division: division ?? FLAT_MASTER_DIVISION,
   };
 }
 
 /** Convert a parsed bulk row into a proposal item. Rate is not part of the budget any more. */
-export function parsedRowToProposalItem(row: ParsedMasterRow): BudgetProposalItem {
+export function parsedRowToProposalItem(
+  row: ParsedMasterRow,
+  fieldType: FieldType = 'brown_field',
+): BudgetProposalItem {
+  const greenField = fieldType === 'green_field';
   return {
     id: `bpi-${crypto.randomUUID()}`,
     head: row.head,
@@ -82,7 +137,11 @@ export function parsedRowToProposalItem(row: ParsedMasterRow): BudgetProposalIte
     subParticulars: row.subParticulars,
     rate: 0,
     totalCost: row.totalCost,
-    division: FLAT_MASTER_DIVISION,
+    // Brown Field is flat and always lands in the internal bucket. Green Field's division IS the
+    // section the machine belongs to, so it is carried through from the sheet.
+    division: greenField ? (row.division || GREEN_FIELD_SECTION_ORDER[0]) : FLAT_MASTER_DIVISION,
+    sectionBudgetCr: greenField ? row.sectionBudgetCr : undefined,
+    headBudgetCr: greenField ? row.headBudgetCr : undefined,
     qty: row.qty,
     sNo: row.sNo,
     reasonForRequirement: row.reasonForRequirement,
@@ -95,6 +154,8 @@ export interface CreateProposalOpts {
   capexMaster: CapexMasterItem[];
   plant: string;
   projectType: ProjectType;
+  /** Defaults to Brown Field. Green Field proposals are `super_admin`-only. */
+  fieldType?: FieldType;
   /** Target FY to publish into; defaults to next FY after the latest live Brown Field FY. */
   targetFy?: string;
   createdBy: string;
@@ -106,12 +167,22 @@ export interface CreateProposalOpts {
  * The live FY is still read, but only to derive the default target FY.
  */
 export function createBlankProposal(opts: CreateProposalOpts): BudgetProposal {
-  const latestFy = getLatestBrownFieldFy(opts.capexMaster, opts.plant, opts.projectType);
+  const fieldType = opts.fieldType ?? 'brown_field';
+  const latestFy = getLatestFyForProposal(opts.capexMaster, fieldType, opts.plant, opts.projectType);
   return {
     id: `bp-${crypto.randomUUID()}`,
     plant: opts.plant,
     projectType: opts.projectType,
-    targetFy: opts.targetFy ?? (latestFy ? nextFyCode(latestFy) : ''),
+    fieldType,
+    // Brown Field plans the year AFTER the live one. Green Field opens a plant's budget for the
+    // CURRENT year (or re-publishes into the year it already has), so it does not roll forward.
+    targetFy:
+      opts.targetFy ??
+      (fieldType === 'green_field'
+        ? latestFy || currentFyCode()
+        : latestFy
+          ? nextFyCode(latestFy)
+          : ''),
     status: 'draft',
     items: [],
     createdBy: opts.createdBy,
@@ -225,17 +296,121 @@ export function validateProposal(proposal: BudgetProposal): string[] {
     if (!it.subParticulars.trim()) errors.push(`Line ${i + 1}: Sub Particulars is required.`);
     if (!(it.totalCost > 0)) errors.push(`Line ${i + 1}: Total Cost (Cr) must be greater than 0.`);
   });
+  if (proposalFieldType(proposal) === 'green_field') {
+    proposal.items.forEach((it, i) => {
+      // A typo in Section would silently file the machine under an envelope the request wizard
+      // never shows, so it is rejected at the door rather than published wrong.
+      if (!it.division || !isGreenFieldSection(it.division)) {
+        errors.push(
+          `Line ${i + 1}: Section must be one of ${GREEN_FIELD_SECTION_ORDER.join(', ')}.`,
+        );
+      }
+      if (!it.head?.trim()) errors.push(`Line ${i + 1}: Head is required.`);
+    });
+  }
   return errors;
+}
+
+// ── Green Field hierarchy ─────────────────────────────────────────────────────
+
+export interface GreenFieldScopeSummary {
+  section: string;
+  /** Envelope assigned to the section (Cr) — the sheet's figure, else Σ of its heads. */
+  budgetCr: number;
+  /** Σ of every machine line in the section (Cr). */
+  usedCr: number;
+  heads: { head: string; budgetCr: number; usedCr: number; count: number }[];
+}
+
+/**
+ * The Green Field hierarchy a proposal describes: section envelope → head envelope → Σ machines.
+ *
+ * The uploaded sheet repeats each envelope figure on every row of its scope, so the FIRST non-empty
+ * value per scope wins and the repeats are ignored. Where the sheet carries no envelope at all, the
+ * scope rolls up from its children — a budget that adds up is always better than a zero envelope
+ * that would render every head as "over allocation".
+ */
+export function summarizeProposalGreenField(items: BudgetProposalItem[]): GreenFieldScopeSummary[] {
+  const sections = new Map<string, GreenFieldScopeSummary>();
+  const sectionDeclared = new Map<string, number>();
+  const headDeclared = new Map<string, number>();
+
+  for (const it of items) {
+    const section = it.division || GREEN_FIELD_SECTION_ORDER[0];
+    const head = it.head?.trim() || section;
+    if (it.sectionBudgetCr != null && !sectionDeclared.has(section)) {
+      sectionDeclared.set(section, it.sectionBudgetCr);
+    }
+    const headKey = `${section}\u0000${head}`;
+    if (it.headBudgetCr != null && !headDeclared.has(headKey)) {
+      headDeclared.set(headKey, it.headBudgetCr);
+    }
+    const entry = sections.get(section) ?? { section, budgetCr: 0, usedCr: 0, heads: [] };
+    entry.usedCr += it.totalCost || 0;
+    const headEntry = entry.heads.find((h) => h.head === head);
+    if (headEntry) { headEntry.usedCr += it.totalCost || 0; headEntry.count += 1; }
+    else entry.heads.push({ head, budgetCr: 0, usedCr: it.totalCost || 0, count: 1 });
+    sections.set(section, entry);
+  }
+
+  const order = (d: string) => {
+    const idx = (GREEN_FIELD_SECTION_ORDER as readonly string[]).indexOf(d);
+    return idx === -1 ? GREEN_FIELD_SECTION_ORDER.length : idx;
+  };
+  return [...sections.values()]
+    .map((entry) => ({
+      ...entry,
+      budgetCr: sectionDeclared.get(entry.section) ?? entry.usedCr,
+      heads: entry.heads
+        .map((h) => ({
+          ...h,
+          budgetCr: headDeclared.get(`${entry.section}\u0000${h.head}`) ?? h.usedCr,
+        }))
+        .sort((a, b) => a.head.localeCompare(b.head)),
+    }))
+    .sort((a, b) => order(a.section) - order(b.section));
+}
+
+/** The plant envelope a Green Field proposal publishes — the stated figure, else Σ its sections. */
+export function greenFieldPlantBudgetCr(proposal: BudgetProposal): number {
+  if (proposal.plantBudgetCr != null && proposal.plantBudgetCr > 0) return proposal.plantBudgetCr;
+  return summarizeProposalGreenField(proposal.items).reduce((s, sec) => s + sec.budgetCr, 0);
+}
+
+/**
+ * Turn an approved Green Field proposal into the plant / section / head budget envelopes, ready to
+ * be merged into `greenFieldBudgetAllocations`. This is what makes ONE upload assign budget at
+ * every level of the hierarchy instead of only at the machine line.
+ */
+export function buildGreenFieldAllocationsFromProposal(
+  proposal: BudgetProposal,
+): GreenFieldBudgetAllocations {
+  const { plant, targetFy: fy, projectType } = proposal;
+  const summary = summarizeProposalGreenField(proposal.items);
+  return {
+    plantBudgets: [{ plant, fy, projectType, budgetCr: greenFieldPlantBudgetCr(proposal) }],
+    sectionBudgets: summary.map((sec) => ({
+      plant, fy, projectType, division: sec.section, budgetCr: sec.budgetCr,
+    })),
+    headBudgets: summary.flatMap((sec) =>
+      sec.heads.map((h) => ({
+        plant, fy, projectType, division: sec.section, head: h.head, budgetCr: h.budgetCr,
+      })),
+    ),
+  };
 }
 
 /** Convert an approved proposal's items into new CapexMasterItem rows for the target FY. */
 export function buildMasterItemsFromProposal(proposal: BudgetProposal): CapexMasterItem[] {
+  const fieldType = proposalFieldType(proposal);
+  const fallbackDivision =
+    fieldType === 'green_field' ? GREEN_FIELD_SECTION_ORDER[0] : FLAT_MASTER_DIVISION;
   return proposal.items.map((it) => ({
     id: `cm-${crypto.randomUUID()}`,
-    fieldType: 'brown_field' as const,
+    fieldType,
     projectType: proposal.projectType,
     greenFieldProjectType: proposal.projectType,
-    division: it.division ?? FLAT_MASTER_DIVISION,
+    division: it.division ?? fallbackDivision,
     plant: proposal.plant,
     head: it.head,
     department: it.department,

@@ -250,9 +250,16 @@ export default function CapexMasterPage() {
 
   const canAddPlant = ['super_admin', 'sourcing_member'].includes(currentRole)
   const canManageGreenField = ['sourcing_member', 'super_admin'].includes(currentRole)
-  // Brown Field live-FY budgets are read-only: changes flow through next-FY proposals
-  // (Budget Planning) or Adhoc reallocation — never direct master edits.
-  const brownFieldLocked = fieldTab === 'brown_field'
+  /**
+   * Live-FY budgets are read-only on master for BOTH Brown Field and Green Field: they are set in
+   * Budget Planning (`/capex/budget-proposals`) and, for Brown Field, adjusted by an Adhoc transfer
+   * — never by a direct master edit. Green Field joined this rule when Green Field planning moved
+   * to Budget Planning; leaving master editable would give a plant two ways to set one budget, and
+   * a master edit would be silently overwritten by the next publish (which replaces the scope).
+   */
+  const brownFieldLocked = fieldTab === 'brown_field' || fieldTab === 'green_field'
+  /** Where the locked tab sends the author to change the budget, in that tab's own words. */
+  const lockedPlanCta = fieldTab === 'green_field' ? 'Set Green Field Budget' : 'Plan Next-FY Budget'
 
   const activePlant = useMemo(() => {
     if (view === 'detail' && selectedPlant) return selectedPlant
@@ -572,7 +579,6 @@ export default function CapexMasterPage() {
   function handleAddItem() {
     if (brownFieldLocked) return
     if (!form.subParticulars.trim() || !activePlant) return
-    if (fieldTab === 'green_field' && (!selectedGreenFieldSection || !selectedHeadFilter)) return
     const headValue = selectedHeadFilter ?? (showCustomHead ? customHeadInput.trim() : form.head)
     if (!headValue) return
     if (showCustomHead && customHeadInput.trim()) addMasterHead(customHeadInput.trim())
@@ -584,12 +590,10 @@ export default function CapexMasterPage() {
       ...(isProjectTypeScopedField(fieldTab)
         ? { projectType: activeProjectType, greenFieldProjectType: activeProjectType }
         : {}),
-      division:
-        fieldTab === 'green_field' && selectedGreenFieldSection
-          ? selectedGreenFieldSection
-          : isFlatMasterFieldType(fieldTab)
-            ? FLAT_MASTER_DIVISION
-            : defaultDivisionForFieldType(fieldTab),
+      // Only Digitisation / IT reach here — Brown Field and Green Field are locked above.
+      division: isFlatMasterFieldType(fieldTab)
+        ? FLAT_MASTER_DIVISION
+        : defaultDivisionForFieldType(fieldTab),
       fy: activeFy || '2025-26',
       plant: activePlant,
       head: headValue,
@@ -665,6 +669,7 @@ export default function CapexMasterPage() {
       : undefined
     setSectionBudgetModalTarget({ section, isEdit })
     setSectionBudgetInput(existing != null ? String(existing) : '')
+    if (brownFieldLocked) return
     setShowSectionBudgetModal(true)
   }
 
@@ -731,6 +736,7 @@ export default function CapexMasterPage() {
       : undefined
     setHeadBudgetModalTarget({ head, division, isEdit })
     setHeadBudgetInput(existing != null ? String(existing) : '')
+    if (brownFieldLocked) return
     setShowHeadBudgetModal(true)
   }
 
@@ -1129,11 +1135,12 @@ export default function CapexMasterPage() {
               )
             })}
 
-            {/* Green Field — create plant (sourcing / admin) */}
+            {/* Green Field plants are created in Budget Planning now — creating the site and
+                uploading its budget is ONE flow, and splitting it across two screens is what made
+                a plant exist here with no budget anywhere. */}
             {fieldTab === 'green_field' && canManageGreenField && selectedProjectType && (
-              <button
-                type="button"
-                onClick={openCreateGreenPlantModal}
+              <Link
+                href="/capex/budget-proposals"
                 className="group text-left rounded-xl border-2 border-dashed border-slate-300 bg-slate-50/30 p-4
                            hover:border-slate-500 hover:bg-slate-50 transition-all
                            focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-600"
@@ -1146,13 +1153,13 @@ export default function CapexMasterPage() {
                     Create Green Field Plant
                   </p>
                   <p className="text-[12px] text-slate-700/70 mt-0.5">
-                    Add plant for FY {PROJECT_TYPE_LABELS[selectedProjectType]} · budgets added on detail page
+                    Opens Budget Planning — create the plant, then upload its budget
                   </p>
                 </div>
                 <div className="mt-3 pt-3 border-t border-slate-200/60">
-                  <p className="text-[11px] text-slate-700/60">Available in Brown Field after creation</p>
+                  <p className="text-[11px] text-slate-700/60">Green Field budgets are set in Budget Planning</p>
                 </div>
-              </button>
+              </Link>
             )}
 
             {/* Brown / Digitisation / IT — add plant */}
@@ -1419,11 +1426,12 @@ export default function CapexMasterPage() {
     fieldTab === 'brown_field' && !selectedHeadFilter
   const isAwaitingHeadSelection = isGreenFieldAwaitingHead || isBrownFieldAwaitingHead
   const canAddMasterItem =
-    !!activePlant && (
+    !!activePlant &&
+    !brownFieldLocked && (
       fieldTab === 'digitisation' ||
-      fieldTab === 'information_technology' ||
-      (fieldTab === 'green_field' && !!selectedGreenFieldSection && !!selectedHeadFilter)
-      // Brown Field is read-only (brownFieldLocked) — budgets change via Budget Planning / Adhoc only.
+      fieldTab === 'information_technology'
+      // Brown Field AND Green Field are read-only (brownFieldLocked) — their budgets are set in
+      // Budget Planning, and Brown Field additionally via an Adhoc transfer.
     )
 
   return (
@@ -1576,7 +1584,7 @@ export default function CapexMasterPage() {
               href="/capex/budget-proposals"
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-slate-500 hover:bg-slate-600 text-white rounded-lg transition-colors"
             >
-              <ClipboardList className="w-3.5 h-3.5" /> Plan Next-FY Budget
+              <ClipboardList className="w-3.5 h-3.5" /> {lockedPlanCta}
             </Link>
           ) : (
             <>
@@ -1993,12 +2001,16 @@ export default function CapexMasterPage() {
             </p>
             {brownFieldLocked ? (
               <>
-                <p className="text-xs text-slate-400">Live FY budgets are locked. Plan changes in the next FY.</p>
+                <p className="text-xs text-slate-400">
+                  {fieldTab === 'green_field'
+                    ? 'Green Field budgets are set in Budget Planning, not here.'
+                    : 'Live FY budgets are locked. Plan changes in the next FY.'}
+                </p>
                 <Link
                   href="/capex/budget-proposals"
                   className="mt-1 flex items-center gap-1.5 px-4 py-2 text-xs font-semibold bg-slate-500 hover:bg-slate-600 text-white rounded-lg transition-colors"
                 >
-                  <ClipboardList className="w-3.5 h-3.5" /> Plan Next-FY Budget
+                  <ClipboardList className="w-3.5 h-3.5" /> {lockedPlanCta}
                 </Link>
               </>
             ) : (

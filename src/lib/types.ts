@@ -274,6 +274,66 @@ export interface LandDocument {
   uploadedAt: string;
 }
 
+/**
+ * A supporting document a VENDOR attaches to ONE line item of their quotation (datasheet, drawing,
+ * compliance certificate, …). Keyed by `CapexLineItem.id` on `RfqQuote.lineDocuments` /
+ * `Quote.lineDocuments`, so the paperwork travels with the price it belongs to rather than being
+ * dumped as one undifferentiated quote-level attachment.
+ *
+ * `base64` is offloaded to IndexedDB (`qdoc:<id>`) exactly like every other blob in this app — see
+ * `stripInviteFiles`/`hydrateInviteFiles` in capexContext.
+ */
+export interface QuoteLineDocument extends LandDocument {
+  /** Byte size at upload — shown to reviewers; never trusted for the quota check. */
+  size?: number;
+  /** Display name of the vendor who uploaded it (the supplier portal is tokenised, not logged in). */
+  uploadedBy?: string;
+}
+
+/**
+ * Which gate a remark was left at. One flat key per approval/handoff surface, so a single trail on
+ * the entity can carry every stage's remarks and still be rendered with the right label.
+ */
+export type ApprovalStage =
+  | 'plant_head_request'
+  | 'plant_head_budget'
+  | 'admin_budget'
+  | 'accounts_budget'
+  | 'technical_spec'
+  | 'sourcing_tech_spec'
+  | 'plant_accounts_fa'
+  | 'plant_accounts_payment'
+  | 'global_accounts_po';
+
+/** What the author was doing when they left the remark. */
+export type ApprovalAction =
+  | 'approved'
+  | 'rejected'
+  | 'sent_back'
+  | 'forwarded'
+  | 'sent'
+  | 'noted';
+
+/**
+ * A remark left by an approver or a sender at one gate of the workflow. Every approval surface —
+ * including the tokenised email pages that have no portal login (plant head, Technical team, Plant
+ * Accounts, Global Accounts) — writes one of these, so the NEXT person in the chain reads what the
+ * previous one said instead of only seeing a status change.
+ *
+ * Kept as an append-only trail on the entity the gate belongs to: `CapexRequest.approvalRemarks`,
+ * `BudgetProposal.approvalRemarks`, `VendorInvite.approvalRemarks`.
+ */
+export interface ApprovalRemark {
+  id: string;
+  stage: ApprovalStage;
+  action: ApprovalAction;
+  /** Display name of the author, e.g. "Technical Team", "Plant Head (email)". */
+  by: string;
+  /** The remark itself — trimmed and length-capped at the boundary (see `approvalRemarks.ts`). */
+  text: string;
+  at: string;
+}
+
 export interface CapexRequest {
   id: string;
   requestNo?: string;
@@ -325,6 +385,12 @@ export interface CapexRequest {
   piSubmittedAt?: string;
   /** When the final payment was made — stops the TAT clock. */
   tatStoppedAt?: string;
+  /**
+   * Append-only remark trail — every approver / sender who acts on this request (plant head via the
+   * email link, Plant Accounts, Global Accounts) leaves their remark here so the next person reads
+   * it. See `src/lib/approvalRemarks.ts`.
+   */
+  approvalRemarks?: ApprovalRemark[];
   // ── Plant-head approval via public email link ──
   /** Public plant-head approval link token (minted when created at pending_head_approval). */
   approvalToken?: string;
@@ -404,6 +470,14 @@ export interface BudgetProposalItem {
   roi?: string;
   /** Set when this row was cloned from a live-FY master item. */
   sourceMasterItemId?: string;
+  /**
+   * Green Field only — the envelope figures carried on the row so the uploaded sheet expresses the
+   * whole hierarchy (plant → section → head → this sub-particular). They are per-SCOPE, not
+   * per-row: every row in a section repeats its section budget. At publish the FIRST non-empty
+   * value for each scope wins (see `buildGreenFieldAllocationsFromProposal`).
+   */
+  sectionBudgetCr?: number;
+  headBudgetCr?: number;
 }
 
 /** Which approval stage an edit was made at (the two stages that can edit + forward). */
@@ -433,6 +507,15 @@ export interface BudgetProposal {
   id: string;
   plant: string;
   projectType: ProjectType;
+  /**
+   * Which budget this proposal authors. Defaults to `brown_field` — every proposal written before
+   * Green Field planning existed is a Brown Field one, and normalizeBudgetProposal backfills it.
+   * Only `super_admin` can author a `green_field` proposal, and Green Field publishes DIRECTLY
+   * (no plant-head / accounts chain) because the admin is already the approving authority.
+   */
+  fieldType?: FieldType;
+  /** Green Field only — the overall plant budget (Cr) the sections are distributed out of. */
+  plantBudgetCr?: number;
   /** The new FY this proposal publishes into when approved, e.g. "2027-28". */
   targetFy: string;
   /** The live FY this proposal was based on. */
@@ -446,6 +529,11 @@ export interface BudgetProposal {
   decidedBy?: string;
   decisionNote?: string;
   publishedAt?: string;
+  /**
+   * Append-only remark trail across all three budget gates (plant head → admin → Global Accounts),
+   * so each approver reads what the previous one wrote. See `src/lib/approvalRemarks.ts`.
+   */
+  approvalRemarks?: ApprovalRemark[];
   // ── Multi-stage approval (plant head → super admin → global accounts) ──
   /** Public plant-head approval link token (minted/rotated on each submit). */
   approvalToken?: string;
@@ -544,6 +632,8 @@ export interface Quote {
   currency?: string;
   /** True when the buyer seeded this quote during request creation. */
   seededByBuyer?: boolean;
+  /** Per-line supporting documents, keyed by `CapexLineItem.id` (mirrors `RfqQuote.lineDocuments`). */
+  lineDocuments?: Record<string, QuoteLineDocument>;
 }
 
 export interface NegotiationMessage {
@@ -620,6 +710,11 @@ export interface RfqQuote {
   currency?: string;
   /** @deprecated HSN now lives per line item on CapexLineItem.hsnCode. Kept only as a legacy fallback for old lump-sum quotes. */
   hsnCode?: string;
+  /**
+   * Per-line supporting documents the vendor attached, keyed by `CapexLineItem.id` — one document
+   * per line. Base64 is offloaded to IndexedDB (`qdoc:<id>`).
+   */
+  lineDocuments?: Record<string, QuoteLineDocument>;
 }
 
 /** One entry in the RFQ negotiation thread (either side may propose / counter / accept). */
@@ -888,6 +983,12 @@ export interface VendorInvite {
    * the vendor can be awarded / their PI requested (see `techSpecBlocksAward`).
    */
   techSpec?: TechSpecApproval;
+  /**
+   * Append-only remark trail for the per-vendor gates carried on this invite — sourcing's remark
+   * when it sends the spec, the Technical team's verdict remark, and (for a split award) this
+   * award's Plant-Accounts / Global-Accounts remarks.
+   */
+  approvalRemarks?: ApprovalRemark[];
 }
 
 /**

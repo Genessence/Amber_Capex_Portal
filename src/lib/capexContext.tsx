@@ -3,6 +3,8 @@
 import React, { createContext, useContext, useEffect, useState, useMemo, useRef } from 'react';
 import {
   AdhocBudgetRequest,
+  ApprovalRemark,
+  ApprovalStage,
   AuctionApprovalDocument,
   AuctionConfig,
   BudgetProposal,
@@ -25,6 +27,7 @@ import {
   ProjectType,
   PurchaseOrder,
   Quote,
+  QuoteLineDocument,
   RequestComment,
   RfqPriceMessage,
   RfqQuote,
@@ -36,7 +39,13 @@ import {
   Vendor,
   VendorInvite,
 } from './types';
-import { applyApproverEdit, buildMasterItemsFromProposal } from './budgetProposalUtils';
+import {
+  applyApproverEdit,
+  buildGreenFieldAllocationsFromProposal,
+  buildMasterItemsFromProposal,
+  proposalFieldType,
+  validateProposal,
+} from './budgetProposalUtils';
 import { ALLOWED_TRANSITIONS, PRE_PI_REQUEST_STATUSES } from './statusFlow';
 import { generateApprovalToken, generatePoToken, generatePoIssueToken, generateTechSpecToken } from './tokenUtils';
 import { buildDocApprovalPackage, effectiveDocApprovalStatus } from './docPackageUtils';
@@ -68,6 +77,8 @@ import {
   type KpiSnapshot,
 } from './kpiSnapshots';
 import { effectiveHeadAllocationCr } from './adhocBudgetUtils';
+import { buildApprovalRemark, appendRemark, remarkPatch } from './approvalRemarks';
+import { sanitizeLineDocuments } from './quoteDocuments';
 import { FLAT_MASTER_DIVISION } from './greenFieldConstants';
 import {
   mockCapexMaster,
@@ -75,8 +86,15 @@ import {
   mockRequests,
   mockVendors,
   CLEAN_SLATE_PURGE_V1,
+  GREEN_FIELD_BUDGET_CLEAR_V1,
 } from './mockData';
-import { PLANTS, ROLE_NAMES } from './constants';
+import {
+  PLANTS,
+  ROLE_NAMES,
+  PLANT_HEAD_ACTOR,
+  PLANT_ACCOUNTS_ACTOR,
+  GLOBAL_ACCOUNTS_ACTOR,
+} from './constants';
 import { BROWNFIELD_SEED_VERSION, brownFieldSeedData } from './brownFieldSeedData';
 import {
   BROWN_FIELD_NESTED_MIGRATION_V1,
@@ -174,6 +192,13 @@ interface CapexContextValue {
   updateBudgetProposal: (id: string, updates: Partial<BudgetProposal>) => void;
   submitBudgetProposal: (id: string) => void;
   /**
+   * Green Field only — publish an admin-authored budget STRAIGHT to the master, with no plant-head
+   * or Global-Accounts stage. The super admin is the approving authority for Green Field, so a
+   * chain that routed their own upload back to them for approval would be ceremony, not control.
+   * Writes the master rows AND the plant / section / head envelopes in one pass.
+   */
+  publishGreenFieldBudget: (proposal: BudgetProposal, actor: string) => void;
+  /**
    * Super-admin stage: approve (→ global accounts) / reject. Passing `editedItems` with an
    * `approved` decision edits the lines and sends the proposal FORWARD carrying those edits.
    * (`needs_correction` remains for the legacy send-back path.)
@@ -198,7 +223,7 @@ interface CapexContextValue {
   /** Global-accounts budget decision — final gate; approve publishes to the live master. */
   decideBudgetAccounts: (id: string, decision: 'approved' | 'rejected', actor: string, note?: string) => void;
   /** Plant-head request decision via the public email link (approve → sourcing / reject). */
-  decideRequestPlantHead: (requestId: string, decision: 'approved' | 'rejected') => void;
+  decideRequestPlantHead: (requestId: string, decision: 'approved' | 'rejected', note?: string) => void;
   // ── Trials (optional QA gate before final payment) ──
   setTrialRequired: (requestId: string, required: boolean, inviteId?: string) => void;
   submitTrial: (inviteId: string, submission: TrialSubmission) => void;
@@ -282,11 +307,11 @@ interface CapexContextValue {
   // ── Accounts: FA codes (plant), PO + upload + issue (global), payment milestones ──
   // The optional inviteId targets a single AWARD (split-auction); omit for single-vendor requests.
   assignFaCode: (requestId: string, lineItemId: string, code: string, inviteId?: string) => void;
-  submitFaCodes: (requestId: string, actor: string, inviteId?: string) => void;
+  submitFaCodes: (requestId: string, actor: string, inviteId?: string, note?: string) => void;
   createPurchaseOrder: (requestId: string, po: PurchaseOrder, milestones: PaymentMilestone[]) => void;
   submitPurchaseOrder: (requestId: string, actor: string) => void;
-  issuePurchaseOrder: (requestId: string, po: PurchaseOrder, milestones: PaymentMilestone[], actor: string, inviteId?: string) => void;
-  markPaymentMade: (requestId: string, milestoneId: string, actor: string, inviteId?: string) => void;
+  issuePurchaseOrder: (requestId: string, po: PurchaseOrder, milestones: PaymentMilestone[], actor: string, inviteId?: string, note?: string) => void;
+  markPaymentMade: (requestId: string, milestoneId: string, actor: string, inviteId?: string, note?: string) => void;
 }
 
 const CapexContext = createContext<CapexContextValue | null>(null);
@@ -427,7 +452,7 @@ function dedupeById<T extends { id: string }>(items: T[]): T[] {
  * price is missing/≤0/non-finite; coerces footer charges to non-negative finite numbers (else
  * dropped); keeps a string currency only.
  */
-function sanitizeRfqQuote(quote: RfqQuote): RfqQuote | null {
+function sanitizeRfqQuote(quote: RfqQuote, allowedItemIds?: string[]): RfqQuote | null {
   const price = Number(quote?.price);
   if (!Number.isFinite(price) || price <= 0) return null;
   const nonNeg = (v: unknown): number | undefined => {
@@ -451,9 +476,17 @@ function sanitizeRfqQuote(quote: RfqQuote): RfqQuote | null {
     freight: nonNeg(quote.freight),
     packing: nonNeg(quote.packing),
     service: nonNeg(quote.service),
+    // `deliveryDays` was previously dropped here while the form collects it as a REQUIRED field and
+    // `deliveryLeadDays` (paymentUtils) reads it to date the final payment — so every RFQ quote lost
+    // its lead time on the way in and the expected-payment date silently fell back to the legacy
+    // weeks field (usually absent → 0). Both are carried now; `deliveryWeeks` stays for legacy reads.
+    deliveryDays: nonNeg(quote.deliveryDays),
     deliveryWeeks: nonNeg(quote.deliveryWeeks),
     warranty: nonNeg(quote.warranty),
     currency: typeof quote.currency === 'string' ? quote.currency : undefined,
+    // Per-line supporting documents arrive from the public supplier page — shape-checked, keyed only
+    // to line items this request actually has (the caller passes the allow-list).
+    lineDocuments: sanitizeLineDocuments(quote.lineDocuments, allowedItemIds),
   };
 }
 
@@ -516,6 +549,39 @@ function stripRequestFiles(requests: CapexRequest[], files: FileMap): CapexReque
     return r;
   });
 }
+/**
+ * Per-line quotation documents follow the same rule as every other blob in this app: the base64
+ * lives in IndexedDB (`qdoc:<id>`), the metadata stays in the localStorage payload. One document map
+ * can be referenced from three places on an invite (the live `rfqQuote`, an auction `Quote`, and the
+ * frozen copies inside `rfqThread`), so both directions are factored out here rather than inlined
+ * three times — a fix applied to two of three copies is exactly how a blob goes missing.
+ */
+function stripLineDocuments(
+  docs: Record<string, QuoteLineDocument>,
+  files: FileMap,
+): Record<string, QuoteLineDocument> {
+  const out: Record<string, QuoteLineDocument> = {};
+  for (const [itemId, d] of Object.entries(docs)) {
+    if (d?.base64) {
+      files[`qdoc:${d.id}`] = d.base64;
+      out[itemId] = { ...d, base64: '' };
+    } else {
+      out[itemId] = d;
+    }
+  }
+  return out;
+}
+function hydrateLineDocuments(
+  docs: Record<string, QuoteLineDocument>,
+  files: FileMap,
+): Record<string, QuoteLineDocument> {
+  const out: Record<string, QuoteLineDocument> = {};
+  for (const [itemId, d] of Object.entries(docs)) {
+    const f = d ? files[`qdoc:${d.id}`] : undefined;
+    out[itemId] = f ? { ...d, base64: f } : d;
+  }
+  return out;
+}
 function stripInviteFiles(invites: VendorInvite[], files: FileMap): VendorInvite[] {
   return invites.map((inv) => {
     let v = inv;
@@ -523,16 +589,34 @@ function stripInviteFiles(invites: VendorInvite[], files: FileMap): VendorInvite
       files[`pi:${inv.id}`] = inv.proformaInvoice.base64;
       v = { ...v, proformaInvoice: { ...inv.proformaInvoice, base64: '' } };
     }
-    if (inv.quotes?.some((q) => q.attachmentBase64)) {
+    if (inv.quotes?.some((q) => q.attachmentBase64 || q.lineDocuments)) {
       v = {
         ...v,
         quotes: inv.quotes.map((q) => {
+          let next = q;
           if (q.attachmentBase64) {
             files[`q-att:${q.id}`] = q.attachmentBase64;
-            return { ...q, attachmentBase64: undefined };
+            next = { ...next, attachmentBase64: undefined };
           }
-          return q;
+          if (q.lineDocuments) next = { ...next, lineDocuments: stripLineDocuments(q.lineDocuments, files) };
+          return next;
         }),
+      };
+    }
+    // Per-line quotation documents on the live RFQ quote (the vendor's datasheet per line item).
+    if (inv.rfqQuote?.lineDocuments) {
+      v = { ...v, rfqQuote: { ...inv.rfqQuote, lineDocuments: stripLineDocuments(inv.rfqQuote.lineDocuments, files) } };
+    }
+    // …and on every quotation carried in the RFQ negotiation thread, so re-reading an older offer
+    // still resolves its attachments instead of silently losing them at the first persist.
+    if (inv.rfqThread?.some((m) => m.quote?.lineDocuments)) {
+      v = {
+        ...v,
+        rfqThread: inv.rfqThread.map((m) =>
+          m.quote?.lineDocuments
+            ? { ...m, quote: { ...m.quote, lineDocuments: stripLineDocuments(m.quote.lineDocuments, files) } }
+            : m,
+        ),
       };
     }
     if (inv.purchaseOrder) {
@@ -629,8 +713,22 @@ function hydrateInviteFiles(invites: VendorInvite[], files: FileMap): VendorInvi
         ...v,
         quotes: inv.quotes.map((q) => {
           const f = files[`q-att:${q.id}`];
-          return f ? { ...q, attachmentBase64: f } : q;
+          const next = f ? { ...q, attachmentBase64: f } : q;
+          return q.lineDocuments ? { ...next, lineDocuments: hydrateLineDocuments(q.lineDocuments, files) } : next;
         }),
+      };
+    }
+    if (inv.rfqQuote?.lineDocuments) {
+      v = { ...v, rfqQuote: { ...inv.rfqQuote, lineDocuments: hydrateLineDocuments(inv.rfqQuote.lineDocuments, files) } };
+    }
+    if (inv.rfqThread?.some((m) => m.quote?.lineDocuments)) {
+      v = {
+        ...v,
+        rfqThread: inv.rfqThread.map((m) =>
+          m.quote?.lineDocuments
+            ? { ...m, quote: { ...m.quote, lineDocuments: hydrateLineDocuments(m.quote.lineDocuments, files) } }
+            : m,
+        ),
       };
     }
     if (inv.purchaseOrder) {
@@ -669,26 +767,38 @@ function hydrateInviteFiles(invites: VendorInvite[], files: FileMap): VendorInvi
   });
 }
 
-const greenFieldSeedMaster = mockCapexMaster.filter(
-  (item) => (item.fieldType ?? 'brown_field') === 'green_field',
-);
+const isGreenFieldRow = (item: CapexMasterItem) =>
+  (item.fieldType ?? 'brown_field') === 'green_field';
+
+/**
+ * The Green Field seed is **RETIRED** (see GREEN_FIELD_BUDGET_CLEAR_V1). Green Field budgets are
+ * authored by the super admin in Budget Planning and published from there, so nothing is seeded and
+ * nothing is backfilled — an empty Green Field master is the correct starting state, exactly as the
+ * cleared Brown Field FY already is.
+ */
+const greenFieldSeedMaster: CapexMasterItem[] = [];
 
 /** Merge stored master with seeds; replaces Brown Field once per seed version. */
 function mergeCapexMasterOnLoad(
   storedMaster: CapexMasterItem[],
   brownfieldSeedVersion: string | undefined,
+  greenFieldClearVersion: string | undefined,
 ): CapexMasterItem[] {
   const brownFieldSeeds = brownFieldSeedData.map(normalizeMasterItem);
   const greenFieldSeeds = greenFieldSeedMaster.map(normalizeMasterItem);
+  // One-time wipe of the seeded Green Field budget. Runs on the STORED rows before anything else,
+  // so a browser that already holds the demo budget ends up in the same clean state as a fresh one.
+  const clearGreen = greenFieldClearVersion !== GREEN_FIELD_BUDGET_CLEAR_V1;
 
   if (!storedMaster.length) {
-    return applyMasterMigrations(mockCapexMaster.map(normalizeMasterItem), undefined, undefined, undefined, undefined);
+    const seeds = mockCapexMaster.filter((item) => !isGreenFieldRow(item)).map(normalizeMasterItem);
+    return applyMasterMigrations(seeds, undefined, undefined, undefined, undefined);
   }
 
+  const kept = clearGreen ? storedMaster.filter((item) => !isGreenFieldRow(item)) : storedMaster;
+
   if (brownfieldSeedVersion !== BROWNFIELD_SEED_VERSION) {
-    const storedGreen = storedMaster.filter(
-      (item) => (item.fieldType ?? 'brown_field') === 'green_field',
-    );
+    const storedGreen = kept.filter(isGreenFieldRow);
     const existingGreenKeys = new Set(storedGreen.map(getMasterBackfillKey));
     const missingGreenSeeds = greenFieldSeeds.filter(
       (seed) => !existingGreenKeys.has(getMasterBackfillKey(seed)),
@@ -696,11 +806,11 @@ function mergeCapexMasterOnLoad(
     return [...storedGreen, ...missingGreenSeeds, ...brownFieldSeeds];
   }
 
-  const existingKeys = new Set(storedMaster.map(getMasterBackfillKey));
+  const existingKeys = new Set(kept.map(getMasterBackfillKey));
   const missingGreenSeeds = greenFieldSeeds.filter(
     (seed) => !existingKeys.has(getMasterBackfillKey(seed)),
   );
-  return [...storedMaster, ...missingGreenSeeds];
+  return [...kept, ...missingGreenSeeds];
 }
 
 
@@ -739,6 +849,8 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
     useState(GREEN_FIELD_SECTION_MIGRATION_V1);
   const [brownFieldNestedMigrationVersion, setBrownFieldNestedMigrationVersion] =
     useState(BROWN_FIELD_NESTED_MIGRATION_V1);
+  const [greenFieldBudgetClearVersion, setGreenFieldBudgetClearVersion] =
+    useState(GREEN_FIELD_BUDGET_CLEAR_V1);
   const [greenFieldBudgetAllocations, setGreenFieldBudgetAllocations] =
     useState<GreenFieldBudgetAllocations>({ plantBudgets: [], sectionBudgets: [], headBudgets: [] });
   const [budgetProposals, setBudgetProposals] = useState<BudgetProposal[]>([]);
@@ -811,7 +923,11 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
           : [];
         setCapexMaster(
           applyMasterMigrations(
-            mergeCapexMasterOnLoad(storedMaster, parsed.brownfieldSeedVersion),
+            mergeCapexMasterOnLoad(
+              storedMaster,
+              parsed.brownfieldSeedVersion,
+              parsed.greenFieldBudgetClearVersion,
+            ),
             DIGITISATION_MIGRATION_V1,
             FLAT_MASTER_MIGRATION_V1,
             GREEN_FIELD_SECTION_MIGRATION_V1,
@@ -825,13 +941,19 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
         setBrownFieldNestedMigrationVersion(BROWN_FIELD_NESTED_MIGRATION_V1);
         if (Array.isArray(parsed.masterHeads)) setMasterHeads(parsed.masterHeads);
         if (Array.isArray(parsed.customPlants)) setCustomPlants(parsed.customPlants);
-        if (parsed.greenFieldBudgetAllocations) {
+        // The Green Field envelopes are wiped in the SAME pass as the Green Field master rows —
+        // keeping them would leave a plant/section/head budget describing line items that no longer
+        // exist, which every Green Field screen would render as a fully-unspent allocation.
+        if (parsed.greenFieldBudgetClearVersion !== GREEN_FIELD_BUDGET_CLEAR_V1) {
+          setGreenFieldBudgetAllocations({ plantBudgets: [], sectionBudgets: [], headBudgets: [] });
+        } else if (parsed.greenFieldBudgetAllocations) {
           setGreenFieldBudgetAllocations({
             plantBudgets: parsed.greenFieldBudgetAllocations.plantBudgets ?? [],
             sectionBudgets: parsed.greenFieldBudgetAllocations.sectionBudgets ?? [],
             headBudgets: parsed.greenFieldBudgetAllocations.headBudgets ?? [],
           });
         }
+        setGreenFieldBudgetClearVersion(GREEN_FIELD_BUDGET_CLEAR_V1);
         if (purged) setBudgetProposals(purged.budgetProposals);
         else if (Array.isArray(parsed.budgetProposals))
           setBudgetProposals(parsed.budgetProposals.map(normalizeBudgetProposal));
@@ -915,6 +1037,7 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
           masterHeads,
           customPlants,
           greenFieldBudgetAllocations,
+          greenFieldBudgetClearVersion,
           budgetProposals,
           adhocBudgetRequests,
           brownFieldHeadAllocations,
@@ -933,7 +1056,7 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
     // File blobs go to IndexedDB (much larger quota); fire-and-forget. Skipped until hydration
     // has merged the stored blobs back into state — writing the lean map first would wipe them.
     if (filesHydrated.current) void putAllFiles(files);
-  }, [requests, vendors, invites, chatMessages, plants, categories, capexMaster, masterHeads, customPlants, greenFieldBudgetAllocations, budgetProposals, adhocBudgetRequests, brownFieldHeadAllocations, kpiSnapshots, brownfieldSeedVersion, cleanSlatePurgeVersion, digitisationMigrationVersion, flatMasterMigrationVersion, greenFieldSectionMigrationVersion, brownFieldNestedMigrationVersion]);
+  }, [requests, vendors, invites, chatMessages, plants, categories, capexMaster, masterHeads, customPlants, greenFieldBudgetAllocations, greenFieldBudgetClearVersion, budgetProposals, adhocBudgetRequests, brownFieldHeadAllocations, kpiSnapshots, brownfieldSeedVersion, cleanSlatePurgeVersion, digitisationMigrationVersion, flatMasterMigrationVersion, greenFieldSectionMigrationVersion, brownFieldNestedMigrationVersion]);
 
   // Hydrate file blobs from IndexedDB after the initial (lean) load — metadata renders
   // immediately; download links light up once base64 is merged back in.
@@ -1424,15 +1547,32 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
     itemHsn?: Record<string, string>,
     incoDoc?: IncoTermsDoc,
   ): boolean {
-    const clean = sanitizeRfqQuote(quote);
-    if (!clean) {
-      console.error('proposeRfqQuote: invalid quotation rejected', quote);
-      return false;
-    }
+    // Resolve the target FIRST: the sanitizer needs the request's line-item ids to reject a
+    // `lineDocuments` map keyed to items this request does not have (the supplier page is public).
     const targetInvite = invites.find((i) => i.id === inviteId);
     const targetRequest = targetInvite
       ? requests.find((r) => r.id === targetInvite.requestId)
       : undefined;
+    const allowedItemIds = targetRequest?.lineItems?.map((li) => li.id);
+    const sanitized = sanitizeRfqQuote(quote, allowedItemIds);
+    if (!sanitized) {
+      console.error('proposeRfqQuote: invalid quotation rejected', quote);
+      return false;
+    }
+    // Who owns the per-line documents decides what an ABSENT map means, and the answer differs by
+    // side — which is why this is keyed on `by` rather than on emptiness:
+    //   • SOURCING has no upload control at all (their counter is built from price fields alone by
+    //     `quoteFromForm` in RfqPanel), so an absent map means "not specified". Carrying the
+    //     vendor's documents forward is the only correct reading; otherwise countering a price
+    //     would silently delete the datasheets the tech-spec gate and the approver's quotation view
+    //     both read.
+    //   • The SUPPLIER owns their own paperwork and has a control for every line, so their map is
+    //     authoritative including when it is empty — a vendor who removes their last attachment
+    //     and re-submits must actually see it gone.
+    const clean: RfqQuote =
+      by === 'supplier' || sanitized.lineDocuments
+        ? sanitized
+        : { ...sanitized, lineDocuments: targetInvite?.rfqQuote?.lineDocuments };
     let hsnPatch: Record<string, string> | null = null;
     if (by === 'supplier' && targetRequest?.lineItems?.length) {
       hsnPatch = resolveSupplierItemHsn(targetRequest.lineItems, clean, itemHsn);
@@ -1740,11 +1880,21 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
       return false;
     }
     const now = new Date().toISOString();
+    // The sender gets a remark too, not only the approver: sourcing's covering note is what tells
+    // the Technical team what changed on a re-send after a send-back.
+    const sendRemark = buildApprovalRemark({
+      stage: 'sourcing_tech_spec',
+      action: 'sent',
+      by: senderName,
+      text: current.notes,
+      at: now,
+    });
     setInvites((prev) =>
       prev.map((inv) =>
         inv.id === inviteId
           ? {
               ...inv,
+              approvalRemarks: appendRemark(inv.approvalRemarks, sendRemark),
               techSpec: {
                 ...current,
                 status: 'pending_technical' as const,
@@ -1794,6 +1944,19 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
         if (inv.id !== inviteId || !inv.techSpec) return inv;
         return {
           ...inv,
+          // Recorded on the shared trail as well as the spec package, so the sourcing surfaces that
+          // render remarks for a request pick up the Technical team's verdict without special-casing
+          // the tech-spec thread.
+          approvalRemarks: appendRemark(
+            inv.approvalRemarks,
+            buildApprovalRemark({
+              stage: 'technical_spec',
+              action: decision === 'approved' ? 'approved' : decision === 'rejected' ? 'rejected' : 'sent_back',
+              by: deciderName,
+              text: note,
+              at: now,
+            }),
+          ),
           techSpec: {
             ...inv.techSpec,
             status: decision,
@@ -2146,7 +2309,15 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
    * hands the award/request to Global Accounts ("Satish") for the PO — so this also mints the
    * public PO-issue token that Plant Accounts email him straight from their own page.
    */
-  function submitFaCodes(requestId: string, actor: string, inviteId?: string) {
+  function submitFaCodes(requestId: string, actor: string, inviteId?: string, note?: string) {
+    const now = new Date().toISOString();
+    const remark = buildApprovalRemark({
+      stage: 'plant_accounts_fa',
+      action: 'sent',
+      by: actor || PLANT_ACCOUNTS_ACTOR,
+      text: note,
+      at: now,
+    });
     if (inviteId) {
       setInvites((prev) =>
         prev.map((inv) =>
@@ -2158,6 +2329,7 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
                 poToken: inv.poToken ?? generatePoToken('award', inv.id),
                 // Satish's PO-issue link — emailed from the Plant-Accounts page on submit.
                 poIssueToken: inv.poIssueToken ?? generatePoIssueToken('award', inv.id),
+                approvalRemarks: appendRemark(inv.approvalRemarks, remark),
               }
             : inv,
         ),
@@ -2171,6 +2343,7 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
         status: 'accounts_processing',
         poToken: req?.poToken ?? generatePoToken('request', requestId),
         poIssueToken: req?.poIssueToken ?? generatePoIssueToken('request', requestId),
+        ...remarkPatch(req?.approvalRemarks, remark),
       },
       actor,
     );
@@ -2188,8 +2361,16 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
     milestones: PaymentMilestone[],
     actor: string,
     inviteId?: string,
+    note?: string,
   ) {
     const now = new Date().toISOString();
+    const remark = buildApprovalRemark({
+      stage: 'global_accounts_po',
+      action: 'approved',
+      by: actor || GLOBAL_ACCOUNTS_ACTOR,
+      text: note,
+      at: now,
+    });
     if (inviteId) {
       setInvites((prev) =>
         prev.map((inv) =>
@@ -2203,6 +2384,7 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
                 awardStatus: 'payment_in_progress' as const,
                 // Vendor can re-upload the PI against the issued PO.
                 piReuploadAllowed: true,
+                approvalRemarks: appendRemark(inv.approvalRemarks, remark),
               }
             : inv,
         ),
@@ -2217,13 +2399,32 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
         status: 'payment_in_progress',
         // Vendor can re-upload the PI against the issued PO.
         piReuploadAllowed: true,
+        ...remarkPatch(requests.find((r) => r.id === requestId)?.approvalRemarks, remark),
       },
       actor,
     );
   }
 
-  function markPaymentMade(requestId: string, milestoneId: string, actor: string, inviteId?: string) {
+  /**
+   * Tick one payment milestone. `note` is Plant Accounts' remark on that specific payment (UTR,
+   * part-payment reason, a hold they lifted) — recorded on the remark trail so the request detail
+   * and the accounts tracker show WHY a milestone moved, not only that it did.
+   */
+  function markPaymentMade(
+    requestId: string,
+    milestoneId: string,
+    actor: string,
+    inviteId?: string,
+    note?: string,
+  ) {
     const now = new Date().toISOString();
+    const paymentRemark = buildApprovalRemark({
+      stage: 'plant_accounts_payment',
+      action: 'noted',
+      by: actor || PLANT_ACCOUNTS_ACTOR,
+      text: note,
+      at: now,
+    });
     if (inviteId) {
       // Award-based: tick this award's milestone; final tick completes the award (per-award TAT
       // stop). When every award is completed, the whole request completes.
@@ -2254,6 +2455,7 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
               ...(finalDone && i.awardStatus === 'payment_in_progress'
                 ? { awardStatus: 'completed' as const, tatStoppedAt: now }
                 : {}),
+              approvalRemarks: appendRemark(i.approvalRemarks, paymentRemark),
             }
           : i,
       );
@@ -2291,18 +2493,32 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
         ...(finalDone && req.status === 'payment_in_progress'
           ? { status: 'completed', tatStoppedAt: now }
           : {}),
+        ...remarkPatch(req.approvalRemarks, paymentRemark),
       },
       actor,
     );
   }
 
   function submitQuote(inviteId: string, quote: Quote) {
-    // Reverse auction re-bid overwrites the existing quote in place.
+    // Public bid surface: shape-check the per-line documents against this request's line items
+    // before they reach state, exactly as `proposeRfqQuote` does for the RFQ path.
+    const invite = invites.find((i) => i.id === inviteId);
+    const allowedItemIds = invite
+      ? requests.find((r) => r.id === invite.requestId)?.lineItems?.map((li) => li.id)
+      : undefined;
+    const cleanDocs = sanitizeLineDocuments(quote.lineDocuments, allowedItemIds);
+    // Reverse auction re-bid overwrites the existing quote in place. A re-bid that attaches nothing
+    // KEEPS the documents already on file — the vendor is revising a price, not withdrawing their
+    // datasheets, and the bid form seeds itself from those same documents.
     setInvites((prev) =>
       prev.map((inv) => {
         if (inv.id !== inviteId) return inv;
-        const existingId = inv.quotes[0]?.id;
-        const nextQuote = existingId ? { ...quote, id: existingId } : quote;
+        const existing = inv.quotes[0];
+        const nextQuote: Quote = {
+          ...quote,
+          ...(existing?.id ? { id: existing.id } : {}),
+          lineDocuments: cleanDocs ?? existing?.lineDocuments,
+        };
         return { ...inv, quotes: [nextQuote], status: 'quote_received' };
       }),
     );
@@ -2728,12 +2944,28 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
     setBudgetProposals((prev) =>
       prev.map((p) => {
         if (p.id !== id || p.status !== 'pending_plant_head') return p;
+        // One remark per decision, on every branch — the admin who picks this up next reads the
+        // plant head's reasoning, not just a status that changed.
+        const remarks = remarkPatch(
+          p.approvalRemarks,
+          buildApprovalRemark({
+            stage: 'plant_head_budget',
+            action:
+              decision === 'approved'
+                ? editedItems?.length ? 'forwarded' : 'approved'
+                : decision === 'needs_correction' ? 'sent_back' : 'rejected',
+            by: 'Plant Head',
+            text: note,
+            at: now,
+          }),
+        );
         if (decision === 'approved') {
           return {
             ...applyApproverEdit(p, editedItems, 'plant_head', 'Plant Head', now, note),
             status: 'pending_admin',
             plantHeadDecidedAt: now,
             plantHeadDecidedBy: 'Plant Head',
+            ...remarks,
           };
         }
         if (decision === 'needs_correction') {
@@ -2744,6 +2976,7 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
             plantHeadDecidedBy: 'Plant Head',
             correctionNote: note,
             ...(editedItems ? { items: editedItems } : {}),
+            ...remarks,
           };
         }
         return {
@@ -2752,6 +2985,7 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
           plantHeadDecidedAt: now,
           plantHeadDecidedBy: 'Plant Head',
           decisionNote: note ?? 'Rejected by plant head',
+          ...remarks,
         };
       }),
     );
@@ -2764,6 +2998,68 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
    * On **approve** the admin may pass `editedItems` — they adjust the lines and send the proposal
    * FORWARD carrying those edits (recorded on `proposal.edits`), rather than bouncing it back.
    */
+  /**
+   * Takes the proposal BY VALUE, not by id. The editor saves and publishes in the same click, so an
+   * id lookup here would read the pre-save copy of the proposal under React batching and publish
+   * stale (often empty) line items. The caller owns the current draft; this owns the write.
+   */
+  function publishGreenFieldBudget(proposal: BudgetProposal, actor: string) {
+    const target = proposal;
+    const id = target.id;
+    if (proposalFieldType(target) !== 'green_field') return;
+    const stored = budgetProposals.find((p) => p.id === id);
+    if (stored?.status === 'approved') return; // already published — never publish twice
+    if (validateProposal(target).length) return;
+    const now = new Date().toISOString();
+
+    setBudgetProposals((prev) =>
+      prev.map((p) =>
+        p.id === id
+          ? {
+              ...p,
+              targetFy: target.targetFy,
+              items: target.items,
+              plantBudgetCr: target.plantBudgetCr,
+              status: 'approved',
+              submittedAt: p.submittedAt ?? now,
+              adminDecidedAt: now,
+              adminDecidedBy: actor,
+              decidedAt: now,
+              decidedBy: actor,
+              publishedAt: now,
+            }
+          : p,
+      ),
+    );
+
+    setCapexMaster((prev) => {
+      // Republishing the same plant + FY + project type REPLACES that scope rather than appending,
+      // so a corrected re-upload does not leave the old lines sitting alongside the new ones and
+      // double the plant's budget.
+      const rest = prev.filter(
+        (m) =>
+          !(
+            (m.fieldType ?? 'brown_field') === 'green_field' &&
+            m.plant === target.plant &&
+            m.fy === target.targetFy &&
+            resolveProjectType(m) === target.projectType
+          ),
+      );
+      return [...rest, ...buildMasterItemsFromProposal(target)];
+    });
+
+    const allocations = buildGreenFieldAllocationsFromProposal(target);
+    setGreenFieldBudgetAllocations((prev) => {
+      const sameScope = (b: { plant: string; fy: string; projectType: ProjectType }) =>
+        b.plant === target.plant && b.fy === target.targetFy && b.projectType === target.projectType;
+      return {
+        plantBudgets: [...prev.plantBudgets.filter((b) => !sameScope(b)), ...allocations.plantBudgets],
+        sectionBudgets: [...prev.sectionBudgets.filter((b) => !sameScope(b)), ...allocations.sectionBudgets],
+        headBudgets: [...prev.headBudgets.filter((b) => !sameScope(b)), ...allocations.headBudgets],
+      };
+    });
+  }
+
   function decideBudgetProposal(
     id: string,
     decision: 'approved' | 'rejected' | 'needs_correction',
@@ -2776,6 +3072,19 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
       prev.map((p) => {
         // Guard: only an admin-pending proposal can be decided at this stage.
         if (p.id !== id || p.status !== 'pending_admin') return p;
+        const remarks = remarkPatch(
+          p.approvalRemarks,
+          buildApprovalRemark({
+            stage: 'admin_budget',
+            action:
+              decision === 'approved'
+                ? editedItems?.length ? 'forwarded' : 'approved'
+                : decision === 'needs_correction' ? 'sent_back' : 'rejected',
+            by: ROLE_NAMES[actor] ?? actor,
+            text: note,
+            at: now,
+          }),
+        );
         if (decision === 'approved') {
           return {
             ...applyApproverEdit(p, editedItems, 'admin', ROLE_NAMES[actor] ?? actor, now, note),
@@ -2784,6 +3093,7 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
             adminDecidedBy: actor,
             // Mint the public Global-Accounts sign-off link (they have no portal login).
             accountsToken: generateApprovalToken('budget_accounts', p.id),
+            ...remarks,
           };
         }
         if (decision === 'needs_correction') {
@@ -2795,6 +3105,7 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
             accountsToken: undefined,
             correctionNote: note,
             ...(editedItems ? { items: editedItems } : {}),
+            ...remarks,
           };
         }
         return {
@@ -2804,6 +3115,7 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
           adminDecidedBy: actor,
           decisionNote: note,
           accountsToken: undefined,
+          ...remarks,
         };
       }),
     );
@@ -2835,6 +3147,16 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
               decidedAt: now,
               decidedBy: actor,
               decisionNote: note ?? p.decisionNote,
+              ...remarkPatch(
+                p.approvalRemarks,
+                buildApprovalRemark({
+                  stage: 'accounts_budget',
+                  action: decision === 'approved' ? 'approved' : 'rejected',
+                  by: actor,
+                  text: note,
+                  at: now,
+                }),
+              ),
               publishedAt: decision === 'approved' ? now : p.publishedAt,
               // Burn the public link so a stale email cannot re-decide.
               accountsToken: undefined,
@@ -2848,18 +3170,38 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
-  /** Plant-head request approval (public email link, no role): approve → sourcing; reject → rejected. */
-  function decideRequestPlantHead(requestId: string, decision: 'approved' | 'rejected') {
+  /**
+   * Plant-head request approval (public email link, no role): approve → sourcing; reject → rejected.
+   *
+   * `note` is the plant head's remark. It is recorded on the request's remark trail for BOTH
+   * outcomes — an approval that came with a condition attached is exactly as worth reading as a
+   * rejection — and, on a rejection, it also becomes the `rejectionReason` the requester sees, so
+   * the reason is never the generic placeholder when a real one was typed.
+   */
+  function decideRequestPlantHead(requestId: string, decision: 'approved' | 'rejected', note?: string) {
     const req = requests.find((r) => r.id === requestId);
     if (!req || req.status !== 'pending_head_approval') return;
     const now = new Date().toISOString();
+    const remark = buildApprovalRemark({
+      stage: 'plant_head_request',
+      action: decision === 'approved' ? 'approved' : 'rejected',
+      by: PLANT_HEAD_ACTOR,
+      text: note,
+      at: now,
+    });
+    const remarks = remarkPatch(req.approvalRemarks, remark);
     if (decision === 'approved') {
-      updateRequest(requestId, { status: 'sourcing', plantHeadDecidedAt: now }, 'Plant Head (email)');
+      updateRequest(requestId, { status: 'sourcing', plantHeadDecidedAt: now, ...remarks }, PLANT_HEAD_ACTOR);
     } else {
       updateRequest(
         requestId,
-        { status: 'rejected', plantHeadDecidedAt: now, rejectionReason: 'Rejected by plant head' },
-        'Plant Head (email)',
+        {
+          status: 'rejected',
+          plantHeadDecidedAt: now,
+          rejectionReason: remark?.text ?? 'Rejected by plant head',
+          ...remarks,
+        },
+        PLANT_HEAD_ACTOR,
       );
     }
   }
@@ -3080,6 +3422,7 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
         budgetProposals,
         createBudgetProposal,
         updateBudgetProposal,
+        publishGreenFieldBudget,
         submitBudgetProposal,
         decideBudgetProposal,
         decideBudgetPlantHead,

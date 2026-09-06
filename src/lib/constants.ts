@@ -160,6 +160,20 @@ export const GLOBAL_ACCOUNTS_NAME = "Satish"
 export const TECHNICAL_TEAM_EMAIL = "technical.team@amber-enterprises.in"
 
 /**
+ * Actor names stamped on status history and on approval remarks by the four TOKENISED PUBLIC pages,
+ * whose actors have no portal login and therefore no role to read a name from.
+ *
+ * These live here, not inline on each page, because the same string is now written from two sides:
+ * the page (which stamps the status-history actor) and `capexContext` (which stamps the remark
+ * author). A page-local literal that drifts from the context's literal would split one person's
+ * actions into two names in the audit trail.
+ */
+export const PLANT_HEAD_ACTOR = "Plant Head (email)"
+export const PLANT_ACCOUNTS_ACTOR = "Plant Accounts (email)"
+export const GLOBAL_ACCOUNTS_ACTOR = `Global Accounts (${GLOBAL_ACCOUNTS_NAME})`
+export const TECHNICAL_TEAM_ACTOR = "Technical Team"
+
+/**
  * Default recipient for plant-head approval emails (budget + request). The plant head has no portal
  * login — the emailed public link is the real payload; the address is a placeholder, editable in
  * the preview modal before "sending".

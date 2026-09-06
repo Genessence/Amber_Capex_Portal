@@ -18,7 +18,9 @@ import { useCapex } from '@/lib/capexContext'
 import { resolvePoTarget } from '@/lib/tokenUtils'
 import { SUPPLIER_CARD } from '@/lib/uiTokens'
 import { FIELD_TYPE_LABELS } from '@/lib/types'
-import { PLANTS, STATUS_LABELS, GLOBAL_ACCOUNTS_NAME } from '@/lib/constants'
+import { PLANTS, STATUS_LABELS, GLOBAL_ACCOUNTS_NAME, GLOBAL_ACCOUNTS_ACTOR } from '@/lib/constants'
+import { RemarkField } from '@/components/RemarkField'
+import { RemarkTrail } from '@/components/RemarkTrail'
 import { buildMilestonesFromVendor, resolveOrderValue } from '@/lib/paymentUtils'
 import type { PurchaseOrder } from '@/lib/types'
 
@@ -30,7 +32,7 @@ const PO_DOC_ACCEPT =
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 
 /** The actor stamped on the PO issued from this public link (no portal login). */
-const PO_ISSUER_ACTOR = `Global Accounts (${GLOBAL_ACCOUNTS_NAME})`
+const PO_ISSUER_ACTOR = GLOBAL_ACCOUNTS_ACTOR
 
 /** Rupees only — every amount reaching this page is resolved on an INR basis. */
 const fmt = (n: number) => '₹' + Math.round(n).toLocaleString('en-IN')
@@ -78,6 +80,20 @@ export default function PoIssuePage() {
   const request = target?.request
   const invite = target?.kind === 'award' ? target.invite : undefined
 
+  /**
+   * Every remark that applies to THIS order: the request's own (the plant head's approval and the
+   * request-level accounts gates) plus, on a split award, the ones recorded against this award's
+   * invite. Merged rather than "invite, else request" — an award track inherits the request's
+   * approvals, so falling back to one or the other hides half the history.
+   */
+  const orderRemarks = useMemo(
+    () =>
+      [...(request?.approvalRemarks ?? []), ...(invite?.approvalRemarks ?? [])].sort((a, b) =>
+        a.at.localeCompare(b.at),
+      ),
+    [request?.approvalRemarks, invite?.approvalRemarks],
+  )
+
   /** Scoped to THIS request, the way AccountsPanel is called internally — a vendor can hold
    *  invites on several requests, and the order value must resolve against this one. */
   const reqInvites = useMemo(
@@ -122,6 +138,9 @@ export default function PoIssuePage() {
   const [poAmount, setPoAmount] = useState('')
   const [poDocs, setPoDocs] = useState<PoDocDraft[]>([])
   const [poDocError, setPoDocError] = useState('')
+  // Global Accounts' remark on issuing the PO — recorded against the order so Plant Accounts and
+  // the internal tracker see any condition attached to it, not just the PO number.
+  const [remark, setRemark] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
   const prefilled = useRef(false)
 
@@ -198,7 +217,7 @@ export default function PoIssuePage() {
       })),
     }
     const ms = buildMilestonesFromVendor(vendor, amt)
-    issuePurchaseOrder(request.id, newPo, ms, PO_ISSUER_ACTOR, invite?.id)
+    issuePurchaseOrder(request.id, newPo, ms, PO_ISSUER_ACTOR, invite?.id, remark)
     setTrialOnRequest(trialRequired)
     setDone(true)
   }
@@ -342,6 +361,13 @@ export default function PoIssuePage() {
           </div>
         )}
 
+        {/* What Plant Accounts (and earlier approvers) wrote — the FA-code handoff remark usually
+            explains anything unusual about the coding this PO is raised against. */}
+        <RemarkTrail
+          remarks={orderRemarks}
+          title="Remarks on this order"
+        />
+
         <div className="border-t border-border pt-4 space-y-3">
           <div className="flex flex-wrap items-end gap-3">
             <div>
@@ -423,6 +449,16 @@ export default function PoIssuePage() {
               </p>
             )}
           </div>
+
+          <RemarkField
+            id="po-issue-remark"
+            label="Your remarks"
+            value={remark}
+            onChange={setRemark}
+            rows={2}
+            placeholder="e.g. PO raised against the revised PI — advance released only after the PBG is received."
+            hint="Optional. Recorded against this order and visible to Plant Accounts and sourcing."
+          />
 
           <p className="text-[11px] text-muted-foreground">
             Next: the vendor re-uploads their PI against this PO → Plant Accounts pay the milestones

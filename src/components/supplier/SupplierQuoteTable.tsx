@@ -15,13 +15,14 @@
  *
  * Render this inside a `hidden lg:block` wrapper; `SupplierQuoteCards` covers below `lg`.
  */
-import type { CapexLineItem, RfqQuote } from "@/lib/types";
+import type { CapexLineItem, QuoteLineDocument, RfqQuote } from "@/lib/types";
 import { useMemo } from "react";
 import { INPUT_RIGHT, fmtCurrency } from "@/lib/auctionTheme";
 import { currencySymbol } from "@/lib/currencyUtils";
 import { rfqTotal, rfqGstAmount, rfqLineGstRate, rfqLineUnitPrice, rfqLineBreakdown, rfqLineSubtotal } from "@/lib/rfqUtils";
 import { HSN_GST_OPTIONS, gstRateForHsn } from "@/lib/hsnGst";
 import { TABLE_WRAP } from "@/lib/uiTokens";
+import { LineDocumentCell } from "./LineDocumentCell";
 
 export type SupplierQuoteVariant = "read" | "entry" | "bid";
 
@@ -42,6 +43,15 @@ export interface SupplierQuoteTableProps {
    * falls back to the stored quote's currency; entry/bid must pass the live form selection.
    */
   currency?: string;
+  /**
+   * Per-line supporting documents keyed by line-item id. In read mode these come off the stored
+   * quote; in entry/bid the caller owns the map and gets `onLineDocument` callbacks.
+   */
+  lineDocuments?: Record<string, QuoteLineDocument>;
+  /** `null` clears the line's document. Passing this handler is what turns the column editable. */
+  onLineDocument?: (itemId: string, doc: QuoteLineDocument | null) => void;
+  /** Vendor display name stamped on an uploaded document. */
+  uploadedBy?: string;
   /** Whether to render the read-mode attribute rows + grand-total footer (default true). */
   showFooter?: boolean;
 }
@@ -73,6 +83,9 @@ export function SupplierQuoteTable({
   onLinePrice,
   hsnByItem,
   onHsnChange,
+  lineDocuments,
+  onLineDocument,
+  uploadedBy,
   currency,
   showFooter = true,
 }: SupplierQuoteTableProps) {
@@ -114,14 +127,25 @@ export function SupplierQuoteTable({
   const gst = rfqGstAmount(activeQuote, effectiveItems);
   const total = rfqTotal(activeQuote, effectiveItems);
 
+  // The per-line Document column is rendered when the vendor can upload (entry/bid) OR when a
+  // stored quote actually carries documents — a read surface with no attachments keeps the old
+  // 7-column layout rather than showing a column of dashes.
+  // Read surfaces get the documents off the stored quote for free — every "here is the quotation"
+  // card in the portal renders through this component, so falling back here means none of them can
+  // be the one that forgets to thread the prop.
+  const docs = lineDocuments ?? quote?.lineDocuments;
+  const hasLineDocs = !!docs && lineItems.some(it => !!docs[it.id]);
+  const showDocColumn = !!onLineDocument || hasLineDocs;
+
   // Column span for the attribute-row label cell = all columns except the trailing value column.
-  // Layout is 7 columns (# / Description / Qty / UOM / HSN / Unit Price / Line Total) across every
-  // variant, so the label fills the first 6. (Attribute rows only ever render in the read variant.)
-  const labelSpan = 6;
+  // Base layout is 7 columns (# / Description / Qty / UOM / HSN / Unit Price / Line Total), so the
+  // label fills the first 6 — plus one more when the Document column is present. (Attribute rows
+  // only ever render in the read variant.)
+  const labelSpan = showDocColumn ? 7 : 6;
 
   return (
     <div className={TABLE_WRAP}>
-      <table className="w-full text-sm border-collapse min-w-[640px]" aria-label="Your quotation">
+      <table className={`w-full text-sm border-collapse ${showDocColumn ? "min-w-[820px]" : "min-w-[640px]"}`} aria-label="Your quotation">
         <thead>
           <tr className="bg-[#171717] text-white">
             <th scope="col" className={`${TH} text-left w-10`}>#</th>
@@ -133,6 +157,9 @@ export function SupplierQuoteTable({
               Unit Price ({sym}){!isRead && <span className="text-red-300"> *</span>}
             </th>
             <th scope="col" className={`${TH} text-right w-32 border-l border-white/15`}>Line Total</th>
+            {showDocColumn && (
+              <th scope="col" className={`${TH} text-left w-40 border-l border-white/15`}>Document</th>
+            )}
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
@@ -206,6 +233,18 @@ export function SupplierQuoteTable({
                     </div>
                   ) : "—"}
                 </td>
+                {showDocColumn && (
+                  <td className="px-3 py-3 align-top border-l border-slate-100">
+                    <LineDocumentCell
+                      compact
+                      itemLabel={item.description}
+                      doc={docs?.[item.id]}
+                      uploadedBy={uploadedBy}
+                      readOnly={!onLineDocument}
+                      onChange={onLineDocument ? d => onLineDocument(item.id, d) : undefined}
+                    />
+                  </td>
+                )}
               </tr>
             );
           })}

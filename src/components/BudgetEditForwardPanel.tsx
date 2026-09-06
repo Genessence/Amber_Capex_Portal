@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import { RemarkField } from '@/components/RemarkField'
 import { ArrowRight, Plus, RotateCcw, Trash2 } from 'lucide-react'
 import type { BudgetProposal, BudgetProposalItem } from '@/lib/types'
 
@@ -158,12 +159,16 @@ export function BudgetEditForwardPanel({
         )}
       </div>
 
-      <textarea
+      {/* The shared remark control, so this box has the same length cap and wording as every other
+          approval surface — and the same sanitizer behind it. */}
+      <RemarkField
+        id="budget-forward-remark"
+        label={`Remark for ${nextStageLabel}`}
         value={note}
-        onChange={e => setNote(e.target.value)}
-        placeholder={`Remark for ${nextStageLabel} (optional) — e.g. why you revised a line…`}
+        onChange={setNote}
         rows={2}
-        className="w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-card focus:outline-none focus:ring-2 focus:ring-primary"
+        placeholder="e.g. Trimmed the compressor line to the approved capacity — revised figure agreed with the plant."
+        hint={`Optional — shown to ${nextStageLabel} and to every later approver, alongside exactly what you changed.`}
       />
 
       <div className="flex justify-end">

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { useCapex } from "@/lib/capexContext"
 import { buildSupplierLink } from "@/lib/tokenUtils"
 import { isAuctionExpired, lowestInrUnitIndex, quoteLineUnitPrice } from "@/lib/auctionUtils"
+import { QuoteLineDocLink } from "@/components/QuoteLineDocLink"
 import { awardUnitPriceInr, inrQuoteGrandTotal, isAwardBased, quoteGrandTotal } from "@/lib/paymentUtils"
 import { currencySymbol, formatTypedInr, inrWithNative, inrWithNativeLabel, isForeignCurrency, toInr } from "@/lib/currencyUtils"
 import { fmtCurrency } from "@/lib/auctionTheme"
@@ -225,6 +226,15 @@ const ItemBodyRow = React.memo(function ItemBodyRow({
                 <p className="text-[11px] text-slate-200">Total: ₹0</p>
               </>
             )}
+            {/* The vendor's supporting document for THIS line. Read from the bid the cell is
+                pricing (`latestQuote`), falling back to the live RFQ quotation for a request that
+                was escalated to auction — the datasheet was attached on the RFQ and the auction
+                re-bid carries it forward, so both shapes resolve. Rendered outside the price branch
+                because a document can exist on a line that has no bid yet. */}
+            <QuoteLineDocLink
+              doc={latestQuote?.lineDocuments?.[item.id] ?? inv.rfqQuote?.lineDocuments?.[item.id]}
+              className="mt-1"
+            />
           </td>
         )
       })}

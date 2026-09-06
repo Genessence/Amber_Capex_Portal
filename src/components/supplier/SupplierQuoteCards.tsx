@@ -12,13 +12,14 @@
  *               no per-line threshold chip or over-threshold border here — that authoritative
  *               signal lives in the page (header chip + summary card).
  */
-import type { CapexLineItem, RfqQuote } from "@/lib/types";
+import type { CapexLineItem, QuoteLineDocument, RfqQuote } from "@/lib/types";
 import { useMemo } from "react";
 import { INPUT_RIGHT, LABEL, fmtCurrency } from "@/lib/auctionTheme";
 import { currencySymbol } from "@/lib/currencyUtils";
 import { rfqTotal, rfqGstAmount, rfqLineGstRate, rfqLineUnitPrice, rfqLineBreakdown, rfqLineSubtotal } from "@/lib/rfqUtils";
 import { HSN_GST_OPTIONS, gstRateForHsn } from "@/lib/hsnGst";
 import type { SupplierQuoteVariant } from "./SupplierQuoteTable";
+import { LineDocumentCell } from "./LineDocumentCell";
 
 export interface SupplierQuoteCardsProps {
   variant: SupplierQuoteVariant;
@@ -30,6 +31,12 @@ export interface SupplierQuoteCardsProps {
   onHsnChange?: (itemId: string, value: string) => void;
   /** See `SupplierQuoteTableProps.currency` — own-currency figures, never converted. */
   currency?: string;
+  /** Per-line supporting documents keyed by line-item id (see `SupplierQuoteTableProps`). */
+  lineDocuments?: Record<string, QuoteLineDocument>;
+  /** `null` clears the line's document. Passing this handler is what turns the row editable. */
+  onLineDocument?: (itemId: string, doc: QuoteLineDocument | null) => void;
+  /** Vendor display name stamped on an uploaded document. */
+  uploadedBy?: string;
   /** Read-mode only: render the charges block + grand-total summary below the cards (default true). */
   showFooter?: boolean;
 }
@@ -58,6 +65,9 @@ export function SupplierQuoteCards({
   onLinePrice,
   hsnByItem,
   onHsnChange,
+  lineDocuments,
+  onLineDocument,
+  uploadedBy,
   currency,
   showFooter = true,
 }: SupplierQuoteCardsProps) {
@@ -93,6 +103,16 @@ export function SupplierQuoteCards({
 
   const gst = rfqGstAmount(activeQuote, effectiveItems);
   const total = rfqTotal(activeQuote, effectiveItems);
+
+  // Mirrors `SupplierQuoteTable.showDocColumn` — the document row appears when the vendor can
+  // upload, or when a stored quote actually carries an attachment. Keeping the two conditions
+  // identical is what stops the desktop and mobile surfaces disagreeing about what exists.
+  // Read surfaces get the documents off the stored quote for free — every "here is the quotation"
+  // card in the portal renders through this component, so falling back here means none of them can
+  // be the one that forgets to thread the prop.
+  const docs = lineDocuments ?? quote?.lineDocuments;
+  const hasLineDocs = !!docs && lineItems.some(it => !!docs[it.id]);
+  const showDocRow = !!onLineDocument || hasLineDocs;
 
   return (
     <div className="space-y-3">
@@ -180,6 +200,22 @@ export function SupplierQuoteCards({
                 )}
               </div>
             </div>
+
+            {/* Supporting document for THIS line (datasheet / drawing / certificate). */}
+            {showDocRow && (
+              <div className="flex items-center justify-between gap-3 border-t border-slate-100 pt-2.5">
+                <span className={LABEL + " mb-0 shrink-0"}>Document</span>
+                <div className="w-44 min-w-0 flex justify-end">
+                  <LineDocumentCell
+                    itemLabel={item.description}
+                    doc={docs?.[item.id]}
+                    uploadedBy={uploadedBy}
+                    readOnly={!onLineDocument}
+                    onChange={onLineDocument ? d => onLineDocument(item.id, d) : undefined}
+                  />
+                </div>
+              </div>
+            )}
           </div>
         );
       })}

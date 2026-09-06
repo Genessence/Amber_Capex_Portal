@@ -4,7 +4,8 @@
  * mirroring `exportUtils.ts`.
  */
 
-import type { CapexMasterItem } from './types';
+import type { CapexMasterItem, FieldType } from './types';
+import { GREEN_FIELD_SECTION_HEADS, GREEN_FIELD_SECTION_ORDER } from './greenFieldConstants';
 
 const CR_TO_INR = 1_00_00_000;
 
@@ -20,6 +21,16 @@ export interface ParsedMasterRow {
   reasonForRequirement?: string;
   benefits?: string;
   roi?: string;
+  /**
+   * Green Field only. The sheet carries the whole envelope hierarchy so one upload assigns budget
+   * at every level: plant → section (`division`) → head → this sub-particular (`totalCost`).
+   * These three are per-SCOPE figures repeated on each row of that scope; the importer takes the
+   * first non-empty one per scope and ignores the repeats.
+   */
+  division?: string;
+  plantBudgetCr?: number;
+  sectionBudgetCr?: number;
+  headBudgetCr?: number;
 }
 
 export interface ParseResult {
@@ -38,6 +49,11 @@ const COLUMN_ALIASES: Record<string, string[]> = {
   reasonForRequirement: ['reason for requirement', 'reason', 'justification'],
   benefits: ['benefits', 'benefit'],
   roi: ['roi', 'payback'],
+  // Green Field hierarchy columns. Ignored by the Brown Field template (which has none of them).
+  division: ['section', 'division', 'green field section'],
+  plantBudgetCr: ['plant budget (cr)', 'plant budget cr', 'plant budget', 'total plant budget (cr)'],
+  sectionBudgetCr: ['section budget (cr)', 'section budget cr', 'section budget', 'division budget (cr)'],
+  headBudgetCr: ['head budget (cr)', 'head budget cr', 'head budget', 'shop budget (cr)'],
 };
 
 // Legacy Rate column — no longer part of the budget, but still read so an OLD workbook that only
@@ -84,6 +100,7 @@ function rowFromCells(
   legacyRateCol?: number,
 ): ParsedMasterRow | null {
   const head = hm.head != null ? str(cells[hm.head]) : '';
+  const division = hm.division != null ? str(cells[hm.division]) : '';
   const subParticulars = hm.subParticulars != null ? str(cells[hm.subParticulars]) : '';
   const department = hm.department != null ? str(cells[hm.department]) : '';
   const qty = hm.qty != null ? toNumber(cells[hm.qty]) : undefined;
@@ -91,7 +108,7 @@ function rowFromCells(
   let totalCost = hm.totalCost != null ? toNumber(cells[hm.totalCost]) : undefined;
 
   // Skip fully empty rows.
-  if (!head && !subParticulars && totalCost == null && legacyRate == null) return null;
+  if (!head && !division && !subParticulars && totalCost == null && legacyRate == null) return null;
 
   // Back-compat only: derive Total Cost (Cr) from qty × a legacy Rate column when it's the sole
   // source of the figure. Rate itself is not part of the budget and is never stored on the row.
@@ -109,6 +126,10 @@ function rowFromCells(
     reasonForRequirement: hm.reasonForRequirement != null ? str(cells[hm.reasonForRequirement]) : undefined,
     benefits: hm.benefits != null ? str(cells[hm.benefits]) : undefined,
     roi: hm.roi != null ? str(cells[hm.roi]) : undefined,
+    division: division || undefined,
+    plantBudgetCr: hm.plantBudgetCr != null ? toNumber(cells[hm.plantBudgetCr]) : undefined,
+    sectionBudgetCr: hm.sectionBudgetCr != null ? toNumber(cells[hm.sectionBudgetCr]) : undefined,
+    headBudgetCr: hm.headBudgetCr != null ? toNumber(cells[hm.headBudgetCr]) : undefined,
   };
 }
 
@@ -203,6 +224,79 @@ const TEMPLATE_HEADERS = [
   'Reason for Requirement', 'Benefits', 'ROI',
 ];
 
+/**
+ * Green Field template headers. The sheet is deliberately WIDER than the Brown Field one because a
+ * Green Field budget is a hierarchy, not a flat list: the plant gets an overall budget, that is
+ * distributed across the four sections, each section across its heads (shops / utilities), and each
+ * head across the individual machines. One row = one machine, and it repeats the three envelope
+ * figures above it so a single upload assigns budget at every level.
+ */
+const GF_TEMPLATE_HEADERS = [
+  'S.No', 'Plant Budget (Cr)', 'Section', 'Section Budget (Cr)', 'Head', 'Head Budget (Cr)',
+  'Department', 'Sub Particulars', 'Qty', 'Total Cost (Cr)',
+  'Reason for Requirement', 'Benefits', 'ROI',
+];
+
+/**
+ * Green Field worked examples — one plant budget distributed across all four sections, each section
+ * across its heads, each head across per-machine lines. The figures are internally consistent
+ * (machines sum to their head, heads to their section, sections to the plant) so the author can see
+ * exactly how the hierarchy is meant to add up before replacing the numbers with their own.
+ */
+const GF_FALLBACK_SAMPLES: ParsedMasterRow[] = [
+  // Plant Machinery — 34.00 Cr
+  { division: 'Plant Machinery', head: 'Moulding Shop', department: 'IMM', subParticulars: 'Injection Moulding Machine 650T', qty: 4, totalCost: 8, sectionBudgetCr: 34, headBudgetCr: 14, reasonForRequirement: 'Core moulding capacity for the new plant', benefits: 'Base capacity 1.2 lakh units/month' },
+  { division: 'Plant Machinery', head: 'Moulding Shop', department: 'IMM', subParticulars: 'Injection Moulding Machine 1300T', qty: 2, totalCost: 6, sectionBudgetCr: 34, headBudgetCr: 14, reasonForRequirement: 'Large-part moulding (ODU cabinet)', benefits: 'In-house large parts; no outsourcing' },
+  { division: 'Plant Machinery', head: 'Press Shop', department: 'Sheet Metal', subParticulars: 'Power Press 200T with Decoiler', qty: 2, totalCost: 4.5, sectionBudgetCr: 34, headBudgetCr: 7.5, reasonForRequirement: 'Sheet metal forming line', benefits: 'In-house sheet metal' },
+  { division: 'Plant Machinery', head: 'Press Shop', department: 'Sheet Metal', subParticulars: 'CNC Turret Punch Press', qty: 1, totalCost: 3, sectionBudgetCr: 34, headBudgetCr: 7.5, benefits: 'Flexible low-volume panels' },
+  { division: 'Plant Machinery', head: 'Assembly Shop', department: 'RAC', subParticulars: 'IDU Final Assembly Conveyor Line', qty: 1, totalCost: 5.5, sectionBudgetCr: 34, headBudgetCr: 8.5, reasonForRequirement: 'Main assembly line for the plant', benefits: '600 units/shift' },
+  { division: 'Plant Machinery', head: 'Assembly Shop', department: 'RAC', subParticulars: 'Leak Testing & Charging Station', qty: 2, totalCost: 3, sectionBudgetCr: 34, headBudgetCr: 8.5, benefits: 'Mandatory QC gate before packing' },
+  { division: 'Plant Machinery', head: 'Lab & Quality Shop', department: 'Quality', subParticulars: 'Psychrometric Test Chamber', qty: 1, totalCost: 4, sectionBudgetCr: 34, headBudgetCr: 4, reasonForRequirement: 'BEE star-rating validation in-house', benefits: 'No third-party lab dependency', roi: '3' },
+  // Utilities — 12.00 Cr
+  { division: 'Utilities', head: 'Electrical', department: 'Maintenance', subParticulars: 'HT Panel & 2500 KVA Transformer', qty: 1, totalCost: 4, sectionBudgetCr: 12, headBudgetCr: 6, reasonForRequirement: 'Plant power infrastructure', benefits: 'Full-load plant supply' },
+  { division: 'Utilities', head: 'Electrical', department: 'Maintenance', subParticulars: 'DG Set 1010 KVA', qty: 2, totalCost: 2, sectionBudgetCr: 12, headBudgetCr: 6, benefits: 'Backup power; no line stoppage' },
+  { division: 'Utilities', head: 'Fire & Safety', department: 'EHS', subParticulars: 'Fire Hydrant & Sprinkler System', qty: 1, totalCost: 2.5, sectionBudgetCr: 12, headBudgetCr: 2.5, reasonForRequirement: 'Statutory fire NOC requirement', benefits: 'Plant occupancy clearance' },
+  { division: 'Utilities', head: 'ETP/STP', department: 'EHS', subParticulars: 'Effluent & Sewage Treatment Plant', qty: 1, totalCost: 2, sectionBudgetCr: 12, headBudgetCr: 2, reasonForRequirement: 'Pollution Control Board consent', benefits: 'Zero liquid discharge compliance' },
+  { division: 'Utilities', head: 'N2/O2/Helium/LPG/PNG', department: 'Maintenance', subParticulars: 'Nitrogen Generation Plant', qty: 1, totalCost: 1.5, sectionBudgetCr: 12, headBudgetCr: 1.5, benefits: 'In-house N2 for brazing; cylinder cost eliminated', roi: '4' },
+  // Compliances — 3.00 Cr (section is its own head)
+  { division: 'Compliances', head: 'Compliances', department: 'Legal', subParticulars: 'Factory Licence, Pollution & Fire NOC', qty: 1, totalCost: 1.2, sectionBudgetCr: 3, headBudgetCr: 3, reasonForRequirement: 'Statutory approvals before commissioning' },
+  { division: 'Compliances', head: 'Compliances', department: 'Legal', subParticulars: 'BIS / BEE Product Certification', qty: 1, totalCost: 1.8, sectionBudgetCr: 3, headBudgetCr: 3, reasonForRequirement: 'Mandatory for RAC sale in India' },
+  // Information Technology — 6.00 Cr (section is its own head)
+  { division: 'Information Technology', head: 'Information Technology', department: 'IT', subParticulars: 'SAP S/4HANA Plant Rollout', qty: 1, totalCost: 3, sectionBudgetCr: 6, headBudgetCr: 6, reasonForRequirement: 'Plant must run on group ERP from day one', benefits: 'Single source of truth across plants' },
+  { division: 'Information Technology', head: 'Information Technology', department: 'IT', subParticulars: 'Network, Wi-Fi & Server Room Setup', qty: 1, totalCost: 2, sectionBudgetCr: 6, headBudgetCr: 6, benefits: 'Shop-floor connectivity' },
+  { division: 'Information Technology', head: 'Information Technology', department: 'IT', subParticulars: 'MES & Shop-floor Data Collection', qty: 1, totalCost: 1, sectionBudgetCr: 6, headBudgetCr: 6, benefits: 'Live production traceability' },
+];
+
+/** Total plant budget the Green Field worked examples add up to (Cr). */
+const GF_SAMPLE_PLANT_BUDGET_CR = 55;
+
+/**
+ * Green Field template rows drawn from the plant's own live budget where it has one, else the
+ * worked examples. Unlike the Brown Field sampler this keeps EVERY row of the source: a Green Field
+ * sheet has to show a hierarchy that adds up, and a round-robin sample of it would not.
+ */
+export function buildGreenFieldTemplateRows(source: CapexMasterItem[] = []): ParsedMasterRow[] {
+  const usable = source.filter((i) => i.subParticulars?.trim() && i.totalCost > 0);
+  if (!usable.length) return GF_FALLBACK_SAMPLES;
+  const order = (d: string) => {
+    const idx = (GREEN_FIELD_SECTION_ORDER as readonly string[]).indexOf(d);
+    return idx === -1 ? GREEN_FIELD_SECTION_ORDER.length : idx;
+  };
+  return [...usable]
+    .sort((a, b) => order(a.division ?? '') - order(b.division ?? '') || (a.head ?? '').localeCompare(b.head ?? ''))
+    .map((i) => ({
+      head: i.head?.trim() || 'Misc.',
+      division: i.division,
+      department: i.department ?? '',
+      subParticulars: i.subParticulars,
+      qty: i.qty,
+      totalCost: i.totalCost,
+      reasonForRequirement: i.reasonForRequirement,
+      benefits: i.benefits,
+      roi: i.roi,
+    }));
+}
+
 /** The template ships with worked examples, so the expected shape is never ambiguous. */
 export const TEMPLATE_MIN_ROWS = 10;
 export const TEMPLATE_MIN_HEADS = 3;
@@ -292,7 +386,11 @@ export function buildTemplateSampleRows(
  * plant's existing budget) — at least 10 rows across at least 3 heads. The sheet is header + data
  * only, so the downloaded file can be edited and re-uploaded through `parseMasterWorkbook` as-is.
  */
-export async function downloadImportTemplate(source: CapexMasterItem[] = []): Promise<void> {
+export async function downloadImportTemplate(
+  source: CapexMasterItem[] = [],
+  fieldType: FieldType = 'brown_field',
+): Promise<void> {
+  if (fieldType === 'green_field') return downloadGreenFieldTemplate(source);
   const ExcelJS = (await import('exceljs')).default;
   const workbook = new ExcelJS.Workbook();
   const ws = workbook.addWorksheet('Budget Master');
@@ -320,6 +418,81 @@ export async function downloadImportTemplate(source: CapexMasterItem[] = []): Pr
   const anchor = document.createElement('a');
   anchor.href = url;
   anchor.download = 'CAPEX-Master-Import-Template.xlsx';
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * Download the Green Field template — the plant budget and its distribution across sections, heads
+ * and individual machines, on one sheet. The envelope figures repeat down each scope (that is what
+ * makes a flat sheet able to carry a tree), and the importer takes the first non-empty one per
+ * scope. Headers are exactly the aliases `buildHeaderMap` accepts, so the downloaded file can be
+ * edited and re-uploaded unchanged.
+ */
+async function downloadGreenFieldTemplate(source: CapexMasterItem[] = []): Promise<void> {
+  const ExcelJS = (await import('exceljs')).default;
+  const workbook = new ExcelJS.Workbook();
+  const ws = workbook.addWorksheet('Green Field Budget');
+  const headerRow = ws.addRow(GF_TEMPLATE_HEADERS);
+  headerRow.eachCell((cell) => {
+    cell.font = { bold: true };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFBBF24' } };
+  });
+
+  const rows = buildGreenFieldTemplateRows(source);
+  // Roll the envelopes up from the rows when the source did not carry them, so the sheet always
+  // adds up: head = Σ its machines, section = Σ its heads, plant = Σ its sections.
+  const headTotals = new Map<string, number>();
+  const sectionTotals = new Map<string, number>();
+  let plantTotal = 0;
+  for (const r of rows) {
+    const section = r.division || 'Plant Machinery';
+    const key = `${section}\u0000${r.head}`;
+    headTotals.set(key, (headTotals.get(key) ?? 0) + (r.totalCost || 0));
+    sectionTotals.set(section, (sectionTotals.get(section) ?? 0) + (r.totalCost || 0));
+    plantTotal += r.totalCost || 0;
+  }
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  const plantBudget = rows === GF_FALLBACK_SAMPLES ? GF_SAMPLE_PLANT_BUDGET_CR : round2(plantTotal);
+
+  rows.forEach((r, i) => {
+    const section = r.division || 'Plant Machinery';
+    ws.addRow([
+      String(i + 1),
+      plantBudget,
+      section,
+      r.sectionBudgetCr ?? round2(sectionTotals.get(section) ?? 0),
+      r.head,
+      r.headBudgetCr ?? round2(headTotals.get(`${section}\u0000${r.head}`) ?? 0),
+      r.department, r.subParticulars, r.qty ?? '', r.totalCost,
+      r.reasonForRequirement ?? '', r.benefits ?? '', r.roi ?? '',
+    ]);
+  });
+
+  // A reference sheet, so the author knows which section names and heads the portal recognises —
+  // a typo in Section silently lands the machine in the wrong envelope otherwise.
+  const ref = workbook.addWorksheet('Sections & Heads');
+  const refHeader = ref.addRow(['Section', 'Head (shop / utility)']);
+  refHeader.eachCell((cell) => { cell.font = { bold: true }; });
+  GREEN_FIELD_SECTION_ORDER.forEach((section) => {
+    const heads = GREEN_FIELD_SECTION_HEADS[section];
+    if (!heads.length) ref.addRow([section, `${section} (section is its own head)`]);
+    else heads.forEach((h) => ref.addRow([section, h]));
+  });
+  ref.columns.forEach((col) => { col.width = 34; });
+
+  ws.columns.forEach((col) => { col.width = 20; });
+  ws.getColumn(8).width = 46;  // Sub Particulars
+  ws.getColumn(11).width = 40; // Reason for Requirement
+  ws.getColumn(12).width = 40; // Benefits
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = 'CAPEX-Green-Field-Budget-Template.xlsx';
   anchor.click();
   URL.revokeObjectURL(url);
 }

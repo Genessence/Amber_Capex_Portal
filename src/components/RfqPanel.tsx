@@ -72,6 +72,7 @@ import {
   fmtCurrency,
 } from '@/lib/auctionTheme'
 import { currencySymbol, inrWithNative, inrWithNativeLabel, toInr, isForeignCurrency } from '@/lib/currencyUtils'
+import { QuoteLineDocLink } from '@/components/QuoteLineDocLink'
 import { awardUnitPriceInr, isAwardBased, splitAwardInProgress } from '@/lib/paymentUtils'
 
 const SOURCING_ROLES = ['sourcing_member', 'super_admin']
@@ -976,6 +977,10 @@ export function RfqPanel({
                                 ) : (
                                   <p className="text-[12px] text-slate-300">—</p>
                                 )}
+                                {/* The vendor's supporting document for THIS line (datasheet /
+                                    drawing / certificate) — read from the STORED quote, never the
+                                    live counter form, because sourcing does not upload here. */}
+                                <QuoteLineDocLink doc={inv.rfqQuote?.lineDocuments?.[item.id]} />
                               </td>
                             )
                           })}
@@ -1192,6 +1197,10 @@ export function RfqPanel({
                                     )}
                                   </>
                                 ) : '—'}
+                                {/* Rendered OUTSIDE the price branch: a vendor may attach a
+                                    datasheet to a line they have not yet priced, and the desktop
+                                    cell shows it in that state too. */}
+                                <QuoteLineDocLink doc={inv.rfqQuote?.lineDocuments?.[item.id]} className="mt-1 justify-end" />
                               </span>
                             </div>
                           )

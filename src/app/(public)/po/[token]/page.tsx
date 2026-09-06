@@ -22,9 +22,11 @@ import {
 import { useCapex } from '@/lib/capexContext'
 import { resolvePoTarget, buildPoIssueLink } from '@/lib/tokenUtils'
 import { EmailPreviewModal } from '@/components/EmailPreviewModal'
+import { RemarkField } from '@/components/RemarkField'
+import { RemarkTrail } from '@/components/RemarkTrail'
 import { SUPPLIER_CARD } from '@/lib/uiTokens'
 import { FIELD_TYPE_LABELS } from '@/lib/types'
-import { PLANTS, STATUS_LABELS, GLOBAL_ACCOUNTS_EMAIL, GLOBAL_ACCOUNTS_NAME } from '@/lib/constants'
+import { PLANTS, STATUS_LABELS, GLOBAL_ACCOUNTS_EMAIL, GLOBAL_ACCOUNTS_NAME, PLANT_ACCOUNTS_ACTOR } from '@/lib/constants'
 import {
   totalPaid,
   totalOutstanding,
@@ -36,7 +38,6 @@ import {
 import type { PaymentMilestone } from '@/lib/types'
 
 /** The actor stamped on every mutation made from this public link (no portal login). */
-const PLANT_ACCOUNTS_ACTOR = 'Plant Accounts (email)'
 
 /** Rupees only — every amount reaching this page is resolved on an INR basis. */
 const fmt = (n: number) => '₹' + Math.round(n).toLocaleString('en-IN')
@@ -108,6 +109,20 @@ export default function PlantAccountsPage() {
   const request = target?.request
   const invite = target?.kind === 'award' ? target.invite : undefined
 
+  /**
+   * Every remark that applies to THIS order: the request's own (the plant head's approval and the
+   * request-level accounts gates) plus, on a split award, the ones recorded against this award's
+   * invite. Merged rather than "invite, else request" — an award track inherits the request's
+   * approvals, so falling back to one or the other hides half the history.
+   */
+  const orderRemarks = useMemo(
+    () =>
+      [...(request?.approvalRemarks ?? []), ...(invite?.approvalRemarks ?? [])].sort((a, b) =>
+        a.at.localeCompare(b.at),
+      ),
+    [request?.approvalRemarks, invite?.approvalRemarks],
+  )
+
   /** Scoped to THIS request, the way AccountsPanel is called internally — a vendor can hold
    *  invites on several requests, and the order value must resolve against this one. */
   const reqInvites = useMemo(
@@ -175,6 +190,12 @@ export default function PlantAccountsPage() {
     poIssueToken && typeof window !== 'undefined' ? buildPoIssueLink(poIssueToken) : ''
   const [emailOpen, setEmailOpen] = useState(false)
   const [linkCopied, setLinkCopied] = useState(false)
+  // Plant Accounts' remark on the FA-code handoff — it rides with the email to Global Accounts AND
+  // is recorded on the request/award, so the reason for an unusual coding survives the email.
+  const [faRemark, setFaRemark] = useState('')
+  // A separate remark per payment tick (UTR, part-payment reason, a hold that was lifted). Kept
+  // apart from `faRemark` because the two are written hours or weeks apart, at different gates.
+  const [payRemark, setPayRemark] = useState('')
 
   const reqLabel = request?.requestNo ?? request?.id.slice(0, 8) ?? ''
   const poEmailSubject = `PO Required — ${reqLabel} · ${plantLabel}`
@@ -192,6 +213,9 @@ export default function PlantAccountsPage() {
       (li, i) => `  ${i + 1}. ${li.description} (Qty ${li.quantity}) — FA Code: ${faDrafts[li.id] ?? faCodes[li.id] ?? '—'}`,
     ),
     '',
+    // The remark Plant Accounts typed above rides in the email as well as onto the record — the
+    // recipient reads the email, not the audit trail, so the reason has to be in both.
+    ...(faRemark.trim() ? ['Remarks from Plant Accounts:', `  ${faRemark.trim()}`, ''] : []),
     'Open this link to issue the PO:',
     poIssueLink || '(link will be ready shortly)',
     '',
@@ -230,7 +254,7 @@ export default function PlantAccountsPage() {
       if (code && code !== faCodes[li.id]) assignFaCode(request.id, li.id, code, invite?.id)
     })
     // Mints Satish's PO-issue token in the same state pass, so the email below has its link.
-    submitFaCodes(request.id, PLANT_ACCOUNTS_ACTOR, invite?.id)
+    submitFaCodes(request.id, PLANT_ACCOUNTS_ACTOR, invite?.id, faRemark)
     setEmailOpen(true)
   }
 
@@ -378,6 +402,17 @@ export default function PlantAccountsPage() {
 
             {status === 'pi_submitted' && (
               <>
+                <div className="mt-3">
+                  <RemarkField
+                    id="fa-remark"
+                    label={`Remarks for ${GLOBAL_ACCOUNTS_NAME}`}
+                    value={faRemark}
+                    onChange={setFaRemark}
+                    rows={2}
+                    placeholder="e.g. Two items share one asset code — book both against the utilities head."
+                    hint="Optional. Goes into the handoff email and is recorded against this order."
+                  />
+                </div>
                 <button
                   type="button"
                   onClick={submitFa}
@@ -488,6 +523,19 @@ export default function PlantAccountsPage() {
             <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground mb-2">
               Payment Milestones
             </p>
+            {status === 'payment_in_progress' && (
+              <div className="mb-3">
+                <RemarkField
+                  id="payment-remark"
+                  label="Remarks for the next payment you tick"
+                  value={payRemark}
+                  onChange={setPayRemark}
+                  rows={2}
+                  placeholder="e.g. UTR AXIS0099123 — advance released against PI dated 12 Aug."
+                  hint="Optional. Recorded against the milestone you tick next, then cleared."
+                />
+              </div>
+            )}
             <div className="space-y-1.5">
               {milestones.map(m => {
                 const paid = m.status === 'paid'
@@ -504,7 +552,10 @@ export default function PlantAccountsPage() {
                       disabled={locked}
                       onChange={() => {
                         if (locked || !request) return
-                        markPaymentMade(request.id, m.id, PLANT_ACCOUNTS_ACTOR, invite?.id)
+                        markPaymentMade(request.id, m.id, PLANT_ACCOUNTS_ACTOR, invite?.id, payRemark)
+                        // One remark belongs to one payment — clear it so the next milestone does
+                        // not silently inherit the previous instalment's note.
+                        setPayRemark('')
                       }}
                       className="w-4 h-4 accent-slate-600 shrink-0"
                     />
@@ -550,6 +601,15 @@ export default function PlantAccountsPage() {
             {milestones.length > 0 ? ` · ${fmt(totalPaid(milestones))}` : ''}
           </div>
         )}
+
+        {/* Every remark left on this order, by anyone — the plant head who approved the request,
+            Global Accounts when they issued the PO, and Plant Accounts' own earlier notes. This is
+            the same trail the internal request detail shows; the actors differ, the record does not. */}
+        <RemarkTrail
+          remarks={orderRemarks}
+          title="Remarks on this order"
+          className="border-t border-border pt-4"
+        />
       </div>
 
       <EmailPreviewModal

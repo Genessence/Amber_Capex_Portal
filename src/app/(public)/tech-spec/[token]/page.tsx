@@ -6,6 +6,8 @@ import {
   CheckCircle2, XCircle, ClipboardCheck, Clock, RotateCcw, Paperclip, Download, Building2, Cpu, EyeOff,
 } from 'lucide-react'
 import { useCapex } from '@/lib/capexContext'
+import { RemarkField } from '@/components/RemarkField'
+import { RemarkTrail } from '@/components/RemarkTrail'
 import { resolveTechSpecTarget } from '@/lib/tokenUtils'
 import { SUPPLIER_CARD } from '@/lib/uiTokens'
 import { FIELD_TYPE_LABELS } from '@/lib/types'
@@ -17,7 +19,9 @@ import {
   effectiveTechSpecStatus,
 } from '@/lib/techSpecUtils'
 
-const DECIDER = 'Technical Team'
+import { TECHNICAL_TEAM_ACTOR } from '@/lib/constants'
+
+const DECIDER = TECHNICAL_TEAM_ACTOR
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
@@ -64,7 +68,6 @@ export default function TechSpecApprovalPage() {
   const { invites, requests, loaded, decideTechSpec } = useCapex()
   const [done, setDone] = useState<null | 'approved' | 'rejected' | 'needs_revision'>(null)
   const [note, setNote] = useState('')
-  const [mode, setMode] = useState<null | 'needs_revision' | 'rejected'>(null)
 
   const target = useMemo(() => resolveTechSpecTarget(token, invites, requests), [token, invites, requests])
 
@@ -134,8 +137,13 @@ export default function TechSpecApprovalPage() {
     ? (request.lineItems ?? []).filter(li => invite.awardedItemIds!.includes(li.id))
     : request.lineItems ?? []
 
+  const noteFilled = note.trim().length > 0
+
   function submit(decision: 'approved' | 'rejected' | 'needs_revision') {
-    if (decision !== 'approved' && !note.trim()) return
+    // Send-back and rejection need a reason — sourcing has nothing to act on without one. An
+    // APPROVAL may also carry a remark (a caveat, a condition on installation), which is why the
+    // field sits above all three buttons rather than behind a mode switch on the negative ones.
+    if (decision !== 'approved' && !noteFilled) return
     if (decideTechSpec(invite.id, decision, DECIDER, note)) setDone(decision)
   }
 
@@ -239,9 +247,32 @@ export default function TechSpecApprovalPage() {
           )}
         </div>
 
+        {/* Earlier rounds of THIS gate — what the Technical team asked for last time, so a re-send
+            after a send-back is reviewed against the original objection.
+
+            SCOPED TO `technical_spec` ON PURPOSE. The invite's trail also carries sourcing's and (on
+            an awarded invite) Accounts' remarks, written by people who name the vendor freely; this
+            page withholds the vendor's identity by design, so it shows only the remarks this page
+            itself produced. Sourcing's covering note reaches the team through `spec.notes` above,
+            which they are explicitly told to keep vendor-free. */}
+        <RemarkTrail
+          remarks={invite.approvalRemarks}
+          stage="technical_spec"
+          title="Your earlier remarks on this specification"
+          className="mt-4"
+        />
+
         {/* Decision */}
-        {mode === null ? (
-          <div className="mt-6 flex flex-col sm:flex-row gap-2">
+        <div className="mt-6 space-y-3">
+          <RemarkField
+            id="tech-note"
+            label="Your remarks"
+            value={note}
+            onChange={setNote}
+            placeholder="e.g. Motor rating is below the requested 15 kW — ask the vendor for a revised datasheet."
+            hint="Optional to approve, required to send back or reject. Shown to the sourcing team."
+          />
+          <div className="flex flex-col sm:flex-row gap-2">
             <button
               onClick={() => submit('approved')}
               className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-sm"
@@ -249,59 +280,28 @@ export default function TechSpecApprovalPage() {
               <CheckCircle2 className="w-4 h-4" /> Approve Specification
             </button>
             <button
-              onClick={() => { setNote(''); setMode('needs_revision') }}
-              className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-white border border-orange-200 text-orange-700 hover:bg-orange-50 font-semibold text-sm"
+              onClick={() => submit('needs_revision')}
+              disabled={!noteFilled}
+              title={noteFilled ? undefined : 'Write what needs to change above'}
+              className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-white border border-orange-200 text-orange-700 hover:bg-orange-50 font-semibold text-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white"
             >
               <RotateCcw className="w-4 h-4" /> Send Back for Revision
             </button>
             <button
-              onClick={() => { setNote(''); setMode('rejected') }}
-              className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-white border border-red-200 text-red-700 hover:bg-red-50 font-semibold text-sm"
+              onClick={() => submit('rejected')}
+              disabled={!noteFilled}
+              title={noteFilled ? undefined : 'Write a reason for rejection above'}
+              className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-white border border-red-200 text-red-700 hover:bg-red-50 font-semibold text-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white"
             >
               <XCircle className="w-4 h-4" /> Reject
             </button>
           </div>
-        ) : (
-          <div className="mt-6 space-y-3">
-            <div>
-              <label htmlFor="tech-note" className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                {mode === 'needs_revision' ? 'What needs to change?' : 'Reason for rejection'} <span className="text-red-600">*</span>
-              </label>
-              <textarea
-                id="tech-note"
-                rows={3}
-                value={note}
-                onChange={e => setNote(e.target.value)}
-                autoFocus
-                placeholder={
-                  mode === 'needs_revision'
-                    ? 'e.g. Motor rating is below the requested 15 kW — ask the vendor for a revised datasheet.'
-                    : 'e.g. The offered machine does not meet the compliance standard required for this line.'
-                }
-                className="mt-1 w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-card focus:outline-none focus:ring-2 focus:ring-primary"
-              />
-            </div>
-            <div className="flex flex-col sm:flex-row gap-2">
-              <button
-                onClick={() => submit(mode)}
-                disabled={!note.trim()}
-                className={`flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-white font-semibold text-sm disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed ${
-                  mode === 'needs_revision' ? 'bg-orange-600 hover:bg-orange-700' : 'bg-red-600 hover:bg-red-700'
-                }`}
-              >
-                {mode === 'needs_revision' ? <RotateCcw className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
-                {mode === 'needs_revision' ? 'Send Back to Sourcing' : 'Confirm Rejection'}
-              </button>
-              <button
-                onClick={() => setMode(null)}
-                className="px-4 py-2.5 rounded-lg bg-white border border-border text-muted-foreground hover:bg-muted/40 font-semibold text-sm"
-              >
-                Cancel
-              </button>
-            </div>
-            <p className="text-[11px] text-muted-foreground">A remark is required so sourcing knows what to fix.</p>
-          </div>
-        )}
+          {!noteFilled && (
+            <p className="text-[11px] text-muted-foreground">
+              Sending back or rejecting needs a remark — sourcing has to know what to fix.
+            </p>
+          )}
+        </div>
       </div>
     </Shell>
   )

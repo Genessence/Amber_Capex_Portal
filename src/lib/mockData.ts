@@ -93,6 +93,17 @@ export const mockVendors: Vendor[] = [
  */
 export const CLEAN_SLATE_PURGE_V1 = 'clean_slate_v3_budget';
 
+/**
+ * One-time wipe of the **Green Field budget only** — every Green Field master row plus the plant /
+ * section / head envelopes. Green Field budgets are now authored by the super admin in Budget
+ * Planning and published from there, so the seeded demo budget is retired: leaving it in place
+ * would show a plant two competing budgets for the same FY. Nothing else is touched — Brown Field,
+ * Digitisation, IT, vendors, plants and workflow data all load normally.
+ *
+ * Bump this to re-run the wipe in every browser.
+ */
+export const GREEN_FIELD_BUDGET_CLEAR_V1 = 'gf_budget_cleared_v2';
+
 export const mockRequests: CapexRequest[] = [];
 
 export const mockInvites: VendorInvite[] = [];

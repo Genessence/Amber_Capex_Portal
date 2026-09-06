@@ -6,11 +6,13 @@ import { CheckCircle2, XCircle, ShieldCheck, FileText, Building2, Landmark, Cloc
 import { useCapex } from '@/lib/capexContext'
 import { resolveApprovalTarget } from '@/lib/tokenUtils'
 import { BudgetEditForwardPanel } from '@/components/BudgetEditForwardPanel'
+import { RemarkField } from '@/components/RemarkField'
+import { RemarkTrail } from '@/components/RemarkTrail'
 import { BudgetProposalBreakdown } from '@/components/BudgetProposalBreakdown'
 import { RequestQuotationView } from '@/components/RequestQuotationView'
 import { SUPPLIER_CARD } from '@/lib/uiTokens'
 import { FIELD_TYPE_LABELS } from '@/lib/types'
-import { STATUS_LABELS } from '@/lib/constants'
+import { GLOBAL_ACCOUNTS_ACTOR, STATUS_LABELS } from '@/lib/constants'
 import {
   BUDGET_PROPOSAL_STATUS_LABELS,
   proposalTotalCr,
@@ -66,6 +68,11 @@ export default function ApprovePage() {
   } = useCapex()
   const [done, setDone] = useState<null | 'approved' | 'rejected' | 'approved_edited'>(null)
   const [editing, setEditing] = useState(false)
+  // The approver's remark, sent with EITHER outcome. A rejection without a reason is the failure
+  // mode this page exists to remove, so Reject is disabled until something is typed; an approval
+  // may carry a condition or a note and is never blocked on one.
+  const [remark, setRemark] = useState('')
+  const remarkFilled = remark.trim().length > 0
 
   const target = useMemo(
     () => resolveApprovalTarget(token, requests, budgetProposals),
@@ -165,20 +172,42 @@ export default function ApprovePage() {
               quotation — so the approver is not signing off on numbers they cannot see. */}
           <RequestQuotationView request={r} className="mt-4" />
 
-          <div className="mt-6 flex flex-col sm:flex-row gap-2">
+          {/* Anything an earlier approver wrote on this request, so a decision is never taken
+              without the context that produced it. Renders nothing when the trail is empty. */}
+          <RemarkTrail remarks={r.approvalRemarks} className="mt-4" />
+
+          <div className="mt-5">
+            <RemarkField
+              id="plant-head-request-remark"
+              label="Your remarks"
+              value={remark}
+              onChange={setRemark}
+              placeholder="e.g. Approved — please negotiate the freight down before award."
+              hint="Optional to approve, required to reject. Shown to the requester and to sourcing."
+            />
+          </div>
+
+          <div className="mt-4 flex flex-col sm:flex-row gap-2">
             <button
-              onClick={() => { decideRequestPlantHead(r.id, 'approved'); setDone('approved') }}
+              onClick={() => { decideRequestPlantHead(r.id, 'approved', remark); setDone('approved') }}
               className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-sm"
             >
               <CheckCircle2 className="w-4 h-4" /> Approve for Sourcing
             </button>
             <button
-              onClick={() => { if (window.confirm('Reject this request? The requester will need to raise it again.')) { decideRequestPlantHead(r.id, 'rejected'); setDone('rejected') } }}
-              className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-white border border-red-200 text-red-700 hover:bg-red-50 font-semibold text-sm"
+              onClick={() => { decideRequestPlantHead(r.id, 'rejected', remark); setDone('rejected') }}
+              disabled={!remarkFilled}
+              title={remarkFilled ? undefined : 'Write a reason above to reject'}
+              className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-white border border-red-200 text-red-700 hover:bg-red-50 font-semibold text-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white"
             >
               <XCircle className="w-4 h-4" /> Reject
             </button>
           </div>
+          {!remarkFilled && (
+            <p className="mt-1.5 text-[11px] text-muted-foreground">
+              Rejecting needs a reason — the requester has to know what to change before raising it again.
+            </p>
+          )}
         </div>
       </Shell>
     )
@@ -227,11 +256,38 @@ export default function ApprovePage() {
 
         <BudgetProposalBreakdown proposal={p} className="mt-4" />
 
-        <div className="mt-6 flex flex-col sm:flex-row gap-2">
+        {/* What the earlier approvers said. At the accounts stage this carries the plant head's and
+            the admin's remarks — the final signatory is otherwise deciding on the numbers alone. */}
+        <RemarkTrail remarks={p.approvalRemarks} className="mt-4" />
+
+        {/* Hidden while the edit panel is open — that panel carries its own remark box, and two
+            remark fields on one screen makes it ambiguous which one is actually sent. */}
+        {!editing && (
+          <div className="mt-5">
+            <RemarkField
+              id="budget-approval-remark"
+              label="Your remarks"
+              value={remark}
+              onChange={setRemark}
+              placeholder={
+                isAccountsStage
+                  ? 'e.g. Signed off — funded from the FY reserve as discussed.'
+                  : 'e.g. Approved, but the automation head must stay within the agreed ceiling.'
+              }
+              hint={
+                isAccountsStage
+                  ? 'Optional to approve, required to reject. Recorded against this budget for everyone who opens it.'
+                  : 'Optional to approve, required to reject. Shown to the admin and to Global Accounts.'
+              }
+            />
+          </div>
+        )}
+
+        <div className="mt-4 flex flex-col sm:flex-row gap-2">
           <button
             onClick={() => {
-              if (isAccountsStage) decideBudgetAccounts(p.id, 'approved', 'Global Accounts (email)')
-              else decideBudgetPlantHead(p.id, 'approved')
+              if (isAccountsStage) decideBudgetAccounts(p.id, 'approved', GLOBAL_ACCOUNTS_ACTOR, remark)
+              else decideBudgetPlantHead(p.id, 'approved', remark)
               setDone('approved')
             }}
             className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-sm"
@@ -249,16 +305,22 @@ export default function ApprovePage() {
           )}
           <button
             onClick={() => {
-              if (!window.confirm('Reject this budget? The author will need to revise and resubmit.')) return
-              if (isAccountsStage) decideBudgetAccounts(p.id, 'rejected', 'Global Accounts (email)')
-              else decideBudgetPlantHead(p.id, 'rejected')
+              if (isAccountsStage) decideBudgetAccounts(p.id, 'rejected', GLOBAL_ACCOUNTS_ACTOR, remark)
+              else decideBudgetPlantHead(p.id, 'rejected', remark)
               setDone('rejected')
             }}
-            className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-white border border-red-200 text-red-700 hover:bg-red-50 font-semibold text-sm"
+            disabled={editing || !remarkFilled}
+            title={remarkFilled ? undefined : 'Write a reason above to reject'}
+            className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-white border border-red-200 text-red-700 hover:bg-red-50 font-semibold text-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white"
           >
             <XCircle className="w-4 h-4" /> Reject
           </button>
         </div>
+        {!editing && !remarkFilled && (
+          <p className="mt-1.5 text-[11px] text-muted-foreground">
+            Rejecting needs a reason — the author has to know what to fix before resubmitting.
+          </p>
+        )}
 
         {editing && !isAccountsStage && (
           <div className="mt-4">

@@ -12,6 +12,7 @@ import { AccountsPanel } from "@/components/AccountsPanel"
 import { TatBanner } from "@/components/TatBanner"
 import { ClampText } from "@/components/ClampText"
 import { RequestQuotationView } from "@/components/RequestQuotationView"
+import { RemarkTrail } from "@/components/RemarkTrail"
 import { TrialCard } from "@/components/TrialCard"
 import { EmailPreviewModal } from "@/components/EmailPreviewModal"
 import { isFulfillmentStatus, resolveFinalVendor, isAwardBased, awardedInvites, awardSummary } from "@/lib/paymentUtils"
@@ -1812,6 +1813,13 @@ export default function CapexDetailPage() {
   }
 
   const reqInvites      = invites.filter(i => i.requestId === id)
+  // The complete remark trail for this request: its own gates plus every per-vendor / per-award gate
+  // recorded on an invite. Sorted by timestamp so the merge reads as one chronology rather than as
+  // "the request's remarks, then all the invites'".
+  const allRemarks = [
+    ...(request.approvalRemarks ?? []),
+    ...reqInvites.flatMap(i => i.approvalRemarks ?? []),
+  ].sort((a, b) => a.at.localeCompare(b.at))
   // Split-award (reverse auction): a request fans out into one fulfillment track per awarded vendor.
   const awardBased      = isAwardBased(reqInvites)
   const awardInvites    = awardedInvites(reqInvites)
@@ -2299,6 +2307,19 @@ export default function CapexDetailPage() {
           )}
         </>
       )}
+
+      {/* Every remark left at every gate — the plant head's, the Technical team's (per vendor), and
+          Accounts'. The request's own trail is merged with each invite's, because the per-vendor
+          gates (tech spec) and each split award's fulfillment gates record against the INVITE, and
+          a reader of this page should not have to know which entity a given approval hung off.
+          Sorted oldest-first here; RemarkTrail flips it to newest-first for reading. */}
+      <div className={CARD}>
+        <RemarkTrail
+          remarks={allRemarks}
+          title="Approval Remarks"
+          emptyNote="No remarks have been left on this request yet."
+        />
+      </div>
 
       {/* Audit trail — visible to all roles */}
       <StatusTimeline history={request.statusHistory} />

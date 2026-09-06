@@ -6,6 +6,8 @@ import { toast } from 'sonner'
 import { ClipboardCheck, Check, X, ChevronDown, ChevronRight, PencilLine, Landmark, Copy, Mail, ExternalLink } from 'lucide-react'
 import { useCapex } from '@/lib/capexContext'
 import { BudgetEditForwardPanel } from '@/components/BudgetEditForwardPanel'
+import { RemarkField } from '@/components/RemarkField'
+import { RemarkTrail } from '@/components/RemarkTrail'
 import { BudgetProposalBreakdown } from '@/components/BudgetProposalBreakdown'
 import { EmailPreviewModal } from '@/components/EmailPreviewModal'
 import { buildApprovalLink } from '@/lib/tokenUtils'
@@ -36,6 +38,14 @@ export default function BudgetApprovalsPage() {
   const [expanded, setExpanded] = useState<string | null>(null)
   // Which proposal has its "edit & send forward" panel open.
   const [editing, setEditing] = useState<string | null>(null)
+  // Which proposal has its rejection panel open, and the remark being typed into it. One at a time:
+  // the remark belongs to the decision being taken, so it must not leak between rows.
+  const [rejecting, setRejecting] = useState<string | null>(null)
+  const [remark, setRemark] = useState('')
+  // The ad-hoc transfer list has its own pair — a remark typed for a budget proposal must never be
+  // submitted against a reallocation that happens to be open on the same screen.
+  const [adhocRejecting, setAdhocRejecting] = useState<string | null>(null)
+  const [adhocRemark, setAdhocRemark] = useState('')
   // Global Accounts have no portal login — the admin emails them the public sign-off link.
   const [emailFor, setEmailFor] = useState<BudgetProposal | null>(null)
 
@@ -80,21 +90,31 @@ export default function BudgetApprovalsPage() {
 
   if (!isAllowed(role)) return null
 
-  function approve(p: BudgetProposal) {
-    decideBudgetProposal(p.id, 'approved', role)
+  function approve(p: BudgetProposal, note?: string) {
+    decideBudgetProposal(p.id, 'approved', role, note?.trim() || undefined)
+    setRejecting(null)
+    setRemark('')
     toast.success('Approved — send the Global Accounts sign-off link from the section below')
   }
   /** Approve with the admin's line-item edits applied, and send it ON to Global Accounts. */
   function forwardWithEdits(p: BudgetProposal, items: BudgetProposalItem[], note: string) {
     decideBudgetProposal(p.id, 'approved', role, note || undefined, items)
     setEditing(null)
+    setRejecting(null)
     toast.success('Approved with your edits — send the Global Accounts sign-off link below')
   }
+  /**
+   * Rejection is a two-step inline flow, not a `window.prompt`. The prompt was cancellable into a
+   * silent no-op, could not be styled or validated, and — being a native modal — blocks the page
+   * outright. A remark is REQUIRED here: the author cannot revise a budget against "rejected".
+   */
   function reject(p: BudgetProposal) {
-    const note = window.prompt('Reason for rejection (optional):')
-    if (note === null) return // cancelled
-    decideBudgetProposal(p.id, 'rejected', role, note || undefined)
-    toast.success('Proposal rejected')
+    if (rejecting !== p.id) { setRejecting(p.id); setRemark(''); return }
+    if (!remark.trim()) return
+    decideBudgetProposal(p.id, 'rejected', role, remark.trim())
+    setRejecting(null)
+    setRemark('')
+    toast.success('Proposal rejected — your reason was sent to the author')
   }
   function accountsLink(p: BudgetProposal) {
     return p.accountsToken && typeof window !== 'undefined' ? buildApprovalLink(p.accountsToken) : ''
@@ -172,14 +192,39 @@ export default function BudgetApprovalsPage() {
                     <PencilLine className="w-3.5 h-3.5" /> Edit &amp; Send Forward
                   </button>
                   <button onClick={() => reject(p)}
-                    className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-white hover:bg-red-50 text-red-600 border border-red-200 rounded-lg">
+                    aria-expanded={rejecting === p.id}
+                    className={`flex items-center gap-1.5 px-3 py-2 text-xs font-semibold border rounded-lg ${rejecting === p.id ? 'bg-red-600 text-white border-red-600' : 'bg-white hover:bg-red-50 text-red-600 border-red-200'}`}>
                     <X className="w-3.5 h-3.5" /> Reject
                   </button>
-                  <button onClick={() => approve(p)}
+                  <button onClick={() => approve(p, rejecting === p.id ? undefined : remark)}
                     className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-slate-600 hover:bg-slate-700 text-white rounded-lg">
                     <Check className="w-3.5 h-3.5" /> Approve → Accounts
                   </button>
                 </div>
+                {rejecting === p.id && (
+                  <div className="border-t border-border px-4 py-3 bg-red-50/30 space-y-2">
+                    <RemarkField
+                      id={`reject-remark-${p.id}`}
+                      label="Reason for rejection"
+                      required
+                      autoFocus
+                      value={remark}
+                      onChange={setRemark}
+                      placeholder="e.g. The machinery head is 40% above the approved envelope — re-scope and resubmit."
+                      hint="Required — the author has to know what to change before resubmitting."
+                    />
+                    <div className="flex justify-end gap-2">
+                      <button onClick={() => { setRejecting(null); setRemark('') }}
+                        className="px-3 py-2 text-xs font-semibold border border-border rounded-lg bg-card hover:bg-muted/40">
+                        Cancel
+                      </button>
+                      <button onClick={() => reject(p)} disabled={!remark.trim()}
+                        className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-red-600 hover:bg-red-700 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed">
+                        <X className="w-3.5 h-3.5" /> Confirm rejection
+                      </button>
+                    </div>
+                  </div>
+                )}
                 {editing === p.id && (
                   <div className="border-t border-border px-4 py-3 bg-blue-50/30">
                     <BudgetEditForwardPanel
@@ -195,6 +240,8 @@ export default function BudgetApprovalsPage() {
                       Proposed FY {p.targetFy} budget · head &amp; sub particulars
                     </p>
                     <BudgetProposalBreakdown proposal={p} />
+                    {/* What the plant head wrote when they sent it on. */}
+                    <RemarkTrail remarks={p.approvalRemarks} className="mt-4" />
                   </div>
                 )}
               </div>
@@ -296,15 +343,42 @@ export default function BudgetApprovalsPage() {
                       {r.toHead}: {fmtCr(toUsed)} used / {fmtCr(toAlloc)} → {fmtCr(toAlloc + r.amountCr)}
                     </p>
                   </div>
-                  <button onClick={() => { decideAdhocBudgetRequest(r.id, 'rejected', role, window.prompt('Reason (optional):') ?? undefined); toast.success('Reallocation rejected') }}
-                    className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-white hover:bg-red-50 text-red-600 border border-red-200 rounded-lg">
+                  <button onClick={() => { if (adhocRejecting !== r.id) { setAdhocRejecting(r.id); setAdhocRemark(''); return } }}
+                    aria-expanded={adhocRejecting === r.id}
+                    className={`flex items-center gap-1.5 px-3 py-2 text-xs font-semibold border rounded-lg ${adhocRejecting === r.id ? 'bg-red-600 text-white border-red-600' : 'bg-white hover:bg-red-50 text-red-600 border-red-200'}`}>
                     <X className="w-3.5 h-3.5" /> Reject
                   </button>
-                  <button onClick={() => { decideAdhocBudgetRequest(r.id, 'approved', role); toast.success('Reallocation approved') }}
+                  <button onClick={() => { decideAdhocBudgetRequest(r.id, 'approved', role, adhocRejecting === r.id ? undefined : adhocRemark.trim() || undefined); setAdhocRejecting(null); setAdhocRemark(''); toast.success('Reallocation approved') }}
                     className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-slate-600 hover:bg-slate-700 text-white rounded-lg">
                     <Check className="w-3.5 h-3.5" /> Approve
                   </button>
                 </div>
+                {adhocRejecting === r.id && (
+                  <div className="mt-3 pt-3 border-t border-border space-y-2">
+                    <RemarkField
+                      id={`adhoc-reject-remark-${r.id}`}
+                      label="Reason for rejection"
+                      required
+                      autoFocus
+                      value={adhocRemark}
+                      onChange={setAdhocRemark}
+                      placeholder="e.g. The source head has committed spend against that balance this quarter."
+                      hint="Required — the requester has to know why the transfer was refused."
+                    />
+                    <div className="flex justify-end gap-2">
+                      <button onClick={() => { setAdhocRejecting(null); setAdhocRemark('') }}
+                        className="px-3 py-2 text-xs font-semibold border border-border rounded-lg bg-card hover:bg-muted/40">
+                        Cancel
+                      </button>
+                      <button
+                        onClick={() => { if (!adhocRemark.trim()) return; decideAdhocBudgetRequest(r.id, 'rejected', role, adhocRemark.trim()); setAdhocRejecting(null); setAdhocRemark(''); toast.success('Reallocation rejected — your reason was recorded') }}
+                        disabled={!adhocRemark.trim()}
+                        className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-red-600 hover:bg-red-700 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed">
+                        <X className="w-3.5 h-3.5" /> Confirm rejection
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )
           })}

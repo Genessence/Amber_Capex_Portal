@@ -6,7 +6,8 @@ import { useCapex } from '@/lib/capexContext'
 import { formatCurrency, isForeignCurrency } from '@/lib/currencyUtils'
 import { inrQuoteGrandTotalInclGst, latestQuote, quoteGrandTotalInclGst, quoteGstAmount } from '@/lib/paymentUtils'
 import { inrRfqTotal, rfqGstAmount, rfqLineUnitPrice, rfqTotal } from '@/lib/rfqUtils'
-import type { CapexLineItem, CapexMasterItem, CapexRequest, VendorInvite } from '@/lib/types'
+import type { CapexLineItem, CapexMasterItem, CapexRequest, QuoteLineDocument, VendorInvite } from '@/lib/types'
+import { QuoteLineDocLink } from '@/components/QuoteLineDocLink'
 
 const CR_TO_INR = 10_000_000
 
@@ -54,6 +55,12 @@ interface QuotationEntry {
   warranty?: number
   attachmentName?: string
   unitPrices: Record<string, number>
+  /**
+   * The vendor's per-line supporting documents, keyed by line-item id. Surfaced here because this
+   * card IS the approver's commercial picture on the public link — a price they cannot see the
+   * datasheet for is a price they are approving blind.
+   */
+  lineDocuments?: Record<string, QuoteLineDocument>
   submittedAt?: string
 }
 
@@ -99,6 +106,7 @@ function buildEntries(
             .map(li => [li.id, rfqLineUnitPrice(q, li.id)] as const)
             .filter((pair): pair is readonly [string, number] => pair[1] != null),
         ),
+        lineDocuments: q.lineDocuments,
       })
       continue
     }
@@ -119,6 +127,9 @@ function buildEntries(
       warranty: q.warranty,
       attachmentName: q.attachmentName,
       unitPrices: q.itemPrices ?? {},
+      // No `rfqQuote` fallback here: this branch is only reached when the invite has none (the
+      // branch above returns early), and TypeScript proves it — `inv.rfqQuote` narrows to `never`.
+      lineDocuments: q.lineDocuments,
       submittedAt: q.submittedAt,
     })
   }
@@ -310,18 +321,26 @@ export function RequestQuotationView({
                   </div>
 
                   {/* Per-line prices, when the quote was priced line by line */}
-                  {lineItems.length > 0 && Object.keys(e.unitPrices).length > 0 && (
+                  {lineItems.length > 0 &&
+                    (Object.keys(e.unitPrices).length > 0 || !!e.lineDocuments) && (
                     <ul className="mt-2 pt-2 border-t border-border/70 space-y-0.5">
                       {lineItems.map(li => {
                         const unit = e.unitPrices[li.id]
-                        if (unit == null) return null
+                        const doc = e.lineDocuments?.[li.id]
+                        // A line with neither a price nor a document has nothing to say here.
+                        if (unit == null && !doc) return null
                         const qty = parseFloat(li.quantity) || 1
                         return (
                           <li key={li.id} className="flex items-center justify-between gap-3 text-[11px]">
                             <span className="text-muted-foreground truncate">{li.description || li.masterHead || 'Item'}</span>
-                            <span className="tabular-nums text-foreground shrink-0">
-                              {formatCurrency(unit, e.currency)} × {qty} ={' '}
-                              <span className="font-semibold">{formatCurrency(unit * qty, e.currency)}</span>
+                            <span className="tabular-nums text-foreground shrink-0 flex items-center gap-2">
+                              {unit != null && (
+                                <span>
+                                  {formatCurrency(unit, e.currency)} × {qty} ={' '}
+                                  <span className="font-semibold">{formatCurrency(unit * qty, e.currency)}</span>
+                                </span>
+                              )}
+                              <QuoteLineDocLink doc={doc} />
                             </span>
                           </li>
                         )

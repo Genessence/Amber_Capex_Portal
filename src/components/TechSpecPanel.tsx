@@ -194,9 +194,19 @@ export function TechSpecPanel({
                 </div>
               </div>
 
-              {/* Technical team's remark on the last decision */}
-              {spec?.decisionNote && (status === 'needs_revision' || status === 'rejected') && (
-                <p className="mt-2 rounded-md border border-orange-200 bg-orange-50 px-2.5 py-1.5 text-[11px] text-orange-900">
+              {/* The Technical team's remark on the last decision.
+                  Shown for an APPROVAL too, not just a send-back or rejection: they can now approve
+                  with a condition attached ("approved provided the guarding is to EN ISO 14120"),
+                  and hiding that on the one outcome that unblocks the award is exactly backwards —
+                  sourcing would proceed to award without ever seeing the condition. */}
+              {spec?.decisionNote && (
+                <p
+                  className={`mt-2 rounded-md border px-2.5 py-1.5 text-[11px] ${
+                    status === 'approved'
+                      ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+                      : 'border-orange-200 bg-orange-50 text-orange-900'
+                  }`}
+                >
                   <span className="font-semibold">Technical team:</span> {spec.decisionNote}
                 </p>
               )}

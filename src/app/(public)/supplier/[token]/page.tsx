@@ -28,7 +28,7 @@ import {
 } from "lucide-react"
 import { useCapex } from "@/lib/capexContext"
 import { resolveInviteByToken, isSubmissionAllowed } from "@/lib/tokenUtils"
-import type { CapexLineItem, CapexRequest, PurchaseOrder, Quote, NegotiationMessage, ProformaInvoice, RfqQuote, TrialSubmission, Vendor, VendorInvite, IncoTermsDoc } from "@/lib/types"
+import type { CapexLineItem, CapexRequest, PurchaseOrder, Quote, NegotiationMessage, ProformaInvoice, QuoteLineDocument, RfqQuote, TrialSubmission, Vendor, VendorInvite, IncoTermsDoc } from "@/lib/types"
 import { rfqTotal, inrRfqTotal, effectiveRfqStatus, rfqLineSubtotal, rfqGstAmount, isCompleteItemHsnMap, RFQ_STATUS_LABELS, RFQ_STATUS_COLORS } from "@/lib/rfqUtils"
 import { toInr, currencySymbol, isForeignCurrency } from "@/lib/currencyUtils"
 import {
@@ -59,6 +59,7 @@ import { TatBanner } from "@/components/TatBanner"
 import { TrialCard } from "@/components/TrialCard"
 import { SupplierQuoteTable } from "@/components/supplier/SupplierQuoteTable"
 import { SupplierQuoteCards } from "@/components/supplier/SupplierQuoteCards"
+import { LineDocumentCell } from "@/components/supplier/LineDocumentCell"
 import { INPUT, INPUT_RIGHT, LABEL, LABEL_REQ, fmtCurrency } from "@/lib/auctionTheme"
 import { SUPPLIER_CARD } from "@/lib/uiTokens"
 import { DEFAULT_TERMS_TEXT, effectiveDocApprovalStatus, docPackageTitles } from "@/lib/docPackageUtils"
@@ -483,6 +484,11 @@ function QuotationEntryForm({
     }
     return seed
   })
+  // Per-line supporting documents (datasheet / drawing / certificate), keyed by line-item id and
+  // seeded from any existing quotation so a re-submit does not silently drop what was attached.
+  const [lineDocs, setLineDocs] = useState<Record<string, QuoteLineDocument>>(
+    () => existing?.lineDocuments ?? {},
+  )
   // Legacy single-price fallback (only used when the request has no line items).
   const [price, setPrice] = useState(existing?.price != null && !existing.linePrices ? String(existing.price) : "")
   const [freight, setFreight] = useState(existing?.freight != null ? String(existing.freight) : "")
@@ -525,9 +531,26 @@ function QuotationEntryForm({
 
   function reset() {
     setLinePrices({})
+    setLineDocs({})
     setHsnByItem(seedHsn())
     setPrice(""); setFreight(""); setPacking(""); setService("")
     setDeliveryDays(""); setWarranty(""); setCurrency("INR")
+  }
+
+  /**
+   * Attach or clear the supporting document on ONE line. Passing `null` deletes the key rather than
+   * storing an `undefined` value, so the map that reaches `sanitizeLineDocuments` never carries a
+   * hole that would sanitize into an empty-but-present entry.
+   */
+  function setLineDoc(itemId: string, doc: QuoteLineDocument | null) {
+    setLineDocs(prev => {
+      if (!doc) {
+        if (!(itemId in prev)) return prev
+        const { [itemId]: _removed, ...rest } = prev
+        return rest
+      }
+      return { ...prev, [itemId]: doc }
+    })
   }
 
   /** Build the quotation payload from the current form state. */
@@ -536,6 +559,7 @@ function QuotationEntryForm({
     return {
       price: subtotal,
       ...(hasLineItems ? { linePrices: numericLinePrices } : {}),
+      ...(Object.keys(lineDocs).length ? { lineDocuments: lineDocs } : {}),
       freight: num(freight),
       packing: num(packing),
       service: num(service),
@@ -591,7 +615,9 @@ function QuotationEntryForm({
       <section className="bg-white border border-slate-200 rounded-2xl shadow-sm p-5 sm:p-6">
         <h2 className="text-base font-bold text-slate-900 mb-1">Your Quotation</h2>
         <p className="text-xs text-slate-500 mb-4">
-          {hasLineItems ? "Enter your unit price and HSN code for each line item below." : "Enter your lump-sum price for this requirement."}
+          {hasLineItems
+            ? "Enter your unit price and HSN code for each line item below. You can attach a supporting document (datasheet, drawing, certificate) to each line."
+            : "Enter your lump-sum price for this requirement."}
         </p>
         {hasLineItems ? (
           <>
@@ -603,6 +629,9 @@ function QuotationEntryForm({
                 onLinePrice={(id, v) => setLinePrices(prev => ({ ...prev, [id]: v }))}
                 hsnByItem={hsnByItem}
                 onHsnChange={(id, v) => setHsnByItem(prev => ({ ...prev, [id]: v }))}
+                lineDocuments={lineDocs}
+                onLineDocument={setLineDoc}
+                uploadedBy={vendorName}
                 currency={currency}
               />
             </div>
@@ -614,6 +643,9 @@ function QuotationEntryForm({
                 onLinePrice={(id, v) => setLinePrices(prev => ({ ...prev, [id]: v }))}
                 hsnByItem={hsnByItem}
                 onHsnChange={(id, v) => setHsnByItem(prev => ({ ...prev, [id]: v }))}
+                lineDocuments={lineDocs}
+                onLineDocument={setLineDoc}
+                uploadedBy={vendorName}
                 currency={currency}
               />
             </div>
@@ -1226,6 +1258,18 @@ function RfqSupplierView({
     }
     return seed
   })
+  // Per-line supporting documents carried into the counter. Seeded from the quote currently on the
+  // table so countering a PRICE never silently withdraws the datasheets that were already accepted.
+  const [cLineDocs, setCLineDocs] = useState<Record<string, QuoteLineDocument>>(() => cq?.lineDocuments ?? {})
+  const setCLineDoc = (itemId: string, doc: QuoteLineDocument | null) =>
+    setCLineDocs(prev => {
+      if (!doc) {
+        if (!(itemId in prev)) return prev
+        const { [itemId]: _removed, ...rest } = prev
+        return rest
+      }
+      return { ...prev, [itemId]: doc }
+    })
   const [cForm, setCForm] = useState({
     price: cq?.price != null ? String(cq.price) : "",
     freight: cq?.freight != null ? String(cq.freight) : "",
@@ -1285,6 +1329,7 @@ function RfqSupplierView({
     const quote: RfqQuote = {
       price: cSubtotal,
       ...(hasLineItems ? { linePrices: cNumericLinePrices } : {}),
+      ...(Object.keys(cLineDocs).length ? { lineDocuments: cLineDocs } : {}),
       freight: num(cForm.freight), packing: num(cForm.packing), service: num(cForm.service),
       deliveryDays: num(cForm.deliveryDays), warranty: num(cForm.warranty),
       currency: cForm.currency,
@@ -1643,6 +1688,29 @@ function RfqSupplierView({
                   </select>
                 </div>
               </div>
+              {hasLineItems && (
+                <div>
+                  <p className={LABEL}>Supporting documents (per line item)</p>
+                  <div className="rounded-lg border border-slate-200 divide-y divide-slate-100">
+                    {lineItems.map(it => (
+                      <div key={it.id} className="flex items-center justify-between gap-3 px-3 py-2">
+                        <span className="text-xs text-slate-700 truncate min-w-0" title={it.description}>{it.description}</span>
+                        <div className="w-44 shrink-0 flex justify-end">
+                          <LineDocumentCell
+                            itemLabel={it.description}
+                            doc={cLineDocs[it.id]}
+                            uploadedBy={vendorName}
+                            onChange={d => setCLineDoc(it.id, d)}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    Already-attached documents are carried into your counter — replace one only if it has changed.
+                  </p>
+                </div>
+              )}
               <div className="rounded-lg border border-slate-100 bg-slate-50 px-4 py-2.5 space-y-1.5 text-sm">
                 <div className="flex justify-between text-slate-600">
                   <span>Taxable value</span>
@@ -1890,6 +1958,9 @@ export default function SupplierPortalPage() {
 
   const [ready, setReady] = useState(false)
   const [itemPrices, setItemPrices] = useState<Record<string, string>>({})
+  // Per-line supporting documents on the auction bid, keyed by line-item id (same contract as the
+  // RFQ entry form). A re-bid keeps whatever is already attached — see `submitQuote`.
+  const [bidLineDocs, setBidLineDocs] = useState<Record<string, QuoteLineDocument>>({})
   const [price, setPrice] = useState("")
   const [deliveryDays, setDeliveryDays] = useState("")
   const [freight, setFreight] = useState("")
@@ -1934,6 +2005,7 @@ export default function SupplierPortalPage() {
     setNote(q.note ?? "")
     setFileName(q.attachmentName ?? "")
     setFileBase64(q.attachmentBase64 ?? "")
+    setBidLineDocs(q.lineDocuments ?? {})
     setPrefilled(true)
   }, [inviteEarly, prefilled])
 
@@ -2003,6 +2075,7 @@ export default function SupplierPortalPage() {
     setFileName("")
     setFileBase64("")
     setFileError("")
+    setBidLineDocs({})
     setPrefilled(false)
   }, [])
 
@@ -2371,6 +2444,18 @@ export default function SupplierPortalPage() {
     ? lineItems.every(item => !!itemPrices[item.id]?.trim()) && !!deliveryDays && !!validUntil
     : !!price && !!deliveryDays && !!validUntil
 
+  /** Attach / clear the supporting document on one auction line (see the RFQ form's twin). */
+  const setBidLineDoc = (itemId: string, doc: QuoteLineDocument | null) => {
+    setBidLineDocs(prev => {
+      if (!doc) {
+        if (!(itemId in prev)) return prev
+        const { [itemId]: _removed, ...rest } = prev
+        return rest
+      }
+      return { ...prev, [itemId]: doc }
+    })
+  }
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!formValid) return
@@ -2404,6 +2489,7 @@ export default function SupplierPortalPage() {
       note: note || undefined,
       attachmentName: fileName || undefined,
       attachmentBase64: fileBase64 || undefined,
+      ...(Object.keys(bidLineDocs).length ? { lineDocuments: bidLineDocs } : {}),
       submittedAt: new Date().toISOString(),
     }
     submitQuote(invite.id, quote)
@@ -2687,6 +2773,9 @@ export default function SupplierPortalPage() {
                     lineItems={lineItems}
                     linePrices={itemPrices}
                     onLinePrice={(id, v) => setItemPrices(prev => ({ ...prev, [id]: v }))}
+                    lineDocuments={bidLineDocs}
+                    onLineDocument={setBidLineDoc}
+                    uploadedBy={vendor?.vendorName}
                     currency={currency}
                     showFooter={false}
                   />
@@ -2697,6 +2786,9 @@ export default function SupplierPortalPage() {
                     lineItems={lineItems}
                     linePrices={itemPrices}
                     onLinePrice={(id, v) => setItemPrices(prev => ({ ...prev, [id]: v }))}
+                    lineDocuments={bidLineDocs}
+                    onLineDocument={setBidLineDoc}
+                    uploadedBy={vendor?.vendorName}
                     currency={currency}
                     showFooter={false}
                   />
