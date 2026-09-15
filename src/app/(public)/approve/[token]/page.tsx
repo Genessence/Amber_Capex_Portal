@@ -239,7 +239,9 @@ export default function ApprovePage() {
             {isAccountsStage ? 'Budget Sign-off · Global Accounts' : 'Budget Approval'}
           </span>
         </div>
-        <h1 className="text-xl font-bold text-foreground">FY {p.targetFy} Budget</h1>
+        <h1 className="text-xl font-bold text-foreground">
+          FY {p.targetFy} {FIELD_TYPE_LABELS[p.fieldType ?? 'brown_field']} Budget
+        </h1>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1 text-sm text-muted-foreground">
           <span className="inline-flex items-center gap-1"><Building2 className="w-3.5 h-3.5" /> {p.plant}</span>
           <span className="uppercase">{p.projectType}</span>

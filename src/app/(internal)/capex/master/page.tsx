@@ -6,7 +6,7 @@ import { Check, Pencil, RotateCcw, X, Building2, Plus, ArrowLeft, ChevronRight, 
 import { toast } from 'sonner'
 import { useCapex } from '@/lib/capexContext'
 import { PLANTS, ROLE_NAMES, getPlantForRole } from '@/lib/constants'
-import type { CapexMasterItem, FieldType, PlantMeta, ProjectType } from '@/lib/types'
+import type { CapexMasterItem, FieldType, GreenFieldPlantCreation, PlantMeta, ProjectType } from '@/lib/types'
 import { FIELD_TYPE_LABELS } from '@/lib/types'
 import {
   BROWN_FIELD_HEAD_ORDER,
@@ -33,6 +33,7 @@ import {
   type GreenFieldSection,
 } from '@/lib/greenFieldConstants'
 import { getBrownFieldHeadBudgetCr } from '@/lib/adhocBudgetUtils'
+import CreateGreenFieldPlantModal from '@/components/CreateGreenFieldPlantModal'
 
 const CR_TO_INR = 10_000_000
 
@@ -100,23 +101,6 @@ const BLANK_FORM = { head: 'Automation', department: '', subParticulars: '', qty
 type PlantFormState = { label: string; state: string; assignedUser: string }
 const BLANK_PLANT_FORM: PlantFormState = { label: '', state: '', assignedUser: '' }
 
-type GreenFieldPlantFormState = {
-  label: string
-  state: string
-  assignedUser: string
-  fy: string
-  projectType: ProjectType
-  budgetCr: string
-}
-const BLANK_GREEN_PLANT_FORM = (fy: string): GreenFieldPlantFormState => ({
-  label: '',
-  state: '',
-  assignedUser: '',
-  fy,
-  projectType: DEFAULT_PROJECT_TYPE,
-  budgetCr: '',
-})
-
 function formatOverLakhs(inr: number) {
   return `₹${(inr / 100_000).toFixed(1)} L`
 }
@@ -165,7 +149,6 @@ export default function CapexMasterPage() {
   const [customHeadInput, setCustomHeadInput] = useState('')
   const [showAddPlant, setShowAddPlant]       = useState(false)
   const [showCreateGreenPlant, setShowCreateGreenPlant] = useState(false)
-  const [greenPlantForm, setGreenPlantForm]   = useState<GreenFieldPlantFormState>(() => BLANK_GREEN_PLANT_FORM(''))
   const [showSetFyModal, setShowSetFyModal]   = useState(false)
   const [setFyInput, setSetFyInput]           = useState('')
   const [plantForm, setPlantForm]             = useState<PlantFormState>(BLANK_PLANT_FORM)
@@ -249,7 +232,7 @@ export default function CapexMasterPage() {
   }, [roleKey])
 
   const canAddPlant = ['super_admin', 'sourcing_member'].includes(currentRole)
-  const canManageGreenField = ['sourcing_member', 'super_admin'].includes(currentRole)
+  const canManageGreenField = ['maintenance', 'sourcing_member', 'super_admin'].includes(currentRole)
   /**
    * Live-FY budgets are read-only on master for BOTH Brown Field and Green Field: they are set in
    * Budget Planning (`/capex/budget-proposals`) and, for Brown Field, adjusted by an Adhoc transfer
@@ -623,37 +606,15 @@ export default function CapexMasterPage() {
   }
 
   function openCreateGreenPlantModal() {
-    const fy = activeFy || allFys[0] || '2026-27'
-    setGreenPlantForm({
-      ...BLANK_GREEN_PLANT_FORM(fy),
-      projectType: selectedProjectType ?? activeProjectType,
-    })
     setShowCreateGreenPlant(true)
   }
 
-  function handleCreateGreenFieldPlant() {
-    const label = greenPlantForm.label.trim()
-    const fy = greenPlantForm.fy.trim()
-    if (!label || !fy) return
-    const budgetParsed = parseFloat(greenPlantForm.budgetCr)
-    const budgetCr = !isNaN(budgetParsed) && budgetParsed > 0 ? budgetParsed : undefined
-    const plantValue = label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
-    createGreenFieldPlant({
-      plantValue,
-      plantLabel: label,
-      state: greenPlantForm.state.trim(),
-      assignedUser: greenPlantForm.assignedUser.trim() || undefined,
-      projectType: greenPlantForm.projectType,
-      fy,
-      budgetCr,
-    })
-    setSelectedFy(fy)
+  function handleCreateGreenFieldPlant(creation: GreenFieldPlantCreation) {
+    createGreenFieldPlant(creation)
+    setSelectedFy(creation.fy)
     setShowCreateGreenPlant(false)
-    setGreenPlantForm(BLANK_GREEN_PLANT_FORM(fy))
     toast.success(
-      budgetCr != null
-        ? `Green Field plant "${label}" created with ₹${budgetCr.toFixed(2)} Cr budget`
-        : `Green Field plant "${label}" created for FY ${fy}`,
+      `Green Field plant "${creation.plantLabel}" created — set its budget in Budget Planning`,
     )
   }
 
@@ -1135,12 +1096,12 @@ export default function CapexMasterPage() {
               )
             })}
 
-            {/* Green Field plants are created in Budget Planning now — creating the site and
-                uploading its budget is ONE flow, and splitting it across two screens is what made
-                a plant exist here with no budget anywhere. */}
+            {/* The SITE is registered here; its BUDGET is authored in Budget Planning and only
+                becomes live once the approval chain publishes it. Two screens, one each for the
+                two decisions — master never sets a Green Field figure. */}
             {fieldTab === 'green_field' && canManageGreenField && selectedProjectType && (
-              <Link
-                href="/capex/budget-proposals"
+              <button
+                onClick={openCreateGreenPlantModal}
                 className="group text-left rounded-xl border-2 border-dashed border-slate-300 bg-slate-50/30 p-4
                            hover:border-slate-500 hover:bg-slate-50 transition-all
                            focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-600"
@@ -1153,13 +1114,13 @@ export default function CapexMasterPage() {
                     Create Green Field Plant
                   </p>
                   <p className="text-[12px] text-slate-700/70 mt-0.5">
-                    Opens Budget Planning — create the plant, then upload its budget
+                    Register the site here — its budget is uploaded in Budget Planning
                   </p>
                 </div>
                 <div className="mt-3 pt-3 border-t border-slate-200/60">
                   <p className="text-[11px] text-slate-700/60">Green Field budgets are set in Budget Planning</p>
                 </div>
-              </Link>
+              </button>
             )}
 
             {/* Brown / Digitisation / IT — add plant */}
@@ -1231,116 +1192,15 @@ export default function CapexMasterPage() {
 
         {/* Create Green Field Plant modal */}
         {showCreateGreenPlant && (
-          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col">
-              <div className="flex items-center justify-between p-6 border-b border-slate-100 shrink-0">
-                <div>
-                  <h2 className="text-base font-bold text-slate-900">Create Green Field Plant</h2>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    Plant will be added to Green Field master and Brown Field plant list
-                  </p>
-                </div>
-                <button
-                  onClick={() => { setShowCreateGreenPlant(false); setGreenPlantForm(BLANK_GREEN_PLANT_FORM(activeFy)) }}
-                  className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-              <div className="overflow-y-auto flex-1 p-6 space-y-5">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-xs font-semibold text-slate-500 block mb-1.5">
-                      Plant Name <span className="text-red-400">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={greenPlantForm.label}
-                      onChange={e => setGreenPlantForm(f => ({ ...f, label: e.target.value }))}
-                      placeholder="e.g. Pune Greenfield"
-                      className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-slate-600"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs font-semibold text-slate-500 block mb-1.5">State / Location</label>
-                    <input
-                      type="text"
-                      value={greenPlantForm.state}
-                      onChange={e => setGreenPlantForm(f => ({ ...f, state: e.target.value }))}
-                      placeholder="e.g. Maharashtra"
-                      className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-slate-600"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs font-semibold text-slate-500 block mb-1.5">
-                      Financial Year <span className="text-red-400">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={greenPlantForm.fy}
-                      onChange={e => setGreenPlantForm(f => ({ ...f, fy: e.target.value }))}
-                      placeholder="e.g. 2026-27"
-                      className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-slate-600"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs font-semibold text-slate-500 block mb-1.5">Business Category</label>
-                    <select
-                      value={greenPlantForm.projectType}
-                      onChange={e => setGreenPlantForm(f => ({ ...f, projectType: e.target.value as ProjectType }))}
-                      className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 bg-white focus:outline-none focus:ring-2 focus:ring-slate-600"
-                    >
-                      {PROJECT_TYPES.map(pt => (
-                        <option key={pt} value={pt}>{PROJECT_TYPE_LABELS[pt]}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="sm:col-span-2">
-                    <label className="text-xs font-semibold text-slate-500 block mb-1.5">Assign Plant Head</label>
-                    <input
-                      type="text"
-                      value={greenPlantForm.assignedUser}
-                      onChange={e => setGreenPlantForm(f => ({ ...f, assignedUser: e.target.value }))}
-                      placeholder="e.g. Vikram Nair"
-                      className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-slate-600"
-                    />
-                  </div>
-                  <div className="sm:col-span-2">
-                    <label className="text-xs font-semibold text-slate-500 block mb-1.5">
-                      Overall Plant Budget (Cr) <span className="text-red-400">*</span>
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={greenPlantForm.budgetCr}
-                      onChange={e => setGreenPlantForm(f => ({ ...f, budgetCr: e.target.value }))}
-                      placeholder="e.g. 150.00"
-                      className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-slate-600"
-                    />
-                    <p className="text-[11px] text-slate-400 mt-1">
-                      Total envelope for this plant — distribute to section heads after creation.
-                    </p>
-                  </div>
-                </div>
-              </div>
-              <div className="flex gap-2 p-6 border-t border-slate-100 shrink-0">
-                <button
-                  onClick={handleCreateGreenFieldPlant}
-                  disabled={!greenPlantForm.label.trim() || !greenPlantForm.fy.trim() || !greenPlantForm.budgetCr.trim() || parseFloat(greenPlantForm.budgetCr) <= 0}
-                  className="flex-1 px-4 py-2.5 text-sm font-semibold bg-slate-600 hover:bg-slate-700 disabled:opacity-40 text-white rounded-lg"
-                >
-                  Create Plant
-                </button>
-                <button
-                  onClick={() => { setShowCreateGreenPlant(false); setGreenPlantForm(BLANK_GREEN_PLANT_FORM(activeFy)) }}
-                  className="px-4 py-2.5 text-sm font-semibold bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 rounded-lg"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
+          <CreateGreenFieldPlantModal
+            projectType={selectedProjectType ?? activeProjectType}
+            existingPlants={[...PLANTS.map(pl => pl.value), ...customPlants.map(pl => pl.value)]}
+            defaultFy={activeFy || allFys[0] || '2026-27'}
+            subtitle="Step 1 of 2 — register the site. Its budget is uploaded in Budget Planning."
+            ctaLabel="Create Plant"
+            onClose={() => setShowCreateGreenPlant(false)}
+            onCreate={handleCreateGreenFieldPlant}
+          />
         )}
 
         {/* Add Plant modal */}

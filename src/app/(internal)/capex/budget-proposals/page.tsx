@@ -6,16 +6,16 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import {
   ArrowLeft, Plus, Trash2, Upload, Download, Send, Save, ClipboardList, FileSpreadsheet, Copy, Mail, AlertCircle,
-  Building2, X,
+  Building2,
 } from 'lucide-react'
 import { useCapex } from '@/lib/capexContext'
 import { PLANTS, ROLE_NAMES, PLANT_HEAD_EMAIL, getPlantForRole } from '@/lib/constants'
 import { buildApprovalLink } from '@/lib/tokenUtils'
 import { EmailPreviewModal } from '@/components/EmailPreviewModal'
+import CreateGreenFieldPlantModal from '@/components/CreateGreenFieldPlantModal'
 import type {
   BudgetProposal, BudgetProposalItem, FieldType, GreenFieldPlantCreation, ProjectType,
 } from '@/lib/types'
-import { currentFyCode } from '@/lib/budgetProposalUtils'
 import {
   BROWN_FIELD_HEAD_ORDER,
   GREEN_FIELD_SECTION_HEADS,
@@ -41,15 +41,26 @@ import { parseCsvText, parseMasterWorkbook, downloadImportTemplate } from '@/lib
 const ALLOWED_ROLES = ['maintenance', 'sourcing_member', 'super_admin']
 
 /**
- * Green Field planning is **super-admin only**. The CAPEX-master authors (maintenance / sourcing)
- * plan the next Brown Field FY; a Green Field budget is a whole new plant's envelope and is set by
- * the admin, who publishes it directly with no approval chain.
+ * Who authors a Green Field budget. Maintenance fills the new site's envelope; the admin keeps
+ * access to review and re-publish an existing year. Sourcing plans Brown Field only. The SITE
+ * itself is registered on CAPEX Master — this page only ever funds a plant that already exists.
  */
-const GREEN_FIELD_ROLES = ['super_admin']
+const GREEN_FIELD_ROLES = ['maintenance', 'super_admin']
 
-const FIELD_TABS: { value: FieldType; label: string }[] = [
-  { value: 'brown_field', label: 'Brown Field' },
-  { value: 'green_field', label: 'Green Field' },
+/** Green Field first — the card order the budget team asked for. */
+const FIELD_CARDS: { value: FieldType; label: string; desc: string; chain: string }[] = [
+  {
+    value: 'green_field',
+    label: 'Green Field',
+    desc: 'Fund a new site created on CAPEX Master — plant → section → head → per-machine, in one sheet.',
+    chain: 'Plant Head → Admin → Global Accounts, then it publishes as the live FY.',
+  },
+  {
+    value: 'brown_field',
+    label: 'Brown Field',
+    desc: 'Author the next financial year for an existing plant, head by head.',
+    chain: 'Plant Head → Admin → Global Accounts, then it publishes as the new live FY.',
+  },
 ]
 
 function fmtCr(n: number) {
@@ -60,16 +71,16 @@ export default function BudgetProposalsPage() {
   const router = useRouter()
   const {
     capexMaster, customPlants, budgetProposals,
-    createBudgetProposal, updateBudgetProposal, submitBudgetProposal, publishGreenFieldBudget,
-    createGreenFieldPlant,
+    createBudgetProposal, updateBudgetProposal, submitBudgetProposal, createGreenFieldPlant,
   } = useCapex()
 
   const [role, setRole] = useState('')
-  const [fieldType, setFieldType] = useState<FieldType>('brown_field')
+  // Null until the author picks a budget type on the card step.
+  const [fieldType, setFieldType] = useState<FieldType | null>(null)
   const [projectType, setProjectType] = useState<ProjectType>('rac')
   const [plant, setPlant] = useState<string | null>(null)
-  const [editingId, setEditingId] = useState<string | null>(null)
   const [showCreatePlant, setShowCreatePlant] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -84,9 +95,13 @@ export default function BudgetProposalsPage() {
     const handler = (e: Event) => {
       const next = (e as CustomEvent).detail as string
       setRole(next)
-      // Switching to a role without Green Field rights must not leave them on the Green Field tab
-      // looking at a budget they cannot author.
-      if (!GREEN_FIELD_ROLES.includes(next)) setFieldType('brown_field')
+      // Switching to a role without Green Field rights must not leave them on a Green Field budget
+      // they cannot author — send them back to the card step to pick again.
+      if (!GREEN_FIELD_ROLES.includes(next)) {
+        setFieldType(prev => (prev === 'green_field' ? null : prev))
+        setEditingId(null)
+        setPlant(getPlantForRole(next))
+      }
     }
     window.addEventListener('capex_rolechange', handler as EventListener)
     return () => window.removeEventListener('capex_rolechange', handler as EventListener)
@@ -97,28 +112,15 @@ export default function BudgetProposalsPage() {
   const isGreenField = fieldType === 'green_field'
 
   /**
-   * Green Field plants are the ones CREATED as Green Field — a Green Field budget is a brand-new
-   * site, so the roster is not the Brown Field plant list. A seeded plant that already carries a
-   * published Green Field budget stays selectable too, otherwise re-publishing an existing year
-   * would be impossible.
+   * ONLY plants registered as Green Field sites on CAPEX Master. A Green Field budget belongs to a
+   * brand-new site, so the roster is deliberately not the Brown Field plant list — and it is not
+   * widened by "any plant that happens to carry a Green Field master row" either, because that let
+   * a seeded plant nobody created here appear as fundable.
    */
-  const greenFieldPlants = useMemo(() => {
-    const withGreenBudget = new Set(
-      capexMaster.filter(m => (m.fieldType ?? 'brown_field') === 'green_field').map(m => m.plant),
-    )
-    const seen = new Set<string>()
-    const list: { value: string; label: string }[] = []
-    const push = (value: string, label: string) => {
-      if (seen.has(value)) return
-      seen.add(value)
-      list.push({ value, label })
-    }
-    customPlants.forEach(p => {
-      if (p.greenFieldPlant || withGreenBudget.has(p.value)) push(p.value, p.label)
-    })
-    PLANTS.forEach(p => { if (withGreenBudget.has(p.value)) push(p.value, p.label) })
-    return list
-  }, [customPlants, capexMaster])
+  const greenFieldPlants = useMemo(
+    () => customPlants.filter(p => p.greenFieldPlant).map(p => ({ value: p.value, label: p.label })),
+    [customPlants],
+  )
 
   const brownFieldPlants = useMemo(() => {
     const base = PLANTS.map(p => ({ value: p.value, label: p.label }))
@@ -161,10 +163,14 @@ export default function BudgetProposalsPage() {
 
   /**
    * Start a blank budget. Takes the plant explicitly so it can be called in the same tick a plant
-   * is created — reading the `plant` state there would still hold the pre-create value.
+   * is created here — reading the `plant` state then would still hold the pre-create value.
    */
-  function handleCreate(forPlant: string | null = plant, label?: string, targetFy?: string) {
-    if (!forPlant) return
+  function handleCreate(forPlant: string | null = plant, label?: string, fy?: string) {
+    if (!forPlant || !fieldType) return
+    // A Green Field site is registered FOR a financial year; its budget opens on that same year
+    // rather than on today's, so the site and its budget can never describe different FYs.
+    const targetFy = fy
+      ?? (isGreenField ? customPlants.find(p => p.value === forPlant)?.greenFieldFy : undefined)
     // Always a BLANK draft — the previous FY's budget is never carried over.
     const proposal = createBlankProposal({
       capexMaster, plant: forPlant, projectType, fieldType, createdBy: role, targetFy,
@@ -177,13 +183,53 @@ export default function BudgetProposalsPage() {
   }
 
   /**
-   * Create the Green Field site, select it, and drop straight into its blank budget — carrying the
-   * FY the plant was created for, so the budget cannot open on a different year than the site.
+   * Register the site and drop straight into its blank budget, carrying the FY it was created for.
+   * The same modal is on CAPEX Master; a Green Field author who is already here should not have to
+   * leave the page they are funding the plant on.
    */
-  function handlePlantCreated(value: string, label: string, fy: string) {
+  function handlePlantCreated(creation: GreenFieldPlantCreation) {
+    createGreenFieldPlant(creation)
     setShowCreatePlant(false)
-    setPlant(value)
-    handleCreate(value, label, fy)
+    setPlant(creation.plantValue)
+    toast.success(`Green Field plant "${creation.plantLabel}" created — now upload its budget`)
+    handleCreate(creation.plantValue, creation.plantLabel, creation.fy)
+  }
+
+  // ── Step 1: pick the budget type. A card each, Green Field first; a role that cannot author
+  // Green Field simply does not get that card, so no card on screen is a dead end.
+  const fieldCards = FIELD_CARDS.filter(c => c.value !== 'green_field' || canGreenField)
+  if (!fieldType) {
+    return (
+      <div className="p-5 h-full flex flex-col gap-5 max-w-4xl">
+        <div className="flex items-center gap-3 shrink-0">
+          <Link href="/capex/master" className="p-2 rounded-lg hover:bg-muted text-muted-foreground">
+            <ArrowLeft className="w-4 h-4" />
+          </Link>
+          <div>
+            <h1 className="text-lg font-bold text-foreground flex items-center gap-2">
+              <ClipboardList className="w-5 h-5 text-slate-600" /> Budget Planning
+            </h1>
+            <p className="text-sm text-muted-foreground mt-0.5">Which budget are you planning?</p>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {fieldCards.map(c => (
+            <button key={c.value} type="button" onClick={() => { setFieldType(c.value); setEditingId(null) }}
+              className="text-left rounded-xl border-2 border-border bg-card p-5 shadow-xs hover:shadow-md hover:border-primary
+                         transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+              <div className="flex items-center gap-2">
+                {c.value === 'green_field'
+                  ? <Building2 className="w-5 h-5 text-slate-600" />
+                  : <FileSpreadsheet className="w-5 h-5 text-slate-600" />}
+                <p className="text-lg font-bold text-foreground">{c.label}</p>
+              </div>
+              <p className="text-sm text-muted-foreground mt-2 leading-relaxed">{c.desc}</p>
+              <p className="text-[11px] text-muted-foreground mt-3 pt-3 border-t border-border">{c.chain}</p>
+            </button>
+          ))}
+        </div>
+      </div>
+    )
   }
 
   if (editing) {
@@ -198,15 +244,15 @@ export default function BudgetProposalsPage() {
           // before this click's save, so an upload-then-publish in one go would validate nothing.
           const errors = validateProposal(next)
           if (errors.length) { toast.error(errors[0]); return }
-          if (proposalFieldType(next) === 'green_field') {
-            publishGreenFieldBudget(next, ROLE_NAMES[role] ?? role)
-            setEditingId(null)
-            toast.success(`Green Field budget published as FY ${next.targetFy} — buyers can raise Green Field requests against it now`)
-            return
-          }
+          // Green Field and Brown Field take the SAME road: the author is not the approving
+          // authority, so nothing reaches the live FY without Plant Head → Admin → Global Accounts.
           submitBudgetProposal(next.id)
           setEditingId(null)
-          toast.success('Proposal submitted to Plant Head for approval')
+          toast.success(
+            proposalFieldType(next) === 'green_field'
+              ? `Green Field budget for FY ${next.targetFy} submitted to Plant Head for approval`
+              : 'Proposal submitted to Plant Head for approval',
+          )
         }}
         fileRef={fileRef}
       />
@@ -216,49 +262,28 @@ export default function BudgetProposalsPage() {
   return (
     <div className="p-5 h-full flex flex-col gap-4">
       <div className="flex items-center gap-3 shrink-0">
-        <Link href="/capex/master" className="p-2 rounded-lg hover:bg-muted text-muted-foreground">
+        <button onClick={() => { setFieldType(null); setEditingId(null) }}
+          aria-label="Back to budget type" className="p-2 rounded-lg hover:bg-muted text-muted-foreground">
           <ArrowLeft className="w-4 h-4" />
-        </Link>
-        <div>
-          <h1 className="text-lg font-bold text-foreground flex items-center gap-2">
+        </button>
+        <div className="min-w-0">
+          <h1 className="text-lg font-bold text-foreground flex items-center gap-2 flex-wrap">
             <ClipboardList className="w-5 h-5 text-slate-600" /> Budget Planning
+            <span className="text-muted-foreground font-semibold">· {isGreenField ? 'Green Field' : 'Brown Field'}</span>
+            {/* One budget type is chosen at a time; changing it is a step back, not a toggle
+                buried in the scope line — that is how the old pill group went unnoticed. */}
+            <button onClick={() => { setFieldType(null); setEditingId(null) }}
+              className="text-[11px] font-semibold px-2 py-0.5 rounded-full border border-border text-muted-foreground hover:text-foreground hover:bg-muted">
+              Change
+            </button>
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
             {isGreenField
-              ? 'Upload a Green Field plant budget — plant → section → head → per-machine. Publishing makes it the live FY buyers raise Green Field requests against.'
-              : 'Author next-FY Brown Field budgets. Submitted proposals go to admin for approval, then publish as the new live FY.'}
+              ? 'Upload a Green Field plant budget — plant → section → head → per-machine. It goes to Plant Head → Admin → Global Accounts, and publishes as the live FY buyers raise Green Field requests against.'
+              : 'Author next-FY Brown Field budgets. Submitted proposals go to Plant Head → Admin → Global Accounts, then publish as the new live FY.'}
           </p>
         </div>
       </div>
-
-      {/* Budget type — Green Field is offered to the super admin only. It gets its OWN labelled
-          row rather than a third grey pill group in the scope line: three identical pill groups
-          side by side made the new one invisible, which is exactly how it was first missed. */}
-      {canGreenField && (
-        <div className="shrink-0 flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card px-3 py-2">
-          <span className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
-            Budget type
-          </span>
-          <div className="flex items-center gap-1 bg-muted rounded-lg p-1">
-            {FIELD_TABS.map(t => (
-              <button key={t.value} onClick={() => { setFieldType(t.value); setEditingId(null) }}
-                aria-pressed={fieldType === t.value}
-                className={`px-4 py-1.5 text-[13px] font-semibold rounded-md transition-colors ${
-                  fieldType === t.value
-                    ? 'bg-primary text-primary-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}>
-                {t.label}
-              </button>
-            ))}
-          </div>
-          <span className="text-[11px] text-muted-foreground">
-            {isGreenField
-              ? 'Publishes straight to the live FY — no approval chain.'
-              : 'Goes to Plant Head → Admin → Global Accounts for approval.'}
-          </span>
-        </div>
-      )}
 
       {/* Scope selectors */}
       <div className="flex flex-wrap items-center gap-3 shrink-0">
@@ -299,12 +324,10 @@ export default function BudgetProposalsPage() {
         <CreateGreenFieldPlantModal
           projectType={projectType}
           existingPlants={[...PLANTS.map(p => p.value), ...customPlants.map(p => p.value)]}
+          subtitle="Step 1 of 2 — register the site. You’ll upload its budget next."
+          ctaLabel="Create & Continue to Budget"
           onClose={() => setShowCreatePlant(false)}
-          onCreate={(creation) => {
-            createGreenFieldPlant(creation)
-            toast.success(`Green Field plant "${creation.plantLabel}" created — now upload its budget`)
-            handlePlantCreated(creation.plantValue, creation.plantLabel, creation.fy)
-          }}
+          onCreate={handlePlantCreated}
         />
       )}
 
@@ -323,8 +346,8 @@ export default function BudgetProposalsPage() {
                 {/* The order matters and is stated, because a Green Field budget cannot exist
                     before the site it belongs to. */}
                 <p className="text-xs text-muted-foreground max-w-md">
-                  Step 1 — create the plant. Step 2 — upload its budget: plant → section → head →
-                  per-machine, in one sheet.
+                  Step 1 — create the plant (here or on CAPEX Master). Step 2 — upload its budget:
+                  plant → section → head → per-machine, in one sheet.
                 </p>
                 <button onClick={() => setShowCreatePlant(true)}
                   className="mt-1 flex items-center gap-1.5 px-4 py-2 text-xs font-semibold bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg">
@@ -418,11 +441,13 @@ function BudgetProposalEditor({ proposal, plantLabel, onBack, onSave, onSubmit, 
   const editableStatuses = ['draft', 'rejected', 'needs_correction']
   const readOnly = !editableStatuses.includes(proposal.status)
   const approvalLink = proposal.approvalToken ? buildApprovalLink(proposal.approvalToken) : ''
-  const emailSubject = `Budget Approval — ${plantLabel} · FY ${proposal.targetFy}`
+  const emailSubject = `${isGreenField ? 'Green Field' : 'Brown Field'} Budget Approval — ${plantLabel} · FY ${proposal.targetFy}`
   const emailBody = [
     'Dear Plant Head,',
     '',
-    `A next-FY Brown Field budget proposal for ${plantLabel} (FY ${proposal.targetFy}) requires your approval.`,
+    isGreenField
+      ? `A Green Field plant budget for ${plantLabel} (FY ${proposal.targetFy}) requires your approval.`
+      : `A next-FY Brown Field budget proposal for ${plantLabel} (FY ${proposal.targetFy}) requires your approval.`,
     '',
     'Please review and Approve / Reject using the secure link below:',
     approvalLink,
@@ -663,7 +688,7 @@ function BudgetProposalEditor({ proposal, plantLabel, onBack, onSave, onSubmit, 
               onSubmit(next)
             }}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg">
-            <Send className="w-3.5 h-3.5" /> {isGreenField ? 'Publish Budget' : 'Submit to Plant Head'}
+            <Send className="w-3.5 h-3.5" /> Submit to Plant Head
           </button>
         </div>
       )}
@@ -799,122 +824,3 @@ function BudgetProposalEditor({ proposal, plantLabel, onBack, onSave, onSubmit, 
   )
 }
 
-// ── Create Green Field Plant ──────────────────────────────────────────────────
-
-/** Slugify a plant name into the stable `value` every plant is keyed by across the portal. */
-function plantSlug(label: string): string {
-  return label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
-}
-
-interface CreatePlantProps {
-  projectType: ProjectType
-  /** Every plant value already taken — `addCustomPlant` dedupes SILENTLY, so collisions are
-      caught here instead of appearing to succeed and doing nothing. */
-  existingPlants: string[]
-  onClose: () => void
-  onCreate: (creation: GreenFieldPlantCreation) => void
-}
-
-/**
- * Step 1 of the Green Field flow: register the site. Deliberately carries **no budget field** — the
- * budget arrives in step 2 as the uploaded hierarchy (plant → section → head → machine), and a
- * figure typed here would be overwritten by the first publish anyway.
- */
-function CreateGreenFieldPlantModal({ projectType, existingPlants, onClose, onCreate }: CreatePlantProps) {
-  const [label, setLabel] = useState('')
-  const [state, setState] = useState('')
-  const [assignedUser, setAssignedUser] = useState('')
-  const [fy, setFy] = useState(currentFyCode())
-
-  const slug = plantSlug(label)
-  const duplicate = !!slug && existingPlants.includes(slug)
-  const fyValid = /^\d{4}-\d{2}$/.test(fy.trim())
-  const error =
-    !label.trim() ? 'Enter a plant name.'
-    : !slug ? 'Plant name must contain at least one letter or number.'
-    : duplicate ? `A plant named "${label.trim()}" already exists.`
-    : !fyValid ? 'Financial year must be in YYYY-YY format (e.g. 2026-27).'
-    : null
-
-  function submit() {
-    if (error) { toast.error(error); return }
-    onCreate({
-      plantValue: slug,
-      plantLabel: label.trim(),
-      state: state.trim(),
-      assignedUser: assignedUser.trim() || undefined,
-      projectType,
-      fy: fy.trim(),
-      // No budgetCr — the envelope comes from the uploaded sheet in step 2.
-    })
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      role="dialog" aria-modal="true" aria-labelledby="gf-plant-title">
-      <div className="w-full max-w-md rounded-xl bg-card border border-border shadow-lg">
-        <div className="flex items-start justify-between gap-3 px-4 py-3 border-b border-border">
-          <div>
-            <h2 id="gf-plant-title" className="text-base font-bold text-foreground">Create Green Field Plant</h2>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Step 1 of 2 · {PROJECT_TYPE_LABELS[projectType]}. You&apos;ll upload its budget next.
-            </p>
-          </div>
-          <button onClick={onClose} aria-label="Close" className="p-1 rounded-lg hover:bg-muted text-muted-foreground">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
-        <div className="p-4 space-y-3">
-          <Field label="Plant name" required>
-            <input autoFocus value={label} onChange={e => setLabel(e.target.value)}
-              placeholder="e.g. Sri City Plant 1"
-              className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card focus:outline-none focus:ring-2 focus:ring-primary" />
-          </Field>
-          <Field label="State">
-            <input value={state} onChange={e => setState(e.target.value)}
-              placeholder="e.g. Andhra Pradesh"
-              className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card focus:outline-none focus:ring-2 focus:ring-primary" />
-          </Field>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Financial year" required>
-              <input value={fy} onChange={e => setFy(e.target.value)} placeholder="2026-27"
-                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card focus:outline-none focus:ring-2 focus:ring-primary" />
-            </Field>
-            <Field label="Plant head (optional)">
-              <input value={assignedUser} onChange={e => setAssignedUser(e.target.value)} placeholder="Name"
-                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-card focus:outline-none focus:ring-2 focus:ring-primary" />
-            </Field>
-          </div>
-          {label.trim() && error && (
-            <p className="text-xs text-red-600 flex items-start gap-1.5" role="alert">
-              <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" /> {error}
-            </p>
-          )}
-        </div>
-
-        <div className="flex justify-end gap-2 px-4 py-3 border-t border-border">
-          <button onClick={onClose}
-            className="px-3 py-2 text-xs font-semibold rounded-lg border border-border bg-card hover:bg-muted text-foreground">
-            Cancel
-          </button>
-          <button onClick={submit} disabled={!!error}
-            className="px-3 py-2 text-xs font-semibold rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground disabled:opacity-50 disabled:cursor-not-allowed">
-            Create &amp; Continue to Budget
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
-  return (
-    <label className="block">
-      <span className="text-xs font-semibold text-muted-foreground">
-        {label}{required && <span className="text-red-600"> *</span>}
-      </span>
-      <div className="mt-1">{children}</div>
-    </label>
-  )
-}

@@ -691,6 +691,12 @@ export interface PlantMeta {
   assignedUser?: string;
   /** Set when plant is created via Green Field master flow */
   greenFieldPlant?: boolean;
+  /**
+   * The FY a Green Field site was registered for. The site is created on CAPEX Master and its
+   * budget authored later in Budget Planning, so without this the draft would open on the current
+   * year and quietly fund a different FY than the one the plant was opened for.
+   */
+  greenFieldFy?: string;
 }
 
 /** A full RFQ quotation (mirrors the reverse-auction quote fields). */

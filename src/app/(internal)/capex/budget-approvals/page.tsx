@@ -13,10 +13,12 @@ import { EmailPreviewModal } from '@/components/EmailPreviewModal'
 import { buildApprovalLink } from '@/lib/tokenUtils'
 import { PLANTS, ROLE_NAMES, GLOBAL_ACCOUNTS_EMAIL } from '@/lib/constants'
 import type { BudgetProposal, BudgetProposalItem } from '@/lib/types'
+import { FIELD_TYPE_LABELS } from '@/lib/types'
 import { PROJECT_TYPE_LABELS } from '@/lib/greenFieldConstants'
 import {
   BUDGET_PROPOSAL_STATUS_COLORS,
   BUDGET_PROPOSAL_STATUS_LABELS,
+  proposalFieldType,
   proposalTotalCr,
 } from '@/lib/budgetProposalUtils'
 import { ADHOC_STATUS_COLORS, ADHOC_STATUS_LABELS, effectiveHeadAllocationCr, headUsedCr } from '@/lib/adhocBudgetUtils'
@@ -132,6 +134,7 @@ export default function BudgetApprovalsPage() {
       '',
       `A next-FY CAPEX budget has cleared the plant head and admin approvals and needs your final sign-off. Approving it publishes the budget as the live FY ${p.targetFy} master.`,
       '',
+      `Budget:   ${FIELD_TYPE_LABELS[proposalFieldType(p)]}`,
       `Plant:    ${plantLabel(p.plant, customPlants)}`,
       `Category: ${PROJECT_TYPE_LABELS[p.projectType]}`,
       `Target FY: ${p.targetFy}${p.sourceFy ? ` (based on FY ${p.sourceFy})` : ''}`,
@@ -155,7 +158,8 @@ export default function BudgetApprovalsPage() {
           <ClipboardCheck className="w-5 h-5 text-primary" /> Budget Approvals
         </h1>
         <p className="text-sm text-muted-foreground mt-0.5">
-          Review next-FY Brown Field budget proposals. Approving publishes the proposal as a new live FY that buyers will use.
+          Review budget proposals — next-FY Brown Field and new Green Field sites alike. Approving sends the
+          proposal to Global Accounts, whose sign-off publishes it as the live FY buyers will use.
         </p>
       </div>
 
@@ -180,7 +184,7 @@ export default function BudgetApprovalsPage() {
                   </button>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-foreground">
-                      {plantLabel(p.plant, customPlants)} · {PROJECT_TYPE_LABELS[p.projectType]} · FY {p.targetFy}
+                      {FIELD_TYPE_LABELS[proposalFieldType(p)]} · {plantLabel(p.plant, customPlants)} · {PROJECT_TYPE_LABELS[p.projectType]} · FY {p.targetFy}
                     </p>
                     <p className="text-[12px] text-muted-foreground">
                       {p.items.length} lines · {fmtCr(proposalTotalCr(p))} · from FY {p.sourceFy ?? '—'} · by {ROLE_NAMES[p.createdBy] ?? p.createdBy}
@@ -272,7 +276,7 @@ export default function BudgetApprovalsPage() {
                   </button>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-foreground">
-                      {plantLabel(p.plant, customPlants)} · {PROJECT_TYPE_LABELS[p.projectType]} · FY {p.targetFy}
+                      {FIELD_TYPE_LABELS[proposalFieldType(p)]} · {plantLabel(p.plant, customPlants)} · {PROJECT_TYPE_LABELS[p.projectType]} · FY {p.targetFy}
                     </p>
                     <p className="text-[12px] text-muted-foreground">
                       {p.items.length} lines · {fmtCr(proposalTotalCr(p))} · admin-approved by {p.adminDecidedBy ?? '—'}
@@ -396,7 +400,7 @@ export default function BudgetApprovalsPage() {
                     {BUDGET_PROPOSAL_STATUS_LABELS[p.status]}
                   </span>
                   <span className="text-sm text-foreground flex-1">
-                    {plantLabel(p.plant, customPlants)} · {PROJECT_TYPE_LABELS[p.projectType]} · FY {p.targetFy}
+                    {FIELD_TYPE_LABELS[proposalFieldType(p)]} · {plantLabel(p.plant, customPlants)} · {PROJECT_TYPE_LABELS[p.projectType]} · FY {p.targetFy}
                   </span>
                   <span className="text-[12px] text-muted-foreground">{fmtCr(proposalTotalCr(p))}</span>
                 </div>

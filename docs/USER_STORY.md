@@ -1,6 +1,6 @@
 # Capex Amber — User Stories
 
-**Last updated:** 2026-08-15
+**Last updated:** 2026-09-06
 
 Living backlog for product requirements. The AI agent maintains this file across chats whenever you describe or change a user story.
 
@@ -850,4 +850,21 @@ The single shared `/capex/dashboard` (total requests / total budget / active sou
   - [x] Fixed in passing: `sanitizeRfqQuote` was **dropping `deliveryDays`**, a required form field that `deliveryLeadDays` reads to date the final payment
 - **Files:** `src/lib/quoteDocuments.ts` (+ `.test.ts`), `src/components/supplier/{LineDocumentCell,SupplierQuoteTable,SupplierQuoteCards}.tsx`, `src/components/{QuoteLineDocLink,RfqPanel,VendorGrid,RequestQuotationView}.tsx`, `src/lib/{capexContext.tsx,types.ts}`, `src/app/(public)/supplier/[token]/page.tsx`
 
-- **Notes:** `npm test` is now **431 tests across 20 files**. Verified with `npx tsc --noEmit`, `npm run build`, and a live run of the plant-head approval link, the supplier quotation entry (upload → submit → IndexedDB offload → hydrated download on the sourcing grid) and the Technical-team approval link.
+- **Notes:** `npm test` is **431 tests across 20 files**. Verified with `npx tsc --noEmit`, `npm run build`, and a live run of the plant-head approval link, the supplier quotation entry (upload → submit → IndexedDB offload → hydrated download on the sourcing grid) and the Technical-team approval link.
+
+### US-118 — Green Field: register the site on master, fund it in Budget Planning, approve it like any budget (2026-09-06)
+- **As** the maintenance user, **I want** Budget Planning to open on a Green Field / Brown Field choice and to fund only the plants an admin actually created, **so that** I upload a new site's budget against the right plant; **as** the business, **I want** that budget to pass the same approvals as every other budget.
+- **Priority:** must · **Status:** done
+- **Acceptance criteria**
+  - [x] Budget Planning opens on a **two-card chooser — Green Field first, then Brown Field** — and nothing else renders until one is picked; the header then names the chosen type with a **Change** control back to the cards. The old "Budget type" pill row is gone
+  - [x] A role only sees cards it can author: Green Field is **maintenance + super_admin**, so sourcing sees the Brown Field card alone rather than a locked dead end; a role switch away from Green Field rights returns to the card step
+  - [x] The site can be registered from **either screen** — CAPEX Master (`maintenance` / `sourcing_member` / `super_admin`) or Budget Planning itself — through one shared, validated modal; colliding slug, empty slug and malformed FY are all rejected there, because `addCustomPlant` dedupes silently. The modal has **no budget field**
+  - [x] Creating the plant **from Budget Planning does not redirect** — it selects the new site and opens its blank budget draft in place, carrying the FY it was created for
+  - [x] Budget Planning's Green Field plant list shows **only plants registered as Green Field sites**; the old "any plant that already carries a Green Field master row" fallback is gone, so the seeded Jhajjar/Pune demo budgets are no longer selectable
+  - [x] The FY typed at registration is recorded (`PlantMeta.greenFieldFy`) and the blank budget **opens on that year** — with creation and funding now on two screens, it would otherwise default to today's FY and quietly fund a different year than the site
+  - [x] Green Field **no longer publishes directly**: it submits to **Plant Head → Admin → Global Accounts** exactly like Brown Field, because its author is no longer the approving authority. `publishGreenFieldBudget` / `publishesDirectly` are removed
+  - [x] The final Global-Accounts sign-off publishes through **one** path (`publishProposalToMaster`), which for Green Field also writes the **plant / section / head envelopes** and **replaces** the `plant + FY + projectType` scope — the accounts stage previously did neither, so the chain would have published a budget with no envelopes and doubled the plant on a re-publish
+  - [x] Both approval surfaces **name the envelope** (`Green Field · <plant> · …` on `/capex/budget-approvals`, "FY 2026-27 Green Field Budget" on the public link, a `Budget:` line in the accounts email) — which budget is being signed must not be inferred from the line items
+- **Files:** `src/components/CreateGreenFieldPlantModal.tsx` (new, shared by both screens), `src/app/(internal)/capex/{budget-proposals,budget-approvals,master}/page.tsx`, `src/app/(public)/approve/[token]/page.tsx`, `src/lib/{capexContext.tsx,budgetProposalUtils.ts,types.ts}`
+
+- **Notes:** `npm test` is **431 tests across 20 files**. Verified with `npx tsc --noEmit`, `npm run build`, and a live end-to-end run: sourcing registers "Sri City Plant 1" on master → maintenance sees the two cards, only that plant in the roster, uploads a ₹12.5 Cr line → Submit to Plant Head → approve on the public link → admin → Global Accounts sign-off → one master row plus plant/section/head envelopes written.

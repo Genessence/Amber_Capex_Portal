@@ -85,11 +85,6 @@ export function proposalFieldType(proposal: Pick<BudgetProposal, 'fieldType'>): 
   return proposal.fieldType ?? 'brown_field';
 }
 
-/** Green Field publishes straight from the admin's upload — no plant-head / accounts chain. */
-export function publishesDirectly(proposal: Pick<BudgetProposal, 'fieldType'>): boolean {
-  return proposalFieldType(proposal) === 'green_field';
-}
-
 /**
  * Latest FY of the field type this proposal authors, scoped to the plant + project type. Green
  * Field has its own FY line (a published Brown Field year must never move the Green Field one), so

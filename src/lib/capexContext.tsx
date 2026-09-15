@@ -44,7 +44,6 @@ import {
   buildGreenFieldAllocationsFromProposal,
   buildMasterItemsFromProposal,
   proposalFieldType,
-  validateProposal,
 } from './budgetProposalUtils';
 import { ALLOWED_TRANSITIONS, PRE_PI_REQUEST_STATUSES } from './statusFlow';
 import { generateApprovalToken, generatePoToken, generatePoIssueToken, generateTechSpecToken } from './tokenUtils';
@@ -197,7 +196,6 @@ interface CapexContextValue {
    * chain that routed their own upload back to them for approval would be ceremony, not control.
    * Writes the master rows AND the plant / section / head envelopes in one pass.
    */
-  publishGreenFieldBudget: (proposal: BudgetProposal, actor: string) => void;
   /**
    * Super-admin stage: approve (→ global accounts) / reject. Passing `editedItems` with an
    * `approved` decision edits the lines and sends the proposal FORWARD carrying those edits.
@@ -2747,6 +2745,7 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
       state: creation.state,
       assignedUser: creation.assignedUser,
       greenFieldPlant: true,
+      greenFieldFy: creation.fy,
     };
     addCustomPlant(meta);
     if (creation.budgetCr != null && creation.budgetCr > 0) {
@@ -3003,39 +3002,23 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
    * id lookup here would read the pre-save copy of the proposal under React batching and publish
    * stale (often empty) line items. The caller owns the current draft; this owns the write.
    */
-  function publishGreenFieldBudget(proposal: BudgetProposal, actor: string) {
-    const target = proposal;
-    const id = target.id;
-    if (proposalFieldType(target) !== 'green_field') return;
-    const stored = budgetProposals.find((p) => p.id === id);
-    if (stored?.status === 'approved') return; // already published — never publish twice
-    if (validateProposal(target).length) return;
-    const now = new Date().toISOString();
-
-    setBudgetProposals((prev) =>
-      prev.map((p) =>
-        p.id === id
-          ? {
-              ...p,
-              targetFy: target.targetFy,
-              items: target.items,
-              plantBudgetCr: target.plantBudgetCr,
-              status: 'approved',
-              submittedAt: p.submittedAt ?? now,
-              adminDecidedAt: now,
-              adminDecidedBy: actor,
-              decidedAt: now,
-              decidedBy: actor,
-              publishedAt: now,
-            }
-          : p,
-      ),
-    );
+  /**
+   * Write an APPROVED proposal into the live master. This is the ONLY path from a proposal to a
+   * live budget — every field type reaches it through the same chain (Plant Head → Admin → Global
+   * Accounts), so no author can put a figure in front of a buyer without an approver.
+   *
+   * Green Field does two things Brown Field does not:
+   *  - it REPLACES its `plant + FY + projectType` scope rather than appending, so a corrected
+   *    re-publish cannot leave the old lines beside the new ones and double the plant's budget;
+   *  - it writes the plant / section / head envelopes, without which every Green Field screen
+   *    renders the plant as having no allocation at all.
+   */
+  function publishProposalToMaster(target: BudgetProposal) {
+    const isGreenField = proposalFieldType(target) === 'green_field';
+    const newRows = buildMasterItemsFromProposal(target);
 
     setCapexMaster((prev) => {
-      // Republishing the same plant + FY + project type REPLACES that scope rather than appending,
-      // so a corrected re-upload does not leave the old lines sitting alongside the new ones and
-      // double the plant's budget.
+      if (!isGreenField) return [...prev, ...newRows];
       const rest = prev.filter(
         (m) =>
           !(
@@ -3045,9 +3028,10 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
             resolveProjectType(m) === target.projectType
           ),
       );
-      return [...rest, ...buildMasterItemsFromProposal(target)];
+      return [...rest, ...newRows];
     });
 
+    if (!isGreenField) return;
     const allocations = buildGreenFieldAllocationsFromProposal(target);
     setGreenFieldBudgetAllocations((prev) => {
       const sameScope = (b: { plant: string; fy: string; projectType: ProjectType }) =>
@@ -3165,8 +3149,7 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
       ),
     );
     if (decision === 'approved') {
-      const newRows = buildMasterItemsFromProposal(target);
-      setCapexMaster((prev) => [...prev, ...newRows]);
+      publishProposalToMaster(target);
     }
   }
 
@@ -3422,7 +3405,6 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
         budgetProposals,
         createBudgetProposal,
         updateBudgetProposal,
-        publishGreenFieldBudget,
         submitBudgetProposal,
         decideBudgetProposal,
         decideBudgetPlantHead,
