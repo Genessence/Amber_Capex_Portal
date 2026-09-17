@@ -503,7 +503,7 @@ export const PARTY_LABELS: Record<Party, string> = {
   vendor: 'Vendor',
   technical: 'Technical Team',
   plant_accounts: 'Plant Accounts',
-  global_accounts: 'Global Accounts (Satish)',
+  global_accounts: 'Global Accounts (Sandeep)',
   none: '—',
 };
 

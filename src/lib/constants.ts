@@ -146,10 +146,10 @@ export const PLANT_ACCOUNTS_EMAIL = "plant.accounts@amber-enterprises.in"
  *     public page the moment they submit the FA codes.
  * Simulated send (preview + toast); the address is editable in the preview modal.
  */
-export const GLOBAL_ACCOUNTS_EMAIL = "satish.accounts@amber-enterprises.in"
+export const GLOBAL_ACCOUNTS_EMAIL = "sandeep.accounts@amber-enterprises.in"
 
 /** Display name for the Global Accounts contact, used in email copy and stamped on the PO. */
-export const GLOBAL_ACCOUNTS_NAME = "Satish"
+export const GLOBAL_ACCOUNTS_NAME = "Sandeep"
 
 /**
  * Recipient for the technical specification approval email. Amber's Technical team signs off a
