@@ -27,15 +27,7 @@ import { RemarkTrail } from '@/components/RemarkTrail'
 import { SUPPLIER_CARD } from '@/lib/uiTokens'
 import { FIELD_TYPE_LABELS } from '@/lib/types'
 import { PLANTS, STATUS_LABELS, GLOBAL_ACCOUNTS_EMAIL, GLOBAL_ACCOUNTS_NAME, PLANT_ACCOUNTS_ACTOR } from '@/lib/constants'
-import {
-  totalPaid,
-  totalOutstanding,
-  deliveryLeadDays,
-  expectedFinalPaymentDate,
-  finalPaymentBlockedByTrial,
-  resolveOrderValue,
-} from '@/lib/paymentUtils'
-import type { PaymentMilestone } from '@/lib/types'
+import { resolveOrderValue } from '@/lib/paymentUtils'
 
 /** The actor stamped on every mutation made from this public link (no portal login). */
 
@@ -75,7 +67,7 @@ function Terminal({ icon, title, note }: { icon: React.ReactNode; title: string;
 function Steps({ status }: { status: string }) {
   const order = ['pi_submitted', 'accounts_processing', 'payment_in_progress', 'completed']
   const idx = order.indexOf(status)
-  const labels = ['FA codes', `PO (${GLOBAL_ACCOUNTS_NAME})`, 'Payments', 'Done']
+  const labels = ['FA codes', `PO (${GLOBAL_ACCOUNTS_NAME})`, 'Vendor PI re-upload', 'Done']
   return (
     <ol className="flex items-center gap-1.5 flex-wrap text-[11px] font-semibold">
       {labels.map((l, i) => (
@@ -99,7 +91,7 @@ function Steps({ status }: { status: string }) {
 export default function PlantAccountsPage() {
   const params = useParams()
   const token = String(params.token ?? '')
-  const { requests, invites, vendors, loaded, assignFaCode, submitFaCodes, markPaymentMade } = useCapex()
+  const { requests, invites, vendors, loaded, assignFaCode, submitFaCodes } = useCapex()
 
   const target = useMemo(
     () => resolvePoTarget(token, requests, invites),
@@ -160,15 +152,9 @@ export default function PlantAccountsPage() {
   const status = (invite ? invite.awardStatus : request?.status) ?? ''
   const existingPo = invite ? invite.purchaseOrder : request?.purchaseOrder
   const poIssued = !!existingPo?.issuedAt
-  const milestones: PaymentMilestone[] = (invite ? invite.paymentMilestones : request?.paymentMilestones) ?? []
   const trialRequired = !!(invite ? invite.trialRequired : request?.trialRequired)
   const trialStatus = invite ? invite.trialStatus : request?.trialStatus
-  const advancePaidAt = invite ? invite.advancePaidAt : request?.advancePaidAt
-  const leadDays = deliveryLeadDays(
-    invite ?? invites.find(i => i.requestId === request?.id && i.vendorId === vendor?.id),
-  )
-  const finalBlocked = finalPaymentBlockedByTrial({ trialRequired, trialStatus })
-  const finalDate = expectedFinalPaymentDate(advancePaidAt, leadDays)
+  const piReuploadedAt = invite ? invite.piReuploadedAt : request?.piReuploadedAt
 
   const pi = invite ? invite.proformaInvoice : invites.find(i => i.requestId === request?.id && i.vendorId === vendor?.id)?.proformaInvoice
   const plantLabel = PLANTS.find(p => p.value === request?.plant)?.label ?? request?.plant ?? '—'
@@ -193,9 +179,6 @@ export default function PlantAccountsPage() {
   // Plant Accounts' remark on the FA-code handoff — it rides with the email to Global Accounts AND
   // is recorded on the request/award, so the reason for an unusual coding survives the email.
   const [faRemark, setFaRemark] = useState('')
-  // A separate remark per payment tick (UTR, part-payment reason, a hold that was lifted). Kept
-  // apart from `faRemark` because the two are written hours or weeks apart, at different gates.
-  const [payRemark, setPayRemark] = useState('')
 
   const reqLabel = request?.requestNo ?? request?.id.slice(0, 8) ?? ''
   const poEmailSubject = `PO Required — ${reqLabel} · ${plantLabel}`
@@ -219,10 +202,10 @@ export default function PlantAccountsPage() {
     'Open this link to issue the PO:',
     poIssueLink || '(link will be ready shortly)',
     '',
-    'After you issue the PO: the vendor re-uploads their Proforma Invoice against it, then Plant Accounts record the milestone payments' +
+    'After you issue the PO, the vendor re-uploads their Proforma Invoice against it' +
       (trialRequired
-        ? ', and the vendor uploads the item trial after the advance is paid (the final payment stays blocked until sourcing approves it).'
-        : '.'),
+        ? ' and uploads the item trial for sourcing approval — then the order is complete.'
+        : ' — that completes the order.'),
     '',
     'Regards,',
     'Plant Accounts — Amber Enterprises CAPEX Portal',
@@ -315,7 +298,7 @@ export default function PlantAccountsPage() {
           <div className="flex items-center gap-2 mb-1">
             <FileText className="w-4 h-4 text-blue-700" />
             <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-              Plant Accounts — FA Codes, PO &amp; Payments
+              Plant Accounts — FA Codes &amp; PO
             </span>
           </div>
           <h1 className="text-xl font-bold text-foreground">{request.subject || 'Capex Request'}</h1>
@@ -443,8 +426,7 @@ export default function PlantAccountsPage() {
               </p>
               <p className="text-xs text-muted-foreground">
                 Send him the secure link below. He uploads the PO and issues it to the vendor; the
-                vendor then re-uploads the Proforma Invoice against it and the payment milestones
-                appear here for you.
+                vendor then re-uploads the Proforma Invoice against it, which completes the order.
               </p>
               {poIssueLink && (
                 <input
@@ -517,88 +499,22 @@ export default function PlantAccountsPage() {
           </div>
         )}
 
-        {/* ── Step 3 · Payment milestones ── */}
-        {milestones.length > 0 && (status === 'payment_in_progress' || status === 'completed') && (
-          <div className="border-t border-border pt-4">
-            <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground mb-2">
-              Payment Milestones
-            </p>
-            {status === 'payment_in_progress' && (
-              <div className="mb-3">
-                <RemarkField
-                  id="payment-remark"
-                  label="Remarks for the next payment you tick"
-                  value={payRemark}
-                  onChange={setPayRemark}
-                  rows={2}
-                  placeholder="e.g. UTR AXIS0099123 — advance released against PI dated 12 Aug."
-                  hint="Optional. Recorded against the milestone you tick next, then cleared."
-                />
-              </div>
-            )}
-            <div className="space-y-1.5">
-              {milestones.map(m => {
-                const paid = m.status === 'paid'
-                const blocked = !!m.isFinal && finalBlocked
-                const locked = paid || blocked || status !== 'payment_in_progress'
-                return (
-                  <label
-                    key={m.id}
-                    className={`flex items-center gap-3 rounded-lg border px-3 py-2.5 ${paid ? 'border-slate-200 bg-slate-50' : 'border-border'} ${locked ? '' : 'cursor-pointer'}`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={paid}
-                      disabled={locked}
-                      onChange={() => {
-                        if (locked || !request) return
-                        markPaymentMade(request.id, m.id, PLANT_ACCOUNTS_ACTOR, invite?.id, payRemark)
-                        // One remark belongs to one payment — clear it so the next milestone does
-                        // not silently inherit the previous instalment's note.
-                        setPayRemark('')
-                      }}
-                      className="w-4 h-4 accent-slate-600 shrink-0"
-                    />
-                    <span className="flex-1 text-sm text-foreground min-w-0">
-                      {m.label}{' '}
-                      <span className="text-muted-foreground">
-                        ({m.percent}%{m.trigger ? ` · ${m.trigger}` : ''})
-                      </span>
-                      {m.isFinal && <span className="ml-1.5 text-[10px] font-bold text-slate-700">FINAL</span>}
-                      {m.isFinal && finalDate && (
-                        <span className="ml-1.5 text-[10px] font-semibold text-blue-700">
-                          · Expected{' '}
-                          {finalDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
-                        </span>
-                      )}
-                      {blocked && (
-                        <span className="block text-[11px] font-semibold text-amber-700 mt-0.5">
-                          Blocked until the item trial is approved by sourcing.
-                        </span>
-                      )}
-                    </span>
-                    <span className="text-sm font-mono font-semibold shrink-0">{fmt(m.amount)}</span>
-                    {paid && <CheckCircle2 className="w-4 h-4 text-slate-600 shrink-0" />}
-                  </label>
-                )
-              })}
-            </div>
-            <div className="flex justify-between text-xs text-muted-foreground mt-2">
-              <span>
-                Paid: <span className="font-semibold text-slate-700">{fmt(totalPaid(milestones))}</span>
-              </span>
-              <span>
-                Outstanding:{' '}
-                <span className="font-semibold text-foreground">{fmt(totalOutstanding(milestones))}</span>
-              </span>
-            </div>
+        {/* ── Step 3 · Vendor re-uploads the PI against the PO (the last step — no payments here) ── */}
+        {status === 'payment_in_progress' && (
+          <div className="flex items-start gap-2 text-sm bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5 text-amber-900">
+            <Clock className="w-4 h-4 shrink-0 mt-0.5" />
+            <span>
+              {piReuploadedAt
+                ? 'The vendor has re-uploaded the Proforma Invoice against the PO.'
+                : 'PO issued — awaiting the vendor to re-upload the Proforma Invoice against it.'}
+              {trialRequired && trialStatus !== 'approved' && ' The item trial must also be approved by sourcing before the order completes.'}
+            </span>
           </div>
         )}
 
         {status === 'completed' && (
           <div className="flex items-center gap-2 text-sm bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2.5 text-emerald-800">
-            <CheckCircle2 className="w-4 h-4 shrink-0" /> All payments cleared
-            {milestones.length > 0 ? ` · ${fmt(totalPaid(milestones))}` : ''}
+            <CheckCircle2 className="w-4 h-4 shrink-0" /> Order complete — the vendor re-uploaded the Proforma Invoice against the PO.
           </div>
         )}
 

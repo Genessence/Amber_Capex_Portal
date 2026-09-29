@@ -15,12 +15,13 @@ import { RequestQuotationView } from "@/components/RequestQuotationView"
 import { RemarkTrail } from "@/components/RemarkTrail"
 import { TrialCard } from "@/components/TrialCard"
 import { EmailPreviewModal } from "@/components/EmailPreviewModal"
+import { AuctionDocumentForm } from "@/components/AuctionDocumentForm"
 import { isFulfillmentStatus, resolveFinalVendor, isAwardBased, awardedInvites, awardSummary } from "@/lib/paymentUtils"
 import { lowestRfqTotal } from "@/lib/rfqUtils"
 import { effectiveDocApprovalStatus } from "@/lib/docPackageUtils"
 import { useCapex } from "@/lib/capexContext"
 import { PRE_PI_REQUEST_STATUSES } from "@/lib/statusFlow"
-import type { AuctionConfig, CapexMasterItem, CapexRequest, CapexStatus, Vendor, Quote, VendorInvite } from "@/lib/types"
+import type { AuctionApprovalDocument, AuctionConfig, CapexMasterItem, CapexRequest, CapexStatus, Vendor, Quote, VendorInvite } from "@/lib/types"
 import { ROLE_NAMES, SOURCING_ENGINEERS, PLANTS } from "@/lib/constants"
 import { StatusBadge } from "@/components/StatusBadge"
 import { fmtCurrency } from "@/lib/auctionTheme"
@@ -47,8 +48,6 @@ import {
   AUCTION_APPROVAL_STATUS_LABELS,
   buildAuctionDocumentPlaceholders,
   canStartAuction,
-  createAuctionApprovalDocument,
-  DEFAULT_AUCTION_RULES,
   formatDateDDMMYYYY,
   getEffectiveAuctionApprovalStatus,
   isVendorEligibleForAuction,
@@ -351,7 +350,7 @@ const AWARD_STATUS_LABEL: Record<string, string> = {
   pi_requested:         "PI requested",
   pi_submitted:         "PI submitted",
   accounts_processing:  "With Accounts (FA codes)",
-  payment_in_progress:  "PO issued — payments",
+  payment_in_progress:  "PO issued — awaiting PI",
   completed:            "Completed",
 }
 
@@ -714,56 +713,6 @@ function SourcingDecisionBanner({ request, vendors, invites }: { request: CapexR
 
 const SOURCING_ROLES = ["sourcing_member", "sourcing_member_2", "sourcing_member_3", "sourcing_member_4", "super_admin"]
 
-// Delivery location form component
-function DeliveryLocationRow({
-  location,
-  onChange,
-  onRemove,
-  showRemove
-}: {
-  location: { name: string; state: string; subLocationCount?: number }
-  onChange: (updates: Partial<{ name: string; state: string; subLocationCount: number }>) => void
-  onRemove: () => void
-  showRemove: boolean
-}) {
-  return (
-    <div className="flex items-start gap-2 bg-slate-50 p-3 rounded-lg">
-      <div className="flex-1 grid grid-cols-3 gap-2">
-        <input
-          type="text"
-          value={location.name}
-          onChange={e => onChange({ name: e.target.value })}
-          placeholder="Location name (e.g., Jhajjar)"
-          className="text-sm border border-slate-200 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
-        />
-        <input
-          type="text"
-          value={location.state}
-          onChange={e => onChange({ state: e.target.value })}
-          placeholder="State (e.g., Haryana)"
-          className="text-sm border border-slate-200 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
-        />
-        <input
-          type="number"
-          value={location.subLocationCount || ''}
-          onChange={e => onChange({ subLocationCount: e.target.value ? parseInt(e.target.value) : undefined })}
-          placeholder="Sub-locations (optional)"
-          className="text-sm border border-slate-200 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
-        />
-      </div>
-      {showRemove && (
-        <button
-          type="button"
-          onClick={onRemove}
-          className="p-2 text-red-500 hover:bg-red-50 rounded-md"
-        >
-          <X className="w-4 h-4" />
-        </button>
-      )}
-    </div>
-  )
-}
-
 // Auction Document Print View
 function AuctionDocumentPrintView({
   request,
@@ -917,49 +866,21 @@ function ReverseAuctionPanel({
   // Auction config state — threshold pre-fills from the lowest RFQ quote collected (if any),
   // so an auction escalated from RFQ starts at the best price already on the table.
   const rfqFloor = lowestRfqTotal(reqInvites, request.lineItems)
-  const [durationDays, setDurationDays] = useState(request.auctionConfig?.durationDays ?? 7)
+  // Duration + threshold were chosen when the auction document was configured (possibly in the RFQ
+  // escalation popup), and are stamped on the document — start from those, still editable below.
+  const [durationDays, setDurationDays] = useState(
+    request.auctionConfig?.durationDays ?? request.auctionApprovalDocument?.durationDays ?? 7,
+  )
   const [threshold, setThreshold] = useState(
-    String(request.auctionConfig?.threshold ?? rfqFloor ?? request.budget ?? "")
+    String(request.auctionConfig?.threshold ?? request.auctionApprovalDocument?.threshold ?? rfqFloor ?? request.budget ?? "")
   )
 
-  // Document setup state
+  // Document setup state (the form itself is the shared AuctionDocumentForm)
   const [showDocumentForm, setShowDocumentForm] = useState(false)
   const [showDocumentPreview, setShowDocumentPreview] = useState(false)
   const [showVendorSelect, setShowVendorSelect] = useState(false)
   const [newVendorId, setNewVendorId] = useState("")
   const [tick, setTick] = useState(0)
-
-  // Form state for document generation
-  const [auctionDate, setAuctionDate] = useState(() => {
-    const d = new Date()
-    d.setDate(d.getDate() + 3)
-    return d.toISOString().split('T')[0]
-  })
-  const [auctionOpeningTime, setAuctionOpeningTime] = useState('11:00')
-  const [auctionClosingTime, setAuctionClosingTime] = useState('12:00')
-  const [bidderAcceptanceDeadlineDate, setBidderAcceptanceDeadlineDate] = useState(() => {
-    const d = new Date()
-    d.setDate(d.getDate() + 2)
-    return d.toISOString().split('T')[0]
-  })
-  const [bidderAcceptanceDeadlineTime, setBidderAcceptanceDeadlineTime] = useState('17:00')
-  const [vendorRevertDeadlineAt, setVendorRevertDeadlineAt] = useState(() => {
-    const d = new Date()
-    d.setDate(d.getDate() + 2)
-    return d.toISOString().slice(0, 16)
-  })
-
-  // Green field delivery locations
-  const [deliveryLocations, setDeliveryLocations] = useState<{ name: string; state: string; subLocationCount?: number }[]>([
-    { name: '', state: '', subLocationCount: undefined }
-  ])
-
-  // Auction rules with defaults
-  const [bidValidityDays, setBidValidityDays] = useState(DEFAULT_AUCTION_RULES.bidValidityDays)
-  const [maxDecrements, setMaxDecrements] = useState(DEFAULT_AUCTION_RULES.maxDecrements)
-  const [extensionDurationMins, setExtensionDurationMins] = useState(DEFAULT_AUCTION_RULES.extensionDurationMinutes)
-  const [maxExtensionsPerBidder, setMaxExtensionsPerBidder] = useState(DEFAULT_AUCTION_RULES.maxExtensionsPerBidder)
-  const [currency, setCurrency] = useState(DEFAULT_AUCTION_RULES.currency)
 
   const canManage = SOURCING_ROLES.includes(currentRole)
   const showPanel = ["sourcing", "negotiation"].includes(request.status)
@@ -1000,36 +921,11 @@ function ReverseAuctionPanel({
     }
   }
 
-  function generateAndSendDocument() {
-    const currentUser = {
-      name: ROLE_NAMES[currentRole] || currentRole,
-      designation: SOURCING_ROLES.find(r => r === currentRole)?.replace(/_/g, ' ') || 'Sourcing Member',
-      email: 'sourcing@ambergroupindia.com',
-      mobile: '+91 99999 99999',
-    }
-
-    const doc = createAuctionApprovalDocument(request, currentUser, {
-      auctionDate,
-      auctionOpeningTime: `${auctionOpeningTime} Hrs`,
-      auctionClosingTime: `${auctionClosingTime} Hrs`,
-      bidderAcceptanceDeadlineDate,
-      bidderAcceptanceDeadlineTime: `${bidderAcceptanceDeadlineTime} Hrs`,
-      vendorRevertDeadlineAt,
-      deliveryLocations: request.fieldType === 'green_field' ? deliveryLocations.filter(l => l.name && l.state) : undefined,
-      rules: {
-        bidValidityDays,
-        maxDecrements,
-        extensionDurationMinutes: extensionDurationMins,
-        maxExtensionsPerBidder,
-        currency,
-      },
-      supplyFrame: 'As per Amber Terms and Conditions',
-      paymentTerms: '60 Days from the date of Invoice (Open Account)',
-    })
-
+  function sendDocument(doc: AuctionApprovalDocument) {
     saveAuctionApprovalDocument(request.id, doc)
     sendAuctionApprovalToVendors(request.id, selectedVendorIds)
-
+    if (doc.durationDays) setDurationDays(doc.durationDays)
+    if (doc.threshold != null) setThreshold(String(doc.threshold))
     toast.success(`Business Rules document generated and sent to ${selectedVendorIds.length} vendor${selectedVendorIds.length !== 1 ? 's' : ''}`)
     setShowDocumentForm(false)
   }
@@ -1104,18 +1000,6 @@ function ReverseAuctionPanel({
       excludeVendorFromAuction(inviteId, 'Manually excluded by sourcing team')
       toast.success(`${vendorName} excluded from auction`)
     }
-  }
-
-  function addDeliveryLocation() {
-    setDeliveryLocations(prev => [...prev, { name: '', state: '', subLocationCount: undefined }])
-  }
-
-  function updateDeliveryLocation(index: number, updates: Partial<{ name: string; state: string; subLocationCount: number }>) {
-    setDeliveryLocations(prev => prev.map((loc, i) => i === index ? { ...loc, ...updates } : loc))
-  }
-
-  function removeDeliveryLocation(index: number) {
-    setDeliveryLocations(prev => prev.filter((_, i) => i !== index))
   }
 
   // Document preview section
@@ -1227,194 +1111,16 @@ function ReverseAuctionPanel({
                 Configure Auction Document
               </button>
             ) : (
-              <div className="space-y-4 border-t border-slate-100 pt-4">
-                <h3 className="text-sm font-semibold text-slate-800">Auction Dates & Times</h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Auction Date</label>
-                    <input
-                      type="date"
-                      value={auctionDate}
-                      onChange={e => setAuctionDate(e.target.value)}
-                      className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Open Time</label>
-                      <input
-                        type="time"
-                        value={auctionOpeningTime}
-                        onChange={e => setAuctionOpeningTime(e.target.value)}
-                        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Close Time</label>
-                      <input
-                        type="time"
-                        value={auctionClosingTime}
-                        onChange={e => setAuctionClosingTime(e.target.value)}
-                        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Bidder Acceptance Deadline Date</label>
-                    <input
-                      type="date"
-                      value={bidderAcceptanceDeadlineDate}
-                      onChange={e => setBidderAcceptanceDeadlineDate(e.target.value)}
-                      className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Bidder Acceptance Deadline Time</label>
-                    <input
-                      type="time"
-                      value={bidderAcceptanceDeadlineTime}
-                      onChange={e => setBidderAcceptanceDeadlineTime(e.target.value)}
-                      className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
-                    />
-                  </div>
-                  <div className="sm:col-span-2">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Vendor Revert Expected By</label>
-                    <input
-                      type="datetime-local"
-                      value={vendorRevertDeadlineAt}
-                      onChange={e => setVendorRevertDeadlineAt(e.target.value)}
-                      className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
-                    />
-                  </div>
-                </div>
-
-                {/* Green Field Delivery Locations */}
-                {request.fieldType === 'green_field' && (
-                  <div className="border-t border-slate-100 pt-4">
-                    <h3 className="text-sm font-semibold text-slate-800 mb-3">Delivery Locations</h3>
-                    <div className="space-y-2">
-                      {deliveryLocations.map((loc, idx) => (
-                        <DeliveryLocationRow
-                          key={idx}
-                          location={loc}
-                          onChange={updates => updateDeliveryLocation(idx, updates)}
-                          onRemove={() => removeDeliveryLocation(idx)}
-                          showRemove={deliveryLocations.length > 1}
-                        />
-                      ))}
-                    </div>
-                    <button
-                      onClick={addDeliveryLocation}
-                      className="mt-2 flex items-center gap-1.5 text-sm font-semibold text-slate-700 hover:text-slate-800"
-                    >
-                      <Plus className="w-4 h-4" />
-                      Add Location
-                    </button>
-                  </div>
-                )}
-
-                {/* Auction Rules */}
-                <div className="border-t border-slate-100 pt-4">
-                  <h3 className="text-sm font-semibold text-slate-800 mb-3">Auction Rules (Optional)</h3>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Bid Validity (days)</label>
-                      <input
-                        type="number"
-                        value={bidValidityDays}
-                        onChange={e => setBidValidityDays(Number(e.target.value))}
-                        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Max Decrements</label>
-                      <input
-                        type="number"
-                        value={maxDecrements}
-                        onChange={e => setMaxDecrements(Number(e.target.value))}
-                        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Extension (mins)</label>
-                      <input
-                        type="number"
-                        value={extensionDurationMins}
-                        onChange={e => setExtensionDurationMins(Number(e.target.value))}
-                        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Max Extensions</label>
-                      <input
-                        type="number"
-                        value={maxExtensionsPerBidder}
-                        onChange={e => setMaxExtensionsPerBidder(Number(e.target.value))}
-                        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Currency</label>
-                      <input
-                        type="text"
-                        value={currency}
-                        onChange={e => setCurrency(e.target.value)}
-                        placeholder="INR"
-                        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Threshold and Duration */}
-                <div className="border-t border-slate-100 pt-4">
-                  <h3 className="text-sm font-semibold text-slate-800 mb-3">Auction Configuration</h3>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Duration (days)</label>
-                      <select
-                        value={durationDays}
-                        onChange={e => setDurationDays(Number(e.target.value))}
-                        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
-                      >
-                        {Array.from({ length: 30 }, (_, i) => i + 1).map(d => (
-                          <option key={d} value={d}>{d} day{d > 1 ? "s" : ""}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Threshold price (₹)</label>
-                      <input
-                        type="number"
-                        value={threshold}
-                        onChange={e => setThreshold(e.target.value)}
-                        placeholder="Buyer estimate"
-                        className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400"
-                      />
-                      {rfqFloor != null && (
-                        <p className="text-[10px] text-slate-400 mt-1">Pre-filled from lowest RFQ quote ({formatPrice(rfqFloor)}) — editable.</p>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex gap-3 pt-4 border-t border-slate-100">
-                  <button
-                    type="button"
-                    onClick={generateAndSendDocument}
-                    disabled={selectedVendorIds.length === 0 || !auctionDate || !auctionOpeningTime || !auctionClosingTime}
-                    className="flex-1 px-4 py-2 rounded-lg bg-slate-600 hover:bg-slate-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-sm font-semibold transition-colors"
-                  >
-                    Generate & Send to Vendors
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowDocumentForm(false)}
-                    className="px-4 py-2 rounded-lg border border-slate-200 text-slate-700 text-sm font-semibold hover:bg-slate-50"
-                  >
-                    Cancel
-                  </button>
-                </div>
+              <div className="border-t border-slate-100 pt-4">
+                <AuctionDocumentForm
+                  request={request}
+                  currentRole={currentRole}
+                  rfqFloor={rfqFloor}
+                  submitLabel="Generate & Send to Vendors"
+                  submitDisabled={selectedVendorIds.length === 0}
+                  onSubmit={sendDocument}
+                  onCancel={() => setShowDocumentForm(false)}
+                />
               </div>
             )}
           </div>
@@ -2056,13 +1762,13 @@ export default function CapexDetailPage() {
                 <input
                   type="checkbox"
                   checked={!!request.trialRequired}
-                  onChange={e => { setTrialRequired(request.id, e.target.checked); toast.success(e.target.checked ? "Item trial required before final payment" : "Item trial turned off") }}
+                  onChange={e => { setTrialRequired(request.id, e.target.checked); toast.success(e.target.checked ? "Item trial required before the order completes" : "Item trial turned off") }}
                   className="mt-0.5 h-4 w-4 accent-[#2563EB]"
                 />
                 <span className="text-sm text-slate-700 leading-snug">
-                  <span className="font-semibold text-slate-900">Require an item trial before final payment</span> — after the advance
-                  is paid, the awarded vendor uploads a trial video / photo / report for your approval; the final payment stays
-                  blocked until you approve it. Set this <span className="font-semibold">before</span> approving the vendor.
+                  <span className="font-semibold text-slate-900">Require an item trial before the order completes</span> — once the PO
+                  is issued, the awarded vendor uploads a trial video / photo / report for your approval; the order does not
+                  complete until you approve it. Set this <span className="font-semibold">before</span> approving the vendor.
                 </span>
               </label>
             </div>
@@ -2248,7 +1954,7 @@ export default function CapexDetailPage() {
             </>
           )}
 
-          {/* Shared fulfillment: TAT clock + accounts FA codes, PO & payment milestones.
+          {/* Shared fulfillment: TAT clock + accounts FA codes, PO & the vendor's PI re-upload.
               Award-based requests keep a coarse request.status (pi_requested), so also show this
               whenever any award has reached the Accounts stage. */}
           {(isFulfillmentStatus(request.status) ||

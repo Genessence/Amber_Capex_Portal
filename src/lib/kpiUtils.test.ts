@@ -445,7 +445,11 @@ describe('ballHolders', () => {
     expect(ballHolders(req({ status: 'pi_requested' }), [], NOW)[0].party).toBe('vendor');
     expect(ballHolders(req({ status: 'pi_submitted' }), [], NOW)[0].party).toBe('plant_accounts');
     expect(ballHolders(req({ status: 'accounts_processing' }), [], NOW)[0].party).toBe('global_accounts');
-    expect(ballHolders(req({ status: 'payment_in_progress' }), [], NOW)[0].party).toBe('plant_accounts');
+    // PO issued: the vendor re-uploads the PI — Plant Accounts no longer tick payments (2026-09).
+    expect(ballHolders(req({ status: 'payment_in_progress' }), [], NOW)[0].party).toBe('vendor');
+    expect(
+      ballHolders(req({ status: 'payment_in_progress', trialRequired: true, trialStatus: 'pending_review' }), [], NOW)[0].party,
+    ).toBe('sourcing');
   });
 
   it('diverts payment stage to the vendor or sourcing while a trial is open', () => {

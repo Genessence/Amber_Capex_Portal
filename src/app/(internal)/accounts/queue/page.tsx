@@ -127,8 +127,8 @@ export default function AccountsQueuePage() {
           <Wallet className="w-5 h-5 text-blue-700" /> Accounts Queue
         </h1>
         <p className="text-sm text-muted-foreground mt-0.5">
-          Track FA codes, purchase orders and milestone payments (one row per awarded vendor on split
-          reverse auctions). Plant Accounts action these on their emailed link — open a request to
+          Track FA codes, purchase orders and the vendor's PI re-upload (one row per awarded vendor on split
+          reverse auctions). Plant Accounts and Global Accounts action these on their emailed links — open a request to
           copy the link or preview the email.
         </p>
       </div>

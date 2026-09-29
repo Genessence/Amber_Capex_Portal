@@ -21,7 +21,6 @@ import { buildPoLink, buildPoIssueLink } from '@/lib/tokenUtils'
 import type {
   CapexLineItem,
   CapexRequest,
-  PaymentMilestone,
   ProformaInvoice,
   PurchaseOrder,
   TrialStatus,
@@ -31,14 +30,9 @@ import type {
 import {
   resolveFinalVendor,
   resolveOrderValue,
-  totalOutstanding,
-  totalPaid,
   isAwardBased,
   awardedInvites,
   isAwardInAccounts,
-  deliveryLeadDays,
-  expectedFinalPaymentDate,
-  finalPaymentBlockedByTrial,
 } from '@/lib/paymentUtils'
 
 function fmt(n: number) {
@@ -46,8 +40,9 @@ function fmt(n: number) {
 }
 
 /**
- * Internal Accounts view. The Plant Accounts team has **no portal login** — FA codes, the PO issue
- * and the payment milestones all happen on the emailed public `/po/[token]` page. This panel is
+ * Internal Accounts view. The Plant Accounts team has **no portal login** — FA codes happen on the
+ * emailed public `/po/[token]` page and the PO issue on Global Accounts' `/po-issue/[token]` page;
+ * the track ends when the vendor re-uploads the PI against the PO (no payment milestones, 2026-09). This panel is
  * therefore a READ-ONLY tracker plus the handoff affordance (copy link + email preview), mirroring
  * the plant-head approval pattern.
  */
@@ -88,9 +83,7 @@ export function AccountsPanel({
             faCodes={inv.faCodes ?? {}}
             status={inv.awardStatus ?? 'pi_submitted'}
             po={inv.purchaseOrder}
-            milestones={inv.paymentMilestones ?? []}
-            advancePaidAt={inv.advancePaidAt}
-            leadDays={deliveryLeadDays(inv)}
+            piReuploadedAt={inv.piReuploadedAt}
             trialRequired={inv.trialRequired}
             trialStatus={inv.trialStatus}
             poToken={inv.poToken}
@@ -112,9 +105,7 @@ export function AccountsPanel({
       faCodes={request.faCodes ?? {}}
       status={request.status}
       po={request.purchaseOrder}
-      milestones={request.paymentMilestones ?? []}
-      advancePaidAt={request.advancePaidAt}
-      leadDays={deliveryLeadDays(finalInvite)}
+      piReuploadedAt={request.piReuploadedAt}
       trialRequired={request.trialRequired}
       trialStatus={request.trialStatus}
       poToken={request.poToken}
@@ -125,14 +116,15 @@ export function AccountsPanel({
 
 /**
  * Which off-portal team owns each fulfillment stage, and the copy shown alongside their link.
- * `pi_submitted` + `payment_in_progress` are Plant Accounts' (`/po/[token]`); `accounts_processing`
- * is Global Accounts' PO issue (`/po-issue/[token]`, emailed by Plant Accounts on FA submit).
+ * `pi_submitted` is Plant Accounts' (`/po/[token]`); `accounts_processing` is Global Accounts' PO
+ * issue (`/po-issue/[token]`, emailed by Plant Accounts on FA submit); `payment_in_progress` (the
+ * key is kept for data compatibility) now means "PO issued — the vendor re-uploads the PI".
  */
 const STAGE_HINT: Record<string, string> = {
   pi_submitted: 'Awaiting Plant Accounts to assign FA codes on the emailed link.',
   accounts_processing: `FA codes submitted — awaiting ${GLOBAL_ACCOUNTS_NAME} (Global Accounts) to issue the PO on the emailed link.`,
-  payment_in_progress: 'PO issued — Plant Accounts are recording milestone payments on the emailed link.',
-  completed: 'All payments cleared.',
+  payment_in_progress: 'PO issued — awaiting the vendor to re-upload the Proforma Invoice against it.',
+  completed: 'Order complete — the vendor re-uploaded the PI against the PO.',
 }
 
 /**
@@ -149,9 +141,7 @@ function AccountsTrack({
   faCodes,
   status,
   po,
-  milestones,
-  advancePaidAt,
-  leadDays,
+  piReuploadedAt,
   trialRequired,
   trialStatus,
   poToken,
@@ -166,9 +156,8 @@ function AccountsTrack({
   faCodes: Record<string, string>
   status: string
   po?: PurchaseOrder
-  milestones: PaymentMilestone[]
-  advancePaidAt?: string
-  leadDays?: number
+  /** When the vendor re-uploaded the PI against the issued PO — the last step of the track. */
+  piReuploadedAt?: string
   trialRequired?: boolean
   trialStatus?: TrialStatus
   /** Public Plant-Accounts token (emailed link at /po/[token]). */
@@ -179,16 +168,15 @@ function AccountsTrack({
   const [emailOpen, setEmailOpen] = useState(false)
   const [linkCopied, setLinkCopied] = useState(false)
 
-  const finalBlocked = finalPaymentBlockedByTrial({ trialRequired, trialStatus })
-  const finalDate = expectedFinalPaymentDate(advancePaidAt, leadDays)
   const poIssued = !!po?.issuedAt
 
   const plantLabel = PLANTS.find(p => p.value === request.plant)?.label ?? request.plant ?? '—'
   const reqLabel = request.requestNo ?? request.id.slice(0, 8)
-  const trackOpen = status !== 'completed'
+  // Accounts only hold the ball until the PO is issued; after that the vendor re-uploads the PI.
+  const trackOpen = status === 'pi_submitted' || (status === 'accounts_processing' && !poIssued)
 
-  // Which team's link is live right now. FA codes + payments are Plant Accounts'; the PO issue in
-  // between belongs to Global Accounts ("Satish"), who gets his own token/page.
+  // Which team's link is live right now. FA codes are Plant Accounts'; the PO issue after that
+  // belongs to Global Accounts ("Satish"), who gets his own token/page.
   const isPoIssueStage = status === 'accounts_processing' && !poIssued
   const link = isPoIssueStage
     ? (poIssueToken && typeof window !== 'undefined' ? buildPoIssueLink(poIssueToken) : '')
@@ -218,17 +206,15 @@ function AccountsTrack({
         'Open this link to issue the PO:',
         link || '(link not ready yet)',
         '',
-        'After you issue the PO: the vendor re-uploads their Proforma Invoice against it, then Plant Accounts record the milestone payments' +
+        'After you issue the PO, the vendor re-uploads their Proforma Invoice against it' +
           (trialRequired
-            ? ', and the vendor uploads the item trial after the advance is paid (the final payment stays blocked until sourcing approves it).'
-            : '.'),
+            ? ' and uploads the item trial for sourcing approval — then the order is complete.'
+            : ' — that completes the order.'),
       ]
     : [
         'Dear Plant Accounts team,',
         '',
-        status === 'payment_in_progress'
-          ? `The Purchase Order for CAPEX request ${reqLabel} (${request.subject}) has been issued. Please record the milestone payments using the secure link below — no portal login is required.`
-          : `CAPEX request ${reqLabel} (${request.subject}) has reached the accounts stage. Please assign the Fixed Asset (FA) codes using the secure link below — no portal login is required — and email ${GLOBAL_ACCOUNTS_NAME} the PO link from that same page.`,
+        `CAPEX request ${reqLabel} (${request.subject}) has reached the accounts stage. Please assign the Fixed Asset (FA) codes using the secure link below — no portal login is required — and email ${GLOBAL_ACCOUNTS_NAME} the PO link from that same page.`,
         '',
         `Plant:  ${plantLabel}`,
         `Vendor: ${vendor?.vendorName ?? '—'}`,
@@ -240,10 +226,7 @@ function AccountsTrack({
         'Open this link to action it:',
         link || '(link not ready yet)',
         '',
-        `Steps: 1) assign the FA codes  2) email ${GLOBAL_ACCOUNTS_NAME} to issue the PO  3) tick the payment milestones once the PO is out` +
-          (trialRequired
-            ? '. The vendor uploads the item trial after the advance is paid — the final payment stays blocked until sourcing approves it.'
-            : '.'),
+        `Steps: 1) assign the FA codes  2) email ${GLOBAL_ACCOUNTS_NAME} to issue the PO. The vendor then re-uploads the Proforma Invoice against the PO, which completes the order.`,
       ]
   ).concat(['', 'Regards,', 'Amber Enterprises CAPEX Portal']).join('\n')
 
@@ -276,7 +259,7 @@ function AccountsTrack({
         <Wallet className="w-5 h-5 text-blue-700" />
         <div>
           <h3 className="font-bold text-foreground">
-            {inviteId ? `Award — ${vendor?.vendorName ?? 'Vendor'}` : 'Accounts — FA Codes, PO & Payments'}
+            {inviteId ? `Award — ${vendor?.vendorName ?? 'Vendor'}` : 'Accounts — FA Codes & PO'}
           </h3>
           <p className="text-xs text-muted-foreground">
             {inviteId ? 'Awarded vendor' : 'Finalized vendor'}:{' '}
@@ -416,68 +399,20 @@ function AccountsTrack({
               )}
             </div>
 
-            {/* ── Payment milestones (read-only) ── */}
-            {milestones.length > 0 && (
-              <div>
-                <p className="text-[12px] font-bold text-muted-foreground uppercase tracking-wide mb-2">
-                  Payment Milestones
-                </p>
-                <div className="space-y-1.5">
-                  {milestones.map(m => {
-                    const paid = m.status === 'paid'
-                    const blocked = !!m.isFinal && finalBlocked
-                    return (
-                      <div
-                        key={m.id}
-                        className={`flex items-center gap-3 rounded-lg border px-3 py-2 ${paid ? 'border-slate-200 bg-slate-50' : 'border-border'}`}
-                      >
-                        {paid ? (
-                          <CheckCircle2 className="w-4 h-4 text-slate-600 shrink-0" />
-                        ) : (
-                          <Clock className="w-4 h-4 text-muted-foreground shrink-0" />
-                        )}
-                        <span className="flex-1 text-sm text-foreground min-w-0">
-                          {m.label}{' '}
-                          <span className="text-muted-foreground">
-                            ({m.percent}%{m.trigger ? ` · ${m.trigger}` : ''})
-                          </span>
-                          {m.isFinal && (
-                            <span className="ml-1.5 text-[10px] font-bold text-slate-700">FINAL</span>
-                          )}
-                          {m.isFinal && finalDate && (
-                            <span className="ml-1.5 text-[10px] font-semibold text-blue-700">
-                              · Expected {finalDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
-                            </span>
-                          )}
-                          {blocked && (
-                            <span className="block text-[11px] font-semibold text-amber-700 mt-0.5">
-                              Blocked until the item trial is approved by sourcing.
-                            </span>
-                          )}
-                        </span>
-                        <span className="text-sm font-mono font-semibold shrink-0">{fmt(m.amount)}</span>
-                      </div>
-                    )
-                  })}
-                </div>
-                <div className="flex justify-between text-xs text-muted-foreground mt-2">
-                  <span>
-                    Paid:{' '}
-                    <span className="font-semibold text-slate-700">{fmt(totalPaid(milestones))}</span>
-                  </span>
-                  <span>
-                    Outstanding:{' '}
-                    <span className="font-semibold text-foreground">
-                      {fmt(totalOutstanding(milestones))}
-                    </span>
-                  </span>
-                </div>
+            {/* ── Final step: the vendor re-uploads the PI against the PO (no payment milestones) ── */}
+            {status === 'completed' ? (
+              <div className="flex items-center gap-2 text-sm bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 text-emerald-800">
+                <CheckCircle2 className="w-4 h-4 shrink-0" /> Order complete — the vendor re-uploaded the PI against the PO.
               </div>
-            )}
-
-            {status === 'completed' && milestones.length > 0 && (
-              <div className="flex items-center gap-2 text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-800">
-                <CheckCircle2 className="w-4 h-4" /> All payments cleared · {fmt(totalPaid(milestones))}
+            ) : (
+              <div className="flex items-start gap-2 text-sm bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-amber-900">
+                <Clock className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>
+                  {piReuploadedAt
+                    ? 'The vendor has re-uploaded the Proforma Invoice against the PO.'
+                    : 'Awaiting the vendor to re-upload the Proforma Invoice against the PO.'}
+                  {trialRequired && trialStatus !== 'approved' && ' The item trial must also be approved by sourcing before the order completes.'}
+                </span>
               </div>
             )}
           </div>
@@ -492,7 +427,7 @@ function AccountsTrack({
         subject={emailSubject}
         body={emailBody}
         link={link}
-        linkLabel={isPoIssueStage ? `Link for ${GLOBAL_ACCOUNTS_NAME} to issue the PO` : 'Plant Accounts link (FA codes → payments)'}
+        linkLabel={isPoIssueStage ? `Link for ${GLOBAL_ACCOUNTS_NAME} to issue the PO` : 'Plant Accounts link (FA codes)'}
         sendLabel={`Send to ${recipientName}`}
         onSend={to => {
           toast.success(`Email sent to ${to}`)

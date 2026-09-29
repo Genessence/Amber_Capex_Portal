@@ -48,7 +48,7 @@ import {
 import { ALLOWED_TRANSITIONS, PRE_PI_REQUEST_STATUSES } from './statusFlow';
 import { generateApprovalToken, generatePoToken, generatePoIssueToken, generateTechSpecToken } from './tokenUtils';
 import { buildDocApprovalPackage, effectiveDocApprovalStatus } from './docPackageUtils';
-import { buildAwardGroups, deriveRequestStatus, isAwardBased, awardedInvites, finalPaymentBlockedByTrial } from './paymentUtils';
+import { buildAwardGroups, deriveRequestStatus, isAwardBased, awardedInvites, fulfillmentReadyToComplete } from './paymentUtils';
 import { effectiveRfqStatus, resolveSupplierItemHsn, rfqTotal } from './rfqUtils';
 import { toInr } from './currencyUtils';
 import {
@@ -222,11 +222,11 @@ interface CapexContextValue {
   decideBudgetAccounts: (id: string, decision: 'approved' | 'rejected', actor: string, note?: string) => void;
   /** Plant-head request decision via the public email link (approve → sourcing / reject). */
   decideRequestPlantHead: (requestId: string, decision: 'approved' | 'rejected', note?: string) => void;
-  // ── Trials (optional QA gate before final payment) ──
+  // ── Trials (optional QA gate — must be approved before the fulfillment track completes) ──
   setTrialRequired: (requestId: string, required: boolean, inviteId?: string) => void;
   submitTrial: (inviteId: string, submission: TrialSubmission) => void;
   respondToTrial: (requestId: string, response: 'approved' | 'rejected', inviteId?: string, message?: string) => void;
-  /** Vendor re-uploads the PI after the PO is issued. */
+  /** Vendor re-uploads the PI after the PO is issued — the last step; completes the track. */
   resubmitProformaInvoice: (inviteId: string, pi: ProformaInvoice) => void;
   // ── Adhoc head→head budget reallocation (Brown Field, admin-approved) ──
   adhocBudgetRequests: AdhocBudgetRequest[];
@@ -308,8 +308,7 @@ interface CapexContextValue {
   submitFaCodes: (requestId: string, actor: string, inviteId?: string, note?: string) => void;
   createPurchaseOrder: (requestId: string, po: PurchaseOrder, milestones: PaymentMilestone[]) => void;
   submitPurchaseOrder: (requestId: string, actor: string) => void;
-  issuePurchaseOrder: (requestId: string, po: PurchaseOrder, milestones: PaymentMilestone[], actor: string, inviteId?: string, note?: string) => void;
-  markPaymentMade: (requestId: string, milestoneId: string, actor: string, inviteId?: string, note?: string) => void;
+  issuePurchaseOrder: (requestId: string, po: PurchaseOrder, actor: string, inviteId?: string, note?: string) => void;
 }
 
 const CapexContext = createContext<CapexContextValue | null>(null);
@@ -1531,7 +1530,7 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
    * supplier input is sanitized: price must be finite > 0; footer charges coerced to non-negative.
    *
    * INCO Terms ride along with a FOREIGN vendor's first quotation (`incoDoc`): the portal collects
-   * the 12 answers in a modal behind the Submit button and passes them here, so the quote and the
+   * the Incoterms answers in a modal behind the Submit button and passes them here, so the quote and the
    * Incoterms land in **one state pass** — either both persist or neither does. A foreign vendor
    * who has never answered the questionnaire cannot submit a quotation without it; the check runs
    * here (not only in the UI) so the invariant holds for every caller.
@@ -2349,14 +2348,15 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
 
   /**
    * Global Accounts ("Satish", public /po-issue/[token] link): assign the PO number, upload the PO
-   * document, and ISSUE it to the vendor —
-   * the vendor is notified and sees/downloads the PO on the supplier portal. Builds payment
-   * milestones and moves the request into payment_in_progress.
+   * document, and ISSUE it to the vendor — the vendor is notified and sees/downloads the PO on the
+   * supplier portal, then re-uploads their PI against it (`resubmitProformaInvoice`), which is the
+   * LAST step of the track. There are no payment milestones any more (removed 2026-09): the status
+   * key stays `payment_in_progress` for data compatibility, but it now means "PO issued — awaiting
+   * the vendor's PI re-upload".
    */
   function issuePurchaseOrder(
     requestId: string,
     po: PurchaseOrder,
-    milestones: PaymentMilestone[],
     actor: string,
     inviteId?: string,
     note?: string,
@@ -2373,14 +2373,13 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
       setInvites((prev) =>
         prev.map((inv) =>
           // Turn-guarded: only an award awaiting its PO can be issued, so a stale link can never
-          // overwrite an issued PO (and reset its milestones).
+          // overwrite an issued PO.
           inv.id === inviteId && inv.awarded && inv.awardStatus === 'accounts_processing'
             ? {
                 ...inv,
                 purchaseOrder: { ...po, issuedAt: now, issuedBy: actor, submittedAt: po.submittedAt ?? now },
-                paymentMilestones: milestones,
                 awardStatus: 'payment_in_progress' as const,
-                // Vendor can re-upload the PI against the issued PO.
+                // Vendor re-uploads the PI against the issued PO — the final step.
                 piReuploadAllowed: true,
                 approvalRemarks: appendRemark(inv.approvalRemarks, remark),
               }
@@ -2393,9 +2392,8 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
       requestId,
       {
         purchaseOrder: { ...po, issuedAt: now, issuedBy: actor, submittedAt: po.submittedAt ?? now },
-        paymentMilestones: milestones,
         status: 'payment_in_progress',
-        // Vendor can re-upload the PI against the issued PO.
+        // Vendor re-uploads the PI against the issued PO — the final step.
         piReuploadAllowed: true,
         ...remarkPatch(requests.find((r) => r.id === requestId)?.approvalRemarks, remark),
       },
@@ -2403,98 +2401,14 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
     );
   }
 
-  /**
-   * Tick one payment milestone. `note` is Plant Accounts' remark on that specific payment (UTR,
-   * part-payment reason, a hold they lifted) — recorded on the remark trail so the request detail
-   * and the accounts tracker show WHY a milestone moved, not only that it did.
-   */
-  function markPaymentMade(
-    requestId: string,
-    milestoneId: string,
-    actor: string,
-    inviteId?: string,
-    note?: string,
-  ) {
-    const now = new Date().toISOString();
-    const paymentRemark = buildApprovalRemark({
-      stage: 'plant_accounts_payment',
-      action: 'noted',
-      by: actor || PLANT_ACCOUNTS_ACTOR,
-      text: note,
-      at: now,
-    });
-    if (inviteId) {
-      // Award-based: tick this award's milestone; final tick completes the award (per-award TAT
-      // stop). When every award is completed, the whole request completes.
-      const inv = invites.find((i) => i.id === inviteId);
-      if (!inv?.paymentMilestones) return;
-      const target = inv.paymentMilestones.find((m) => m.id === milestoneId);
-      // Block the FINAL payment while a required trial has not been approved.
-      if (target?.isFinal && finalPaymentBlockedByTrial(inv)) {
-        console.error('[CapexContext] Final payment blocked: trial not yet approved');
-        return;
-      }
-      // The advance is the first NON-final milestone; ticking it starts the delivery-lead clock.
-      const isAdvance = inv.paymentMilestones.find((m) => !m.isFinal)?.id === milestoneId;
-      const updated = inv.paymentMilestones.map((m) =>
-        m.id === milestoneId ? { ...m, status: 'paid' as const, paidAt: now, paidBy: actor } : m,
-      );
-      const finalDone =
-        updated.some((m) => m.isFinal && m.status === 'paid') || updated.every((m) => m.status === 'paid');
-      const nextInvites = invites.map((i) =>
-        i.id === inviteId
-          ? {
-              ...i,
-              paymentMilestones: updated,
-              // Money has moved against the submitted PI, so the vendor can no longer revise it —
-              // the first payment closes the post-PO re-upload window for good.
-              piReuploadAllowed: false,
-              ...(isAdvance && !i.advancePaidAt ? { advancePaidAt: now } : {}),
-              ...(finalDone && i.awardStatus === 'payment_in_progress'
-                ? { awardStatus: 'completed' as const, tatStoppedAt: now }
-                : {}),
-              approvalRemarks: appendRemark(i.approvalRemarks, paymentRemark),
-            }
-          : i,
-      );
-      setInvites(() => nextInvites);
-      const reqAwards = awardedInvites(nextInvites.filter((i) => i.requestId === requestId));
-      const allDone = reqAwards.length > 0 && reqAwards.every((a) => a.awardStatus === 'completed');
-      const req = requests.find((r) => r.id === requestId);
-      if (allDone && req && req.status !== 'completed') {
-        updateRequest(requestId, { status: 'completed' }, actor);
-      }
-      return;
-    }
+  /** Completes the request once EVERY award on it has completed (split-award requests). */
+  function completeRequestIfAllAwardsDone(requestId: string, nextInvites: VendorInvite[], actor: string) {
+    const reqAwards = awardedInvites(nextInvites.filter((i) => i.requestId === requestId));
+    const allDone = reqAwards.length > 0 && reqAwards.every((a) => a.awardStatus === 'completed');
     const req = requests.find((r) => r.id === requestId);
-    if (!req?.paymentMilestones) return;
-    const target = req.paymentMilestones.find((m) => m.id === milestoneId);
-    // Block the FINAL payment while a required trial has not been approved.
-    if (target?.isFinal && finalPaymentBlockedByTrial(req)) {
-      console.error('[CapexContext] Final payment blocked: trial not yet approved');
-      return;
+    if (allDone && req && req.status !== 'completed') {
+      updateRequest(requestId, { status: 'completed' }, actor);
     }
-    const isAdvance = req.paymentMilestones.find((m) => !m.isFinal)?.id === milestoneId;
-    const updated = req.paymentMilestones.map((m) =>
-      m.id === milestoneId ? { ...m, status: 'paid' as const, paidAt: now, paidBy: actor } : m,
-    );
-    // Ticking the final instalment (or clearing every milestone) stops the TAT clock and completes the request.
-    const finalDone =
-      updated.some((m) => m.isFinal && m.status === 'paid') || updated.every((m) => m.status === 'paid');
-    updateRequest(
-      requestId,
-      {
-        paymentMilestones: updated,
-        // First payment closes the post-PO PI re-upload window (see the award branch above).
-        piReuploadAllowed: false,
-        ...(isAdvance && !req.advancePaidAt ? { advancePaidAt: now } : {}),
-        ...(finalDone && req.status === 'payment_in_progress'
-          ? { status: 'completed', tatStoppedAt: now }
-          : {}),
-        ...remarkPatch(req.approvalRemarks, paymentRemark),
-      },
-      actor,
-    );
   }
 
   function submitQuote(inviteId: string, quote: Quote) {
@@ -3189,7 +3103,7 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
-  // ── Trials (optional QA gate before final payment) ──
+  // ── Trials (optional QA gate — must be approved before the fulfillment track completes) ──
   function setTrialRequired(requestId: string, required: boolean, inviteId?: string) {
     const nextStatus = (cur?: TrialStatus): TrialStatus =>
       required ? (cur && cur !== 'not_required' ? cur : 'pending_upload') : 'not_required';
@@ -3259,31 +3173,68 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
     };
     const nextStatus: TrialStatus = response === 'approved' ? 'approved' : 'rejected';
     if (inviteId) {
-      setInvites((prev) =>
-        prev.map((i) => (i.id === inviteId ? { ...i, trialStatus: nextStatus, trialThread: [...(i.trialThread ?? []), threadEntry] } : i)),
-      );
+      const inv = entity as VendorInvite;
+      const patched: VendorInvite = { ...inv, trialStatus: nextStatus, trialThread: [...(inv.trialThread ?? []), threadEntry] };
+      // Approving the trial AFTER the vendor already re-uploaded the PI is what ends the track.
+      const done = inv.awardStatus === 'payment_in_progress' && fulfillmentReadyToComplete(patched);
+      const final: VendorInvite = done ? { ...patched, awardStatus: 'completed', tatStoppedAt: now } : patched;
+      const nextInvites = invites.map((i) => (i.id === inviteId ? final : i));
+      setInvites(() => nextInvites);
+      if (done) completeRequestIfAllAwardsDone(requestId, nextInvites, 'Sourcing');
       return;
     }
-    setRequests((prev) =>
-      prev.map((r) => (r.id === requestId ? { ...r, trialStatus: nextStatus, trialThread: [...(r.trialThread ?? []), threadEntry] } : r)),
+    const req = entity as CapexRequest;
+    const patch: Partial<CapexRequest> = {
+      trialStatus: nextStatus,
+      trialThread: [...(req.trialThread ?? []), threadEntry],
+    };
+    const done = req.status === 'payment_in_progress' && fulfillmentReadyToComplete({ ...req, ...patch });
+    updateRequest(
+      requestId,
+      { ...patch, ...(done ? { status: 'completed' as const, tatStoppedAt: now } : {}) },
+      'Sourcing',
     );
   }
 
-  /** Vendor re-uploads the PI after the PO is issued (keeps payments in progress). */
+  /**
+   * Vendor re-uploads the PI against the issued PO — the LAST step of the fulfillment track. It
+   * completes the award/request (and stops the TAT clock) unless a required trial is still awaiting
+   * sourcing's approval, in which case `respondToTrial` completes it on approval.
+   *
+   * Gated on the PO being issued and the PI not yet re-uploaded — deliberately NOT on
+   * `piReuploadAllowed`, which the retired payment ticks used to clear; keying on it would strand a
+   * track parked at `payment_in_progress` from before milestones were removed.
+   */
   function resubmitProformaInvoice(inviteId: string, pi: ProformaInvoice) {
     const now = new Date().toISOString();
     const invite = invites.find((i) => i.id === inviteId);
     if (!invite) return;
-    setInvites((prev) =>
-      prev.map((i) =>
-        i.id === inviteId
-          ? { ...i, proformaInvoice: { ...pi, uploadedAt: pi.uploadedAt || now, submittedByVendor: true }, piReuploadAllowed: false }
-          : i,
-      ),
-    );
-    if (!invite.awarded) {
-      setRequests((prev) => prev.map((r) => (r.id === invite.requestId ? { ...r, piReuploadAllowed: false } : r)));
+    const actor = vendors.find((v) => v.id === invite.vendorId)?.vendorName ?? 'Vendor';
+    const newPi: ProformaInvoice = { ...pi, uploadedAt: pi.uploadedAt || now, submittedByVendor: true };
+
+    if (invite.awarded) {
+      if (invite.awardStatus !== 'payment_in_progress' || invite.piReuploadedAt) return;
+      const patched: VendorInvite = { ...invite, proformaInvoice: newPi, piReuploadAllowed: false, piReuploadedAt: now };
+      const done = fulfillmentReadyToComplete(patched);
+      const final: VendorInvite = done ? { ...patched, awardStatus: 'completed', tatStoppedAt: now } : patched;
+      const nextInvites = invites.map((i) => (i.id === inviteId ? final : i));
+      setInvites(() => nextInvites);
+      if (done) completeRequestIfAllAwardsDone(invite.requestId, nextInvites, actor);
+      return;
     }
+
+    const req = requests.find((r) => r.id === invite.requestId);
+    if (!req || req.status !== 'payment_in_progress' || req.piReuploadedAt) return;
+    setInvites((prev) =>
+      prev.map((i) => (i.id === inviteId ? { ...i, proformaInvoice: newPi, piReuploadAllowed: false } : i)),
+    );
+    const patch: Partial<CapexRequest> = { piReuploadAllowed: false, piReuploadedAt: now };
+    const done = fulfillmentReadyToComplete({ ...req, ...patch });
+    updateRequest(
+      req.id,
+      { ...patch, ...(done ? { status: 'completed' as const, tatStoppedAt: now } : {}) },
+      actor,
+    );
   }
 
   // ── Adhoc head→head budget reallocation (Brown Field, admin-approved) ──
@@ -3449,7 +3400,6 @@ export function CapexProvider({ children }: { children: React.ReactNode }) {
         createPurchaseOrder,
         submitPurchaseOrder,
         issuePurchaseOrder,
-        markPaymentMade,
       }}
     >
       {children}

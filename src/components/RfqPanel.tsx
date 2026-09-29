@@ -24,7 +24,9 @@ import { buildSupplierLink } from '@/lib/tokenUtils'
 import { ROLE_NAMES } from '@/lib/constants'
 import { FinalDecisionActions } from '@/components/FinalDecisionActions'
 import { TechSpecPanel } from '@/components/TechSpecPanel'
-import type { CapexLineItem, CapexRequest, DocApprovalDoc, DocSelection, IncoTermsDoc, IncoTermsStatus, RfqQuote, Vendor, VendorInvite } from '@/lib/types'
+import { AuctionDocumentForm } from '@/components/AuctionDocumentForm'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import type { AuctionApprovalDocument, CapexLineItem, CapexRequest, DocApprovalDoc, DocSelection, IncoTermsDoc, IncoTermsStatus, RfqQuote, Vendor, VendorInvite } from '@/lib/types'
 import {
   RFQ_STATUS_COLORS,
   RFQ_STATUS_LABELS,
@@ -168,6 +170,8 @@ export function RfqPanel({
     respondToRfqQuote,
     reopenRfqQuote,
     seedAuctionFromRfq,
+    saveAuctionApprovalDocument,
+    sendAuctionApprovalToVendors,
     requestProformaInvoice,
     setSourcingMode,
     resendDocApprovalPackage,
@@ -180,6 +184,9 @@ export function RfqPanel({
   const [showVendorSelect, setShowVendorSelect] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
   const [showNewVendor, setShowNewVendor] = useState(false)
+  // Start Reverse Auction opens the Configure Auction Document popup first — the auction only
+  // starts once the document is configured and sent (`escalateToAuction`).
+  const [auctionDocOpen, setAuctionDocOpen] = useState(false)
   const [newVendor, setNewVendor] = useState({ name: '', email: '', phone: '', foreign: false })
   // Per-vendor document selection chosen at invite time (which docs each vendor must approve).
   const [docSel, setDocSel] = useState<Record<string, DocSelection>>({})
@@ -439,15 +446,16 @@ export function RfqPanel({
     const name = newVendor.name.trim()
     const email = newVendor.email.trim()
     if (!name || !email) { toast.error('Enter the vendor name and email'); return }
-    inviteNewVendor(request.id, { name, email, phone: newVendor.phone.trim(), foreign: newVendor.foreign }, senderName, newVendorDocSel)
+    const foreign = newVendor.foreign
+    inviteNewVendor(request.id, { name, email, phone: newVendor.phone.trim(), foreign }, senderName, newVendorDocSel)
     setNewVendor({ name: '', email: '', phone: '', foreign: false })
     setNewVendorDocSel({ commercialTerms: true, pbg: true, dlc: true, paymentTerms: true, extraDocs: [] })
     setShowNewVendor(false)
-    toast.success(`Invited ${name} — Incoterms will be collected with their quotation`)
+    toast.success(foreign ? `Invited ${name} — Incoterms will be collected with their quotation` : `Invited ${name} — link sent`)
   }
 
   // INCO Terms review — foreign vendors answer the questionnaire WITH their quotation; sourcing
-  // reviews the 12 answers here and approves, sends back a revision, or rejects. The loop repeats
+  // reviews the answers here and approves, sends back a revision, or rejects. The loop repeats
   // until approved; an unsettled agreement blocks the award (`canRequestPi`), not the quoting.
   function incoDoc(inv: VendorInvite): IncoTermsDoc {
     return incoEdits[inv.id] ?? inv.incoTermsDoc ?? { id: `inco-${inv.id}` }
@@ -531,10 +539,24 @@ export function RfqPanel({
       toast.error('This request is already awarded — it can no longer be escalated to an auction.')
       return
     }
-    if (!window.confirm('Escalate this RFQ to a live reverse auction? The current best price drops 5% to become the new price to beat, and every vendor’s rank resets — vendors must submit a fresh bid to reveal their rank.')) return
+    // The auction document (Business Rules) must be configured and sent BEFORE the auction starts.
+    setAuctionDocOpen(true)
+  }
+  /**
+   * Submit of the Configure Auction Document popup: send the Business Rules to every vendor who
+   * quoted in the RFQ, THEN escalate. Document first, so no vendor ever lands on an auction screen
+   * without the rules they must approve before bidding (the supplier portal gates bidding on that
+   * approval). Opening bids are seeded from the RFQ quotes exactly as before.
+   */
+  function escalateToAuction(doc: AuctionApprovalDocument) {
+    if (inFulfillment || awardBased || quotedCount < 2) return
+    const vendorIds = invites.filter(i => i.rfqQuote).map(i => i.vendorId)
+    saveAuctionApprovalDocument(request.id, doc)
+    sendAuctionApprovalToVendors(request.id, vendorIds)
     seedAuctionFromRfq(request.id)
     setSourcingMode(request.id, 'auction')
-    toast.success('Switched to Reverse Auction — best price cut 5% and ranks reset')
+    setAuctionDocOpen(false)
+    toast.success(`Auction document sent to ${vendorIds.length} vendor${vendorIds.length !== 1 ? 's' : ''} — reverse auction started`)
   }
   function copyLink(inv: VendorInvite) {
     navigator.clipboard.writeText(buildSupplierLink(inv.token))
@@ -677,11 +699,11 @@ export function RfqPanel({
                 </button>
               </div>
 
-              {/* New one-time vendor form — INCO Terms are sent automatically on invite */}
+              {/* New one-time vendor form — Incoterms apply ONLY when the vendor is flagged foreign */}
               {showNewVendor && (
                 <div className="mt-3 border border-slate-200 rounded-lg overflow-hidden">
                   <div className="bg-[#F4F4F5] px-4 py-2 border-b border-slate-200">
-                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">New / one-time vendor — mark foreign to collect Incoterms with their quotation</p>
+                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">New / one-time vendor</p>
                   </div>
                   <div className="p-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
@@ -709,7 +731,7 @@ export function RfqPanel({
                         onChange={e => setNewVendor(v => ({ ...v, foreign: e.target.checked }))}
                         className="mt-0.5 h-4 w-4 accent-[#2563EB]" />
                       <span className="text-[11px] text-slate-600 leading-snug">
-                        <span className="font-semibold text-slate-800">Foreign / international vendor</span> — the Incoterms (2020) questionnaire is presented when they submit their quotation, then negotiated here until agreed.
+                        <span className="font-semibold text-slate-800">Foreign / international vendor</span> — they will also answer Mode of Transport and Incoterms (FOB, CIF, …) with their quotation. Leave unticked for a domestic vendor.
                       </span>
                     </label>
                   </div>
@@ -1479,6 +1501,41 @@ export function RfqPanel({
                   </button>
                 </div>
               )}
+
+              <Dialog open={auctionDocOpen} onOpenChange={v => { if (!v) setAuctionDocOpen(false) }}>
+                <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+                  <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2">
+                      <Gavel className="w-4 h-4" /> Configure Auction Document
+                    </DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-3 text-xs text-slate-600">
+                    <p>
+                      Set the auction terms below. On submit, the Business Rules document is sent to the vendors who quoted,
+                      and the reverse auction starts. Vendors must approve the document before they can bid.
+                    </p>
+                    <p>
+                      The current best price{lowest != null ? <> (<span className="font-semibold tabular-nums text-slate-900">{fmtCurrency(lowest)}</span>)</> : ''} drops
+                      5% to become the new price to beat, and every vendor’s rank resets.
+                    </p>
+                    <p>
+                      <span className="font-semibold text-slate-800">Sent to:</span>{' '}
+                      {invites.filter(i => i.rfqQuote).map(i => vendorName(i.vendorId)).join(', ') || '—'}
+                    </p>
+                  </div>
+                  {auctionDocOpen && (
+                    <AuctionDocumentForm
+                      request={request}
+                      currentRole={currentRole}
+                      rfqFloor={lowest}
+                      submitLabel="Send Document & Start Reverse Auction"
+                      submitDisabled={quotedCount < 2}
+                      onSubmit={escalateToAuction}
+                      onCancel={() => setAuctionDocOpen(false)}
+                    />
+                  )}
+                </DialogContent>
+              </Dialog>
 
               {/* Negotiation history (read-only, collapsible) */}
               {historyEntries.length > 0 && (

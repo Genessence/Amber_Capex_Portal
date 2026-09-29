@@ -21,7 +21,7 @@ import { FIELD_TYPE_LABELS } from '@/lib/types'
 import { PLANTS, STATUS_LABELS, GLOBAL_ACCOUNTS_NAME, GLOBAL_ACCOUNTS_ACTOR } from '@/lib/constants'
 import { RemarkField } from '@/components/RemarkField'
 import { RemarkTrail } from '@/components/RemarkTrail'
-import { buildMilestonesFromVendor, resolveOrderValue } from '@/lib/paymentUtils'
+import { resolveOrderValue } from '@/lib/paymentUtils'
 import type { PurchaseOrder } from '@/lib/types'
 
 const MAX_PO_DOC_BYTES = 500 * 1024
@@ -216,8 +216,7 @@ export default function PoIssuePage() {
         uploadedAt: now,
       })),
     }
-    const ms = buildMilestonesFromVendor(vendor, amt)
-    issuePurchaseOrder(request.id, newPo, ms, PO_ISSUER_ACTOR, invite?.id, remark)
+    issuePurchaseOrder(request.id, newPo, PO_ISSUER_ACTOR, invite?.id, remark)
     setTrialOnRequest(trialRequired)
     setDone(true)
   }
@@ -257,19 +256,18 @@ export default function PoIssuePage() {
             <CheckCircle2 className="w-10 h-10 text-emerald-500" />
             <h1 className="text-lg font-bold text-foreground">PO Issued{poNo ? ` · ${poNo}` : ''}</h1>
             <p className="text-sm text-muted-foreground max-w-md">
-              The vendor can now download the PO and re-upload their Proforma Invoice against it.
-              Plant Accounts then record the milestone payments
+              The vendor can now download the PO and re-upload their Proforma Invoice against it —
+              that closes the order
               {withTrial
-                ? '; after the advance is paid the vendor uploads the item trial, and the final payment waits for sourcing approval.'
+                ? ', once the vendor\'s item trial has also been approved by sourcing.'
                 : '.'}
             </p>
           </div>
           <ol className="mt-4 text-sm text-muted-foreground space-y-2 list-decimal list-inside border-t border-border pt-4">
             <li className="font-semibold text-emerald-700">PO issued to vendor</li>
             <li>Vendor re-uploads the PI against the PO</li>
-            <li>Plant Accounts tick the advance payment</li>
-            {withTrial && <li>Trial upload (after advance) → sourcing approve → final payment unlocks</li>}
-            {!withTrial && <li>Plant Accounts tick the remaining milestones</li>}
+            {withTrial && <li>Vendor uploads the item trial → sourcing approves</li>}
+            <li>Order complete</li>
           </ol>
         </div>
       </Shell>
@@ -461,8 +459,8 @@ export default function PoIssuePage() {
           />
 
           <p className="text-[11px] text-muted-foreground">
-            Next: the vendor re-uploads their PI against this PO → Plant Accounts pay the milestones
-            {trialRequired ? ' → trial after the advance (final payment gated)' : ''}.
+            Next: the vendor re-uploads their PI against this PO
+            {trialRequired ? ' and uploads the item trial for sourcing approval' : ''} — then the order is complete.
           </p>
 
           <button

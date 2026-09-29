@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  fulfillmentReadyToComplete,
   awardUnitPriceInr,
   buildMilestonesFromVendor,
   inrQuoteGrandTotal,
@@ -386,5 +387,18 @@ describe('quoteGstAmount / quoteGrandTotalInclGst — the Quote counterpart of r
 
     // The old, mixed basis got it backwards.
     expect(inrQuoteGrandTotal(seeded)).toBeLessThan(aInr);
+  });
+});
+
+describe('fulfillmentReadyToComplete — the PI re-upload is the last step', () => {
+  const at = '2026-09-01T00:00:00.000Z';
+  it('is not ready until the vendor re-uploads the PI against the PO', () => {
+    expect(fulfillmentReadyToComplete({})).toBe(false);
+    expect(fulfillmentReadyToComplete({ piReuploadedAt: at })).toBe(true);
+  });
+  it('waits for a required trial to be approved, whichever happens last', () => {
+    expect(fulfillmentReadyToComplete({ piReuploadedAt: at, trialRequired: true, trialStatus: 'pending_review' })).toBe(false);
+    expect(fulfillmentReadyToComplete({ piReuploadedAt: at, trialRequired: true, trialStatus: 'approved' })).toBe(true);
+    expect(fulfillmentReadyToComplete({ trialRequired: true, trialStatus: 'approved' })).toBe(false);
   });
 });

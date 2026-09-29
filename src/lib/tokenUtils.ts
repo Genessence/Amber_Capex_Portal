@@ -67,7 +67,7 @@ export function buildApprovalLink(token: string): string {
 // ── Fulfillment links (public, no login) ─────────────────────────────────────
 // Neither accounts team has a portal account, and the fulfillment track is split across two links
 // that resolve to the same request/award:
-//   • `poToken`      → /po/<token>       — **Plant Accounts**: FA codes, then the payment milestones
+//   • `poToken`      → /po/<token>       — **Plant Accounts**: FA codes
 //   • `poIssueToken` → /po-issue/<token> — **Global Accounts ("Satish")**: issue the Purchase Order
 // Plant Accounts email the second link to Satish from their own page the moment they submit the FA
 // codes. Each page asserts the `stage` it expects, so one link can never do the other's job.

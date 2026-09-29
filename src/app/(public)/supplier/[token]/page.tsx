@@ -42,7 +42,6 @@ import {
   buildBlankIncoTermsDoc,
 } from "@/lib/incoTermsUtils"
 import {
-  computeAuctionBestPrice,
   computeVendorRankings,
   formatAuctionCountdown,
   isAuctionExpired,
@@ -200,14 +199,14 @@ function AuctionRulesList({
   )
 }
 
-/* ── Rank + best price + your bid summary ──────────────────────
- * Every figure in this card is INR (`fmt` hardcodes ₹) so rank, best price and the vendor's own
- * bid are all on one comparable basis. A vendor quoting in a foreign currency additionally sees
- * their own-currency total beneath, explicitly labelled with its own symbol.
+/* ── Rank + your bid summary ──────────────────────────────────
+ * The vendor sees ONLY their own rank and their own bid (2026-09). The auction's best price — and
+ * any "₹X above best" gap, which would reveal it by subtraction — is deliberately withheld from the
+ * supplier screen; it stays visible to sourcing internally. The bid is INR (`fmt` hardcodes ₹); a
+ * vendor quoting in a foreign currency additionally sees their own-currency total beneath.
  */
 function RankSummaryCard({
   rank,
-  bestPrice,
   grandTotal,
   nativeGrandTotal,
   currency,
@@ -216,9 +215,7 @@ function RankSummaryCard({
   hasExistingQuote,
 }: {
   rank?: number
-  /** Whole-quote price to beat: lowest RFQ − 5%, or a live bid once one comes in under it. INR. */
-  bestPrice: number | null
-  /** The vendor's whole-quote bid total, converted to INR — comparable with `bestPrice`. */
+  /** The vendor's whole-quote bid total, converted to INR. */
   grandTotal: number
   /** The same total in the currency the vendor is bidding in (display context only). */
   nativeGrandTotal: number
@@ -230,10 +227,9 @@ function RankSummaryCard({
 }) {
   const isLeading = rank === 1
   const isForeign = currency !== "INR"
-  const gapToBest = bestPrice != null && grandTotal > bestPrice ? grandTotal - bestPrice : 0
   return (
     <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-      <div className="grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-slate-100">
+      <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-slate-100">
         <div className="px-6 py-5">
           <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Your Rank</p>
           {rank != null ? (
@@ -248,27 +244,16 @@ function RankSummaryCard({
                 <p className="text-3xl font-black text-slate-900 leading-none">{rankLabel(rank)}</p>
                 <p className="text-sm text-slate-500 mt-1">
                   {isLeading
-                    ? "You hold the best price."
-                    : gapToBest > 0
-                      ? `${fmt(gapToBest)} above best price`
-                      : hasExistingQuote
-                        ? "Submit a revised bid to improve your rank."
-                        : "Submit your first bid to enter the ranking."}
+                    ? "You currently hold the top rank."
+                    : hasExistingQuote
+                      ? "Submit a revised bid to improve your rank."
+                      : "Submit your first bid to enter the ranking."}
                 </p>
               </div>
             </div>
           ) : (
             <p className="text-sm text-slate-500">Submit a bid to see your rank.</p>
           )}
-        </div>
-        <div className="px-6 py-5">
-          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Best Price</p>
-          <p className="text-3xl font-black text-emerald-700 tabular-nums leading-none">
-            {bestPrice != null ? fmt(Math.round(bestPrice)) : "—"}
-          </p>
-          <p className="text-sm text-slate-500 mt-1">
-            {bestPrice != null ? "Beat this to take L1" : "No opening price yet"}
-          </p>
         </div>
         <div className="px-6 py-5">
           <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Your Bid Total</p>
@@ -1394,7 +1379,7 @@ function RfqSupplierView({
     toast.success("Proforma Invoice submitted")
   }
 
-  // Re-upload a revised PI against an issued PO (allowed only when Amber flags piReuploadAllowed).
+  // Re-upload the PI against the issued PO — the last step of the order.
   function resubmitPi() {
     if (!piBase64) { toast.error("Attach the revised Proforma Invoice file"); return }
     resubmitProformaInvoice(invite.id, {
@@ -1406,7 +1391,7 @@ function RfqSupplierView({
       amount: piAmount ? Number(piAmount) : undefined,
       note: piNote || undefined,
     })
-    toast.success("Revised Proforma Invoice submitted")
+    toast.success("Proforma Invoice submitted against the PO")
   }
 
   // Contract documents must be approved BEFORE the vendor can enter a price.
@@ -1463,37 +1448,47 @@ function RfqSupplierView({
   } else if (piRequested) {
     actionNeeded = true
     turnLabel = "Action needed — upload your Proforma Invoice."
+  } else {
+    const trackStatus = isAward ? invite.awardStatus : request.status
+    const reuploaded = isAward ? invite.piReuploadedAt : request.piReuploadedAt
+    if (trackStatus === "completed") turnLabel = "Order complete — no further action needed."
+    else if (trackStatus === "payment_in_progress" && !reuploaded) {
+      actionNeeded = true
+      turnLabel = "Action needed — re-upload your Proforma Invoice against the PO."
+    }
   }
 
   let body: React.ReactNode
 
-  /* ── Fulfillment: PI submitted → PO → payments (per-award when awarded) ── */
+  /* ── Fulfillment: PI submitted → PO → PI re-upload → done (per-award when awarded) ── */
   if (fulfilled) {
-    // Award tracks carry their own PO + milestones + TAT anchors on the invite.
-    const milestones = (isAward ? invite.paymentMilestones : request.paymentMilestones) ?? []
+    // Award tracks carry their own PO + TAT anchors on the invite.
     const po = isAward ? invite.purchaseOrder : request.purchaseOrder
-    // PI re-upload against the issued PO — enabled per-award (invite) or single-vendor (request).
-    // It closes the moment ANY milestone is paid: the PO is being settled against the PI on file,
-    // so revising it after money has moved would change what was already paid. `markPaymentMade`
-    // clears the flag too; this also covers records paid before that clearing existed.
-    const anyPaymentMade = milestones.some(m => m.status === "paid")
-    const piReupload = (isAward ? invite.piReuploadAllowed : request.piReuploadAllowed) && !anyPaymentMade
-    // Trial (QA) gate — unlocks after the advance (first) milestone is paid, until it's approved.
+    const trackStatus = isAward ? invite.awardStatus : request.status
+    const orderComplete = trackStatus === "completed"
+    // The LAST step: once the PO is issued the vendor re-uploads the PI against it, which completes
+    // the order (no payment milestones — removed 2026-09). Mirrors `resubmitProformaInvoice`'s gate.
+    const piReuploadedAt = isAward ? invite.piReuploadedAt : request.piReuploadedAt
+    const piReupload = trackStatus === "payment_in_progress" && !piReuploadedAt
+    // Trial (QA) gate — unlocks once the PO is issued; the order completes only after it's approved.
     const trialRequired = isAward ? invite.trialRequired : request.trialRequired
     const trialStatus = (isAward ? invite.trialStatus : request.trialStatus) ?? "not_required"
     const trialSubmission = isAward ? invite.trialSubmission : request.trialSubmission
     const trialThread = isAward ? invite.trialThread : request.trialThread
-    // The advance is the first NON-final milestone; if there is none (e.g. a 100% single split), the
-    // trial can be uploaded once the PO is issued (avoids a trial-vs-final-payment deadlock).
-    const advanceMs = milestones.find(m => !m.isFinal)
-    const advancePaid = advanceMs ? advanceMs.status === "paid" : !!po?.issuedAt
+    const poIssued = !!po?.issuedAt
     body = (
       <div className="space-y-4 max-w-2xl mx-auto">
         <div className={`${card} text-center`}>
-          <CheckCircle2 className="w-12 h-12 text-slate-500 mx-auto mb-3" />
-          <h2 className="text-lg font-bold text-slate-900">Proforma Invoice Submitted</h2>
+          <CheckCircle2 className={`w-12 h-12 mx-auto mb-3 ${orderComplete ? "text-emerald-500" : "text-slate-500"}`} />
+          <h2 className="text-lg font-bold text-slate-900">{orderComplete ? "Order Complete" : "Proforma Invoice Submitted"}</h2>
           <p className="text-sm text-slate-600 mt-2">
-            Thank you. Your PI has been sent to Amber&apos;s buyer and accounts team for PO processing and payment.
+            {orderComplete
+              ? "Thank you. Your Proforma Invoice against the Purchase Order has been received — this order is complete."
+              : piReuploadedAt
+                ? "Thank you. Your Proforma Invoice against the Purchase Order has been received."
+                : poIssued
+                  ? "Amber has issued the Purchase Order. Re-upload your Proforma Invoice against it below to complete the order."
+                  : "Thank you. Your PI has been sent to Amber's accounts team for PO processing."}
           </p>
         </div>
         {/* vendorAmount is INR — TatBanner prints its delay-liability figure with a ₹ sign. */}
@@ -1510,7 +1505,7 @@ function RfqSupplierView({
               <h3 className="font-bold text-slate-900">Re-upload Proforma Invoice against the PO</h3>
             </div>
             <p className="text-sm text-slate-600 mb-4">
-              Amber has requested a revised Proforma Invoice against the issued PO. Upload the updated document below.
+              Upload your Proforma Invoice against the issued PO. This is the final step of the order.
             </p>
             <div className="space-y-4">
               <div>
@@ -1537,28 +1532,8 @@ function RfqSupplierView({
               </div>
               <button onClick={resubmitPi}
                 className="w-full flex items-center justify-center gap-2 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-semibold py-2.5 min-h-[44px] transition-colors">
-                <Send className="w-4 h-4" /> Submit Revised Proforma Invoice
+                <Send className="w-4 h-4" /> Submit Proforma Invoice against PO
               </button>
-            </div>
-          </div>
-        )}
-        {milestones.length > 0 && (
-          <div className={card}>
-            <h3 className="font-bold text-slate-900 mb-3">Payment Status</h3>
-            <div className="space-y-1.5">
-              {milestones.map(m => (
-                <div key={m.id} className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2 ${m.status === "paid" ? "border-slate-200 bg-slate-50" : "border-slate-200"}`}>
-                  <span className="text-sm text-slate-700 min-w-0">
-                    {m.label} <span className="text-slate-400">({m.percent}%)</span>
-                  </span>
-                  <span className="flex items-center gap-2 text-sm shrink-0">
-                    <span className="font-mono font-semibold break-words" title={fmt(m.amount)}>{fmt(m.amount)}</span>
-                    {m.status === "paid"
-                      ? <span className="text-[11px] font-semibold text-slate-700 flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> Paid</span>
-                      : <span className="text-[11px] font-semibold text-slate-400">Pending</span>}
-                  </span>
-                </div>
-              ))}
             </div>
           </div>
         )}
@@ -1567,7 +1542,7 @@ function RfqSupplierView({
             <CheckCircle2 className="w-3.5 h-3.5" /> Trial approved by Amber
           </p>
         )}
-        {trialRequired && advancePaid && trialStatus !== "approved" && (
+        {trialRequired && poIssued && trialStatus !== "approved" && (
           <TrialCard
             mode="upload"
             status={trialStatus}
@@ -2121,12 +2096,10 @@ export default function SupplierPortalPage() {
   const siblingInvites = invites.filter(i => i.requestId === invite.requestId)
   const rankings = computeVendorRankings(siblingInvites)
   const myRanking = rankings.find(r => r.inviteId === invite.id)
-  // The whole-quote price to beat: opens at the lowest RFQ − 5% and drops only when a vendor bids
-  // under it. Computed inline, like the rankings above: this sits below the component's early
-  // returns, so a hook here would change the hook order between the loading render and this one.
-  const auctionBestPrice = computeAuctionBestPrice(siblingInvites, lineItems, request?.auctionConfig)
+  // The auction's best price is deliberately NOT computed here: the vendor sees only their own rank
+  // and bid (2026-09). Sourcing still sees the price to beat on the internal auction panel.
 
-  // The bid form is entered in the vendor's OWN currency; the best price and the threshold are INR.
+  // The bid form is entered in the vendor's OWN currency; the threshold is INR.
   // Everything compared against them must be converted first, or a foreign bid reads as ~85× cheaper
   // than it is (a $1,00,000 bid was shown as "₹1,00,000" and beat a genuinely cheaper ₹80,00,000 one).
   const itemSubtotal = hasLineItems
@@ -2139,8 +2112,6 @@ export default function SupplierPortalPage() {
   // NOTE: the threshold is deliberately still compared against the SUBTOTAL, not the whole quote —
   // that basis question is a separate finding; only the currency normalisation changed here.
   const aboveThreshold = threshold != null && itemSubtotalInr > threshold
-  const gapToBest =
-    auctionBestPrice != null && grandTotalInr > auctionBestPrice ? grandTotalInr - auctionBestPrice : 0
 
   const shellProps = {
     requestNo: request?.requestNo,
@@ -2605,10 +2576,9 @@ export default function SupplierPortalPage() {
         </div>
       )}
 
-      {/* Rank + best price + your bid */}
+      {/* Rank + your bid (the best price is withheld from vendors) */}
       <RankSummaryCard
         rank={myRanking?.rank}
-        bestPrice={auctionBestPrice}
         grandTotal={grandTotalInr}
         nativeGrandTotal={grandTotal}
         currency={currency}
@@ -2940,11 +2910,8 @@ export default function SupplierPortalPage() {
                     Rank: {rankLabel(myRanking.rank)}
                   </span>
                 )}
-                {gapToBest > 0 && grandTotalInr > 0 && (
-                  <span className="text-xs text-slate-500 truncate min-w-0">
-                    <span className="sm:hidden">{fmt(gapToBest)} above best</span>
-                    <span className="hidden sm:inline">{fmt(gapToBest)} above best price — lower your bid to improve rank</span>
-                  </span>
+                {myRanking && myRanking.rank > 1 && (
+                  <span className="text-xs text-slate-500 truncate min-w-0">Lower your bid to improve your rank</span>
                 )}
               </div>
               <div className="flex items-center gap-2 shrink-0">

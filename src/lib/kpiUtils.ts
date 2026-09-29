@@ -547,13 +547,14 @@ function awardHold(request: CapexRequest, inv: VendorInvite, now: number): BallH
       return hold('plant_accounts', inv.piSubmittedAt ?? at, now, inv.id);
     case 'accounts_processing':
       return hold('global_accounts', inv.piSubmittedAt ?? at, now, inv.id);
+    // PO issued: the vendor re-uploads the PI (the last step) and, when required, uploads the
+    // trial — only a trial awaiting review puts the ball with sourcing. No payment milestones.
     default: {
       const trial = effectiveTrialStatus(inv);
-      if (trial === 'pending_upload') return hold('vendor', inv.advancePaidAt ?? at, now, inv.id);
       if (trial === 'pending_review') {
         return hold('sourcing', inv.trialSubmission?.uploadedAt ?? at, now, inv.id);
       }
-      return hold('plant_accounts', inv.purchaseOrder?.issuedAt ?? at, now, inv.id);
+      return hold('vendor', inv.purchaseOrder?.issuedAt ?? at, now, inv.id);
     }
   }
 }
@@ -588,12 +589,12 @@ export function ballHolders(
     case 'accounts_processing':
       return [hold('global_accounts', request.piSubmittedAt ?? at, now)];
     case 'payment_in_progress': {
+      // PO issued — see `awardHold`: the vendor holds the ball unless a trial awaits review.
       const trial = effectiveTrialStatus(request);
-      if (trial === 'pending_upload') return [hold('vendor', request.advancePaidAt ?? at, now)];
       if (trial === 'pending_review') {
         return [hold('sourcing', request.trialSubmission?.uploadedAt ?? at, now)];
       }
-      return [hold('plant_accounts', request.purchaseOrder?.issuedAt ?? at, now)];
+      return [hold('vendor', request.purchaseOrder?.issuedAt ?? at, now)];
     }
     default: {
       // Pre-award: sourcing / negotiation / the legacy sourcing_approved + buyer_approved states.

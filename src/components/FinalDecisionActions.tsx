@@ -15,7 +15,7 @@ const AWARD_STATUS_LABEL: Record<string, string> = {
   pi_requested: 'PI requested',
   pi_submitted: 'PI submitted',
   accounts_processing: 'With accounts',
-  payment_in_progress: 'Payment in progress',
+  payment_in_progress: 'PO issued — awaiting PI',
   completed: 'Completed',
 }
 
@@ -174,7 +174,7 @@ export function FinalDecisionActions({
         </p>
       )}
       {request.trialRequired && (
-        <p className="text-[11px] font-semibold text-blue-700">Item trial is ON — the awarded vendor(s) will upload a trial and the final payment is blocked until you approve it.</p>
+        <p className="text-[11px] font-semibold text-blue-700">Item trial is ON — the awarded vendor(s) will upload a trial after the PO is issued, and the order completes only once you approve it.</p>
       )}
       <div className="border-t border-slate-100 divide-y divide-slate-100">
         {groups.map(g => {

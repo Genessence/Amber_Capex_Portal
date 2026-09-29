@@ -31,13 +31,13 @@ export function TatBanner({
   const tat = computeTat({ piSubmittedAt, vendorAmount, tatStoppedAt, now })
   if (!tat.applicable) return null
 
-  // Closed — final payment made.
+  // Closed — the order completed (vendor re-uploaded the PI against the PO).
   if (!tat.running) {
     return (
       <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 flex items-start gap-3">
         <CheckCircle2 className="w-5 h-5 text-slate-600 mt-0.5" />
         <div>
-          <p className="font-semibold text-slate-900">TAT Closed — Final Payment Made</p>
+          <p className="font-semibold text-slate-900">TAT Closed — Order Complete</p>
           <p className="text-sm text-slate-800/80 mt-0.5">
             {tat.deductionPct > 0
               ? `Delay liability of ${tat.deductionPct}% (${fmt(tat.deductionAmount)}) applied.`

@@ -309,6 +309,19 @@ export function finalPaymentBlockedByTrial(entity: { trialRequired?: boolean; tr
   return !!entity.trialRequired && entity.trialStatus !== 'approved';
 }
 
+/**
+ * The fulfillment track ends when the vendor re-uploads the PI against the issued PO (2026-09 —
+ * Plant Accounts no longer tick payment milestones). A required trial still has to be approved by
+ * sourcing before the track completes; whichever of the two happens LAST completes it.
+ */
+export function fulfillmentReadyToComplete(entity: {
+  piReuploadedAt?: string;
+  trialRequired?: boolean;
+  trialStatus?: TrialStatus;
+}): boolean {
+  return !!entity.piReuploadedAt && !finalPaymentBlockedByTrial(entity);
+}
+
 /** Delivery lead time in DAYS from a vendor invite (RFQ days → weeks fallback → auction quote). */
 export function deliveryLeadDays(invite?: VendorInvite): number | undefined {
   if (!invite) return undefined;

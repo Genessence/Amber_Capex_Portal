@@ -137,7 +137,7 @@ export function TrialCard({
       )}
 
       {mode === 'upload' && status === 'approved' && (
-        <p className="text-sm text-emerald-700 font-medium">Trial approved by sourcing. The final payment can now proceed.</p>
+        <p className="text-sm text-emerald-700 font-medium">Trial approved by sourcing.</p>
       )}
 
       {mode === 'review' && status === 'pending_review' && (
@@ -172,7 +172,7 @@ export function TrialCard({
         <p className="text-sm text-amber-700 font-medium">Trial rejected — awaiting the vendor to re-upload.</p>
       )}
       {mode === 'review' && status === 'approved' && (
-        <p className="text-sm text-emerald-700 font-medium">Trial approved — final payment is unblocked.</p>
+        <p className="text-sm text-emerald-700 font-medium">Trial approved.</p>
       )}
 
       {/* Thread history */}

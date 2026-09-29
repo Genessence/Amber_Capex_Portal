@@ -2,8 +2,8 @@
  * INCO (Incoterms 2020) agreement helpers.
  *
  * Flow (2026-07): the Incoterms questionnaire is answered **with the quotation, not before it**.
- * A FOREIGN vendor fills in their prices, hits Submit Quotation, and is shown the 12 questions in a
- * modal; answering them submits the quote and the Incoterms together in one atomic mutation
+ * A FOREIGN vendor fills in their prices, hits Submit Quotation, and is shown the 2 questions (Mode of
+ * Transport + Incoterm) in a modal; answering them submits the quote and the Incoterms together in one atomic mutation
  * (`proposeRfqQuote(..., incoDoc)`) — neither is persisted without the other. Sourcing then sees the
  * answers, and the two sides negotiate exactly like the RFQ price thread:
  *
@@ -30,20 +30,14 @@ export interface IncoQuestion {
 /** The 11 official Incoterms 2020 rules. */
 export const INCOTERM_RULES = ['EXW', 'FCA', 'CPT', 'CIP', 'DAP', 'DPU', 'DDP', 'FAS', 'FOB', 'CFR', 'CIF'];
 
-/** The 12-question vendor questionnaire (Incoterms 2020). */
+/**
+ * The vendor questionnaire — deliberately just TWO questions (2026-09): how the goods travel, and
+ * which Incoterms 2020 rule (FOB, CIF, …) the price is quoted on. The old 12-question form is gone;
+ * answers stored under its other keys on legacy docs are simply no longer shown.
+ */
 export const INCO_TERMS_QUESTIONS: IncoQuestion[] = [
-  { key: 'incoterm', label: 'Incoterm rule', type: 'select', options: INCOTERM_RULES, required: true },
-  { key: 'placeOfDelivery', label: 'Place / port of delivery', type: 'text', required: true },
-  { key: 'modeOfTransport', label: 'Mode of transport', type: 'select', options: ['Air', 'Road', 'Rail', 'Sea', 'Inland Waterway', 'Multimodal'], required: true },
-  { key: 'freightArrangedBy', label: 'Who arranges main freight', type: 'select', options: ['Seller', 'Buyer'], required: true },
-  { key: 'freightCostBy', label: 'Freight cost borne by', type: 'select', options: ['Seller', 'Buyer', 'Shared'], required: true },
-  { key: 'insuranceArrangedBy', label: 'Who arranges insurance', type: 'select', options: ['Seller', 'Buyer', 'Not covered'], required: true },
-  { key: 'insuranceCostBy', label: 'Insurance cost borne by', type: 'select', options: ['Seller', 'Buyer', 'Not covered'], required: true },
-  { key: 'exportCustoms', label: 'Export customs clearance', type: 'select', options: ['Seller', 'Buyer'], required: true },
-  { key: 'importCustoms', label: 'Import customs & duties', type: 'select', options: ['Seller', 'Buyer'], required: true },
-  { key: 'riskTransfer', label: 'Risk transfers at', type: 'select', options: ['Seller premises', 'Carrier handoff', 'Alongside vessel', 'On board vessel', 'Destination (before unload)', 'Destination (after unload)'], required: true },
-  { key: 'loadingUnloading', label: 'Loading / unloading responsibility', type: 'select', options: ['Seller loads / Buyer unloads', 'Seller loads & unloads', 'Buyer loads & unloads'], required: true },
-  { key: 'remarks', label: 'Delivery timeline, currency & remarks', type: 'textarea' },
+  { key: 'modeOfTransport', label: 'Mode of Transport', type: 'select', options: ['Air', 'Road', 'Rail', 'Sea', 'Inland Waterway', 'Multimodal'], required: true },
+  { key: 'incoterm', label: 'Incoterms', type: 'select', options: INCOTERM_RULES, required: true },
 ];
 
 export const INCO_TERMS_STATUS_LABELS: Record<IncoTermsStatus, string> = {

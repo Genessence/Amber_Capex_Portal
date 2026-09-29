@@ -257,7 +257,7 @@ export function VendorOnboardModal({ open, onClose, requestId, defaultTab = "exi
                   </div>
                 </div>
                 <p className="text-[11px] text-slate-400 mt-1">
-                  Used to build payment milestones when this vendor is finalized. Total: {(Number(advancePct) || 0) + (Number(dispatchPct) || 0) + (Number(installPct) || 0)}%
+                  Payment-terms split shared with the vendor. Total: {(Number(advancePct) || 0) + (Number(dispatchPct) || 0) + (Number(installPct) || 0)}%
                 </p>
               </div>
             </div>

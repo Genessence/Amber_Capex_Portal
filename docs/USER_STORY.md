@@ -868,3 +868,50 @@ The single shared `/capex/dashboard` (total requests / total budget / active sou
 - **Files:** `src/components/CreateGreenFieldPlantModal.tsx` (new, shared by both screens), `src/app/(internal)/capex/{budget-proposals,budget-approvals,master}/page.tsx`, `src/app/(public)/approve/[token]/page.tsx`, `src/lib/{capexContext.tsx,budgetProposalUtils.ts,types.ts}`
 
 - **Notes:** `npm test` is **431 tests across 20 files**. Verified with `npx tsc --noEmit`, `npm run build`, and a live end-to-end run: sourcing registers "Sri City Plant 1" on master → maintenance sees the two cards, only that plant in the roster, uploads a ₹12.5 Cr line → Submit to Plant Head → approve on the public link → admin → Global Accounts sign-off → one master row plus plant/section/head envelopes written.
+
+### US-119 — Fulfillment ends at the vendor's PI re-upload (payment step removed) (2026-09)
+
+| ID | Story | Status |
+|----|-------|--------|
+| US-119 | As the business, I want the order to **end when the vendor re-uploads the PI against the PO Sandeep issued**. Plant Accounts **no longer tick payment milestones**, because that step was extra. Everything else stays the same. | done |
+
+- **Acceptance:**
+  - [x] Issuing the PO builds no payment milestones, and the Plant Accounts page has no payment checkboxes.
+  - [x] The vendor's PI re-upload moves the award / request to `completed` and stops the TAT clock.
+  - [x] If a trial is required, the vendor uploads it once the PO is issued, and the order completes only after sourcing approves it (whichever of the two happens last).
+  - [x] Internal tracker, supplier portal, PO-issue page, emails and status labels no longer mention payments.
+- **Supersedes:** the payment parts of US-086, US-090 and US-100.
+
+### US-120 — Incoterms only for foreign vendors, trimmed to two questions (2026-09)
+
+| ID | Story | Status |
+|----|-------|--------|
+| US-120 | As sourcing, when I add a vendor with **Invite new vendor** and leave **Foreign** unticked, I want **no Incoterms** anywhere for that vendor. For a foreign vendor I want the Incoterms questionnaire cut to **two questions: Mode of Transport and Incoterms** (FOB, CIF, etc.). | done |
+
+- **Acceptance:**
+  - [x] A domestic new vendor gets no Incoterms status, doc or questionnaire. The form header and the confirmation message no longer mention Incoterms (confirmation reads "link sent").
+  - [x] A foreign vendor sees a 2-question popup at Submit Quotation: Mode of Transport (Air / Road / Rail / Sea / Inland Waterway / Multimodal) and Incoterms (EXW, FCA, CPT, CIP, DAP, DPU, DDP, FAS, FOB, CFR, CIF). Both are required.
+  - [x] Sourcing's Incoterms tracker and the vendor's negotiation card show the same two fields.
+
+### US-121 — Configure the auction document before a reverse auction starts (2026-09)
+
+| ID | Story | Status |
+|----|-------|--------|
+| US-121 | As sourcing, when I click **Start Reverse Auction** on an RFQ, I want to be asked to **Configure Auction Document** first (dates, deadlines, rules, duration, threshold). On submit, the document is **sent to the vendors first** and then the reverse auction starts. | done |
+
+- **Acceptance:**
+  - [x] Clicking Start Reverse Auction opens the Configure Auction Document popup (same form as the auction panel's setup). Cancel leaves the request in RFQ.
+  - [x] Submit sends the Business Rules document to every vendor who quoted, then switches to the reverse auction with opening bids seeded (best price −5%, ranks reset).
+  - [x] Vendors see the Business Rules approval screen before any bid form. The countdown starts from Start Auction once at least one vendor has approved.
+  - [x] The duration and threshold chosen in the popup carry through to Start Auction.
+
+### US-122 — Vendors see only their rank and their bid in a reverse auction (2026-09)
+
+| ID | Story | Status |
+|----|-------|--------|
+| US-122 | As the business, I do **not** want vendors to see the auction's best price. A vendor should see only **their own rank and their own bid**. | done |
+
+- **Acceptance:**
+  - [x] The supplier auction summary shows Your Rank and Your Bid Total only; the Best Price box is removed.
+  - [x] No "₹X above best price" hint on the rank card or the sticky bar (it would reveal the best price). Non-leaders see "Lower your bid to improve your rank".
+  - [x] Sourcing still sees the price to beat internally.

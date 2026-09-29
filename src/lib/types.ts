@@ -210,6 +210,13 @@ export interface AuctionApprovalDocument {
   performanceBankGuaranteeText?: string;
   /** Delay Liability Clause text sent for vendor agreement (auction approval package). */
   delayLiabilityClauseText?: string;
+  /**
+   * Auction duration + threshold chosen when the document was configured. Stamped here because the
+   * form may be filled in the RFQ panel's escalation popup, while Start Auction lives in the
+   * reverse-auction panel — the two components share no state.
+   */
+  durationDays?: number;
+  threshold?: number;
 }
 
 export interface TechSpecs {
@@ -417,6 +424,12 @@ export interface CapexRequest {
   advancePaidAt?: string;
   /** Set when accounts re-open PI upload after PO issue (vendor re-uploads PI). */
   piReuploadAllowed?: boolean;
+  /**
+   * When the vendor re-uploaded the PI against the issued PO — the LAST step of the fulfillment
+   * track (payment milestones were removed, 2026-09). Completes the track once any required trial
+   * is approved (`fulfillmentReadyToComplete`).
+   */
+  piReuploadedAt?: string;
 }
 
 export interface PurchaseOrder {
@@ -786,7 +799,7 @@ export interface ProformaInvoice extends LandDocument {
 }
 
 /**
- * INCO (Incoterms 2020) agreement state. A FOREIGN vendor answers the 12-question form in a modal
+ * INCO (Incoterms 2020) agreement state. A FOREIGN vendor answers the 2-question form (Mode of Transport + Incoterm) in a modal
  * when they submit their quotation — the quote and the answers persist together (→ pending_sourcing).
  * Sourcing then edits & sends back (→ pending_vendor) or approves; the vendor accepts, sends back
  * their own corrections (→ pending_sourcing), or declines. The loop repeats until `approved`.
@@ -801,24 +814,15 @@ export type IncoTermsStatus =
   | 'approved'
   | 'rejected';
 
-/** The 12 Incoterms answers (all optional until filled). Keys match INCO_TERMS_QUESTIONS. */
+/** The Incoterms answers (all optional until filled). Keys match INCO_TERMS_QUESTIONS. */
 export interface IncoTermsDoc {
   id: string;
   sentAt?: string;
   respondedAt?: string;
   revisionNote?: string;
+  /** Incoterms 2020 rule the price is quoted on (FOB, CIF, …). */
   incoterm?: string;
-  placeOfDelivery?: string;
   modeOfTransport?: string;
-  freightArrangedBy?: string;
-  freightCostBy?: string;
-  insuranceArrangedBy?: string;
-  insuranceCostBy?: string;
-  exportCustoms?: string;
-  importCustoms?: string;
-  riskTransfer?: string;
-  loadingUnloading?: string;
-  remarks?: string;
 }
 
 export interface IncoTermsMessage {
@@ -984,6 +988,12 @@ export interface VendorInvite {
   advancePaidAt?: string;
   /** Set when accounts re-open PI upload after PO issue (vendor re-uploads PI). */
   piReuploadAllowed?: boolean;
+  /**
+   * When the vendor re-uploaded the PI against the issued PO — the LAST step of the fulfillment
+   * track (payment milestones were removed, 2026-09). Completes the track once any required trial
+   * is approved (`fulfillmentReadyToComplete`).
+   */
+  piReuploadedAt?: string;
   /**
    * Technical-team sign-off on THIS vendor's machine specification. Must reach `approved` before
    * the vendor can be awarded / their PI requested (see `techSpecBlocksAward`).

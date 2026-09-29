@@ -88,7 +88,7 @@ export const STATUS_LABELS: Record<string, string> = {
   pi_requested:          "PI Requested",
   pi_submitted:          "PI Submitted",
   accounts_processing:   "With Accounts",
-  payment_in_progress:   "Payment In Progress",
+  payment_in_progress:   "PO Issued — Awaiting PI",
   completed:             "Completed",
   rejected:              "Rejected",
 }
@@ -134,7 +134,7 @@ export const FA_CODE_RECIPIENT_EMAIL = "asset.register@amber-enterprises.in"
 /**
  * Recipient for the Plant Accounts fulfillment handoff email. Plant Accounts have **no portal
  * login** — once the vendor submits the Proforma Invoice they assign FA codes, issue the PO and
- * tick payment milestones on the **public** `/po/[token]` link. Simulated send (preview + toast).
+ * assign FA codes on the **public** `/po/[token]` link. Simulated send (preview + toast).
  */
 export const PLANT_ACCOUNTS_EMAIL = "plant.accounts@amber-enterprises.in"
 
